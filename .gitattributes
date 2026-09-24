@@ -1,0 +1,10 @@
+# Automatically normalize text files
+* text=auto
+
+# Shell scripts must use Linux line endings
+*.sh text eol=lf
+mvnw text eol=lf
+
+# Windows scripts
+*.bat text eol=crlf
+*.cmd text eol=crlf

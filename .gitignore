@@ -1,0 +1,21 @@
+# Java / Maven
+**/target/
+*.class
+*.log
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Operating system
+.DS_Store
+Thumbs.db
+
+# Local configuration
+**/application-local.properties
