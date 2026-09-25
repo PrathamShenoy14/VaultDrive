@@ -1,6 +1,8 @@
 package com.vaultdrive.auth;
 
 import com.vaultdrive.auth.dto.RegisterRequest;
+import com.vaultdrive.auth.exception.EmailAlreadyExistsException;
+import com.vaultdrive.auth.exception.InvalidPasswordException;
 import com.vaultdrive.user.User;
 import com.vaultdrive.user.UserRepository;
 

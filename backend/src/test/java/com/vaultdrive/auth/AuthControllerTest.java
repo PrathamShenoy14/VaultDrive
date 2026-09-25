@@ -2,6 +2,13 @@ package com.vaultdrive.auth;
 
 import com.vaultdrive.common.exception.GlobalExceptionHandler;
 import com.vaultdrive.auth.dto.RegisterRequest;
+import com.vaultdrive.auth.exception.EmailAlreadyExistsException;
+import com.vaultdrive.auth.exception.InvalidPasswordException;
+
+import com.vaultdrive.auth.dto.LoginRequest;
+import com.vaultdrive.auth.exception.InvalidCredentialsException;
+
+import com.vaultdrive.security.JwtService;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -26,15 +33,23 @@ class AuthControllerTest {
 
     private MockMvc mockMvc;
     private RegistrationService registrationService;
+    private AuthenticationService authenticationService;
+    private JwtService jwtService;    
     private ObjectMapper objectMapper;
 
     @BeforeEach
     void setUp() {
 
         registrationService = mock(RegistrationService.class);
+        authenticationService = mock(AuthenticationService.class);
+        jwtService = mock(JwtService.class);
 
         AuthController controller =
-                new AuthController(registrationService);
+                new AuthController(
+                    registrationService, 
+                    authenticationService,
+                    jwtService
+                );
 
         mockMvc = MockMvcBuilders
                 .standaloneSetup(controller)
@@ -189,5 +204,90 @@ class AuthControllerTest {
         .andExpect(jsonPath("$.error").value("CONFLICT"))
         .andExpect(jsonPath("$.message")
                 .value("Email is already registered"));
+    }
+
+    @Test
+    void shouldLoginSuccessfully() throws Exception {
+    
+        UUID userId = UUID.randomUUID();
+    
+        when(authenticationService.authenticate(any(LoginRequest.class)))
+                .thenReturn(userId);
+    
+        when(jwtService.generateAccessToken(userId))
+                .thenReturn("test-signed-jwt");
+    
+        String request = """
+                {
+                    "email": "pratham@example.com",
+                    "password": "MySecurePassword123!"
+                }
+                """;
+    
+        mockMvc.perform(
+                post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request)
+        )
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.accessToken").value("test-signed-jwt"))
+        .andExpect(jsonPath("$.tokenType").value("Bearer"))
+        .andExpect(jsonPath("$.expiresIn").value(jwtService.getAccessTokenExpiresInSeconds()));
+    
+        verify(authenticationService)
+                .authenticate(any(LoginRequest.class));
+    
+        verify(jwtService)
+                .generateAccessToken(userId);
+    }
+
+    @Test
+    void shouldRejectInvalidLoginCredentials() throws Exception {
+    
+        when(authenticationService.authenticate(any(LoginRequest.class)))
+                .thenThrow(new InvalidCredentialsException());
+    
+        String request = """
+                {
+                    "email": "pratham@example.com",
+                    "password": "WrongPassword123!"
+                }
+                """;
+    
+        mockMvc.perform(
+                post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request)
+        )
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.status").value(401))
+        .andExpect(jsonPath("$.error").value("UNAUTHORIZED"))
+        .andExpect(jsonPath("$.message")
+                .value("Invalid email or password"));
+    }
+
+    @Test
+    void shouldRejectInvalidLoginRequest() throws Exception {
+    
+        String request = """
+                {
+                    "email": "invalid-email",
+                    "password": ""
+                }
+                """;
+    
+        mockMvc.perform(
+                post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request)
+        )
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.status").value(400))
+        .andExpect(jsonPath("$.message")
+                .value(org.hamcrest.Matchers.containsString("email")))
+        .andExpect(jsonPath("$.message")
+                .value(org.hamcrest.Matchers.containsString("password")));
+    
+        verifyNoInteractions(authenticationService);
     }
 }

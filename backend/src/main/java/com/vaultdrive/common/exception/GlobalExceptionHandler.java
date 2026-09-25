@@ -1,7 +1,8 @@
 package com.vaultdrive.common.exception;
 
-import com.vaultdrive.auth.EmailAlreadyExistsException;
-import com.vaultdrive.auth.InvalidPasswordException;
+import com.vaultdrive.auth.exception.EmailAlreadyExistsException;
+import com.vaultdrive.auth.exception.InvalidPasswordException;
+import com.vaultdrive.auth.exception.InvalidCredentialsException;
 
 import org.hibernate.exception.ConstraintViolationException;
 
@@ -124,6 +125,23 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(error);
+    }
+
+    // 5. Invalid credentials violation
+    
+    @ExceptionHandler(InvalidCredentialsException.class)
+    public ResponseEntity<ApiError> handleInvalidCredentials(
+            InvalidCredentialsException exception
+    ) {
+        ApiError error = new ApiError(
+                401,
+                "UNAUTHORIZED",
+                exception.getMessage()
+        );
+    
+        return ResponseEntity
+                .status(HttpStatus.UNAUTHORIZED)
                 .body(error);
     }
 }

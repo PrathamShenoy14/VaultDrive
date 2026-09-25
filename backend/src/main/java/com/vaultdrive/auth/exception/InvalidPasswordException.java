@@ -1,4 +1,4 @@
-package com.vaultdrive.auth;
+package com.vaultdrive.auth.exception;
 
 public class InvalidPasswordException
         extends RuntimeException {
