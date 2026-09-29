@@ -1,20 +1,26 @@
 package com.vaultdrive.user;
 
 import org.junit.jupiter.api.Test;
+
 import org.springframework.beans.factory.annotation.Autowired;
+
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
+
 import org.springframework.dao.DataIntegrityViolationException;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
 @AutoConfigureTestDatabase(
         replace = AutoConfigureTestDatabase.Replace.NONE
 )
+@ActiveProfiles("test")
 class UserRepositoryTest {
 
     @Autowired
@@ -23,48 +29,51 @@ class UserRepositoryTest {
     @Test
     void shouldSaveAndFindUserByEmail() {
 
-        // Arrange
+        // Use a unique email to avoid collisions with other test runs.
+        String email = UUID.randomUUID() + "@example.com";
+
         User user = new User(
-                "test@example.com",
+                email,
                 "temporary-test-hash",
                 "Test User"
         );
 
-        // Act
         userRepository.saveAndFlush(user);
 
         Optional<User> result =
-                userRepository.findByEmailIgnoreCase("TEST@example.com");
+                userRepository.findByEmailIgnoreCase(
+                        email.toUpperCase()
+                );
 
-        // Assert
         assertThat(result).isPresent();
 
         assertThat(result.get().getEmail())
-                .isEqualTo("test@example.com");
+                .isEqualTo(email);
     }
 
     @Test
     void shouldRejectDuplicateEmailIgnoringCase() {
 
-        // Arrange
+        String email = UUID.randomUUID() + "@example.com";
+
         User firstUser = new User(
-                "test@example.com",
+                email,
                 "temporary-test-hash",
                 "First User"
         );
 
         User secondUser = new User(
-                "TEST@example.com",
+                email.toUpperCase(),
                 "another-test-hash",
                 "Second User"
         );
 
-        // Act
         userRepository.saveAndFlush(firstUser);
 
-        // Assert
         assertThatThrownBy(() ->
                 userRepository.saveAndFlush(secondUser)
-        ).isInstanceOf(DataIntegrityViolationException.class);
-        }       
+        ).isInstanceOf(
+                DataIntegrityViolationException.class
+        );
+    }
 }
