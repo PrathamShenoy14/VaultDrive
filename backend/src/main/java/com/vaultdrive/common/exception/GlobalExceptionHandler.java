@@ -9,6 +9,10 @@ import com.vaultdrive.folder.exception.FolderNotFoundException;
 import com.vaultdrive.folder.exception.DuplicateFolderNameException;
 import com.vaultdrive.folder.exception.InvalidFolderMoveException;
 
+import com.vaultdrive.file.exception.InvalidFileNameException;
+import com.vaultdrive.file.exception.DuplicateFileNameException;
+import com.vaultdrive.file.exception.FileUploadException;
+
 import org.hibernate.exception.ConstraintViolationException;
 
 import org.springframework.dao.DataIntegrityViolationException;
@@ -193,6 +197,19 @@ public class GlobalExceptionHandler {
                             .status(HttpStatus.CONFLICT)
                             .body(error);
                 }
+
+                if ("uq_files_active_name".equals(constraintName)) {
+
+                    ApiError error = new ApiError(
+                            409,
+                            "CONFLICT",
+                            "A file with this name already exists"
+                    );
+
+                    return ResponseEntity
+                            .status(HttpStatus.CONFLICT)
+                            .body(error);
+                }
             }
 
             cause = cause.getCause();
@@ -220,6 +237,45 @@ public class GlobalExceptionHandler {
                 .body(new ApiError(
                         400,
                         "Bad Request",
+                        ex.getMessage()
+                ));
+    }
+
+    @ExceptionHandler(InvalidFileNameException.class)
+    public ResponseEntity<ApiError> handleInvalidFileName(
+            InvalidFileNameException ex
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(new ApiError(
+                        400,
+                        "Bad Request",
+                        ex.getMessage()
+                ));
+    }
+
+    @ExceptionHandler(DuplicateFileNameException.class)
+    public ResponseEntity<ApiError> handleDuplicateFileName(
+            DuplicateFileNameException ex
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(new ApiError(
+                        409,
+                        "Conflict",
+                        ex.getMessage()
+                ));
+    }
+
+    @ExceptionHandler(FileUploadException.class)
+    public ResponseEntity<ApiError> handleFileUpload(
+            FileUploadException ex
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(new ApiError(
+                        500,
+                        "Internal Server Error",
                         ex.getMessage()
                 ));
     }

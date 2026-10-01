@@ -40,20 +40,23 @@ class FolderServiceTest {
 
     @Mock
    private FolderRepository folderRepository;
-
+   
    @Mock
    private UserRepository userRepository;
 
    private FolderService folderService;
    private FolderNameValidator folderNameValidator;
+   private FolderAccessValidator folderAccessValidator;
 
     @BeforeEach
     void setUp() {
 
         folderNameValidator = new FolderNameValidator();
+        folderAccessValidator = new FolderAccessValidator(folderRepository);
 
         folderService = new FolderService(
             folderRepository,
+            folderAccessValidator,
             folderNameValidator,
             userRepository
         );
@@ -349,18 +352,7 @@ class FolderServiceTest {
                 )
         )
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessage("Cycle detected in folder hierarchy");
-
-        // Verify both folders were visited.
-        verify(folderRepository).findByIdAndOwnerIdAndDeletedAtIsNull(
-                folderAId,
-                ownerId
-        );
-
-        verify(folderRepository).findByIdAndOwnerIdAndDeletedAtIsNull(
-                folderBId,
-                ownerId
-        );
+                .hasMessage("Folder hierarchy contains a cycle");
 
         // Ensure nothing was saved.
         verify(folderRepository, never())

@@ -23,15 +23,18 @@ import java.util.UUID;
 public class FolderService {
 
     private final FolderRepository folderRepository;
+    private final FolderAccessValidator folderAccessValidator;
     private final FolderNameValidator folderNameValidator;
     private final UserRepository userRepository;
 
     public FolderService(
             FolderRepository folderRepository,
+            FolderAccessValidator folderAccessValidator,
             FolderNameValidator folderNameValidator,
             UserRepository userRepository
     ) {
         this.folderRepository = folderRepository;
+        this.folderAccessValidator = folderAccessValidator;
         this.folderNameValidator = folderNameValidator;
         this.userRepository = userRepository;
     }
@@ -48,7 +51,7 @@ public class FolderService {
         String normalizedName =
                 folderNameValidator.validateAndNormalize(name);
 
-        validateActiveAncestorChain(ownerId, parentFolderId);
+        folderAccessValidator.requireAccessibleParent(ownerId, parentFolderId);
 
         boolean nameExists;
 
@@ -95,23 +98,12 @@ public class FolderService {
             UUID folderId
     ) {
 
-        Folder folder = folderRepository
-                .findByIdAndOwnerIdAndDeletedAtIsNull(
-                        folderId,
-                        ownerId
-                )
-                .orElseThrow(() ->
-                        new FolderNotFoundException(
-                                "Folder not found"
-                        )
+        Folder folder =
+                folderAccessValidator.requireAccessibleFolder(
+                        ownerId,
+                        folderId
                 );
-
-        // Ensure none of its ancestors has been deleted.
-        validateActiveAncestorChain(
-                ownerId,
-                folder.getParentFolderId()
-        );
-
+        
         return toResponse(folder);
     }
 
@@ -135,25 +127,11 @@ public class FolderService {
             UUID parentFolderId
     ) {
 
-        // Verify that the requested parent belongs to this user
-        // and has not been deleted.
-
-        Folder parent = folderRepository
-                .findByIdAndOwnerIdAndDeletedAtIsNull(
-                        parentFolderId,
-                        ownerId
-                )
-                .orElseThrow(() ->
-                        new FolderNotFoundException(
-                                "Folder not found"
-                        )
-                );
-
         // A folder inside a deleted ancestor is inaccessible.
 
-        validateActiveAncestorChain(
+        folderAccessValidator.requireAccessibleFolder(
                 ownerId,
-                parent.getParentFolderId()
+                parentFolderId
         );
 
         // Fetch only immediate, active children.
@@ -191,17 +169,11 @@ public class FolderService {
                 folderNameValidator.validateAndNormalize(newName);
 
         // Verify ownership and ensure the folder is active.
-        Folder folder = folderRepository
-                .findByIdAndOwnerIdAndDeletedAtIsNull(folderId, ownerId)
-                .orElseThrow(() ->
-                        new FolderNotFoundException("Folder not found")
+        Folder folder =
+                folderAccessValidator.requireAccessibleFolder(
+                        ownerId,
+                        folderId
                 );
-
-        // A folder inside a deleted ancestor cannot be renamed.
-        validateActiveAncestorChain(
-                ownerId,
-                folder.getParentFolderId()
-        );
 
         // Renaming to the existing name is a successful no-op.
         if (folder.getName().equals(normalizedName)) {
@@ -250,27 +222,21 @@ public class FolderService {
 
         lockFolderNamespace(ownerId);
         
-        // 1. Verify ownership and ensure the source folder is active.
-        Folder folder = folderRepository
-                .findByIdAndOwnerIdAndDeletedAtIsNull(folderId, ownerId)
-                .orElseThrow(() ->
-                        new FolderNotFoundException("Folder not found")
+        // 1. Verify ownership and ensure the source folder and its ancestors are active.
+        Folder folder =
+                folderAccessValidator.requireAccessibleFolder(
+                        ownerId,
+                        folderId
                 );
     
-        // 2. Verify that the source folder's ancestors are active.
-        validateActiveAncestorChain(
-                ownerId,
-                folder.getParentFolderId()
-        );
-    
-        // 3. Moving a folder into itself is invalid.
+        // 2. Moving a folder into itself is invalid.
         if (folderId.equals(destinationFolderId)) {
             throw new InvalidFolderMoveException(
                     "A folder cannot be moved into itself"
             );
         }
     
-        // 4. Moving to the current location is a successful no-op.
+        // 3. Moving to the current location is a successful no-op.
         if (java.util.Objects.equals(
                 folder.getParentFolderId(),
                 destinationFolderId
@@ -278,7 +244,7 @@ public class FolderService {
             return toResponse(folder);
         }
     
-        // 5. Validate the destination and prevent circular hierarchies.
+        // 4. Validate the destination and prevent circular hierarchies.
         Set<UUID> visited = new HashSet<>();
     
         UUID currentId = destinationFolderId;
@@ -311,7 +277,7 @@ public class FolderService {
             currentId = currentFolder.getParentFolderId();
         }
     
-        // 6. Check for duplicate names at the destination.
+        // 5. Check for duplicate names at the destination.
         boolean nameExists;
     
         if (destinationFolderId == null) {
@@ -335,7 +301,7 @@ public class FolderService {
             );
         }
     
-        // 7. Update the folder's parent and modification timestamp.
+        // 6. Update the folder's parent and modification timestamp.
         folder.move(destinationFolderId);
     
         // Flush to detect database constraint violations immediately.
@@ -349,24 +315,13 @@ public class FolderService {
 
         lockFolderNamespace(ownerId);
     
-        // 1. Retrieve the folder and verify ownership.
-        // Deleted folders are intentionally excluded.
-        Folder folder = folderRepository
-                .findByIdAndOwnerIdAndDeletedAtIsNull(folderId, ownerId)
-                .orElseThrow(() ->
-                        new FolderNotFoundException("Folder not found")
+        Folder folder =
+                folderAccessValidator.requireAccessibleFolder(
+                        ownerId,
+                        folderId
                 );
     
-        // 2. Verify that none of its ancestors has been deleted.
-        validateActiveAncestorChain(
-                ownerId,
-                folder.getParentFolderId()
-        );
-    
-        // 3. Soft-delete only the requested folder.
         folder.softDelete();
-    
-        // 4. Persist the change and detect database errors immediately.
         folderRepository.flush();
     }
 
@@ -416,7 +371,10 @@ public class FolderService {
         // Determine whether the original parent is still accessible.
         if (destinationParentId != null) {
             try {
-                validateActiveAncestorChain(ownerId, destinationParentId);
+                folderAccessValidator.requireAccessibleFolder(
+                                ownerId,
+                                destinationParentId
+                        );
             } catch (FolderNotFoundException exception) {
                 // The original parent is deleted or inaccessible.
                 // Restore the folder to the root instead.
@@ -524,39 +482,5 @@ public class FolderService {
                 folder.getCreatedAt(),
                 folder.getUpdatedAt()
         );
-    }
-
-    // Validate the complete parent hierarchy.
-
-    private void validateActiveAncestorChain(
-            UUID ownerId,
-            UUID parentFolderId
-    ) {
-
-        Set<UUID> visited = new HashSet<>();
-
-        UUID currentId = parentFolderId;
-
-        while (currentId != null) {
-
-            if (!visited.add(currentId)) {
-                throw new IllegalStateException(
-                        "Cycle detected in folder hierarchy"
-                );
-            }
-
-            Folder currentFolder = folderRepository
-                    .findByIdAndOwnerIdAndDeletedAtIsNull(
-                            currentId,
-                            ownerId
-                    )
-                    .orElseThrow(() ->
-                            new FolderNotFoundException(
-                                    "Parent folder not found"
-                            )
-                    );
-
-            currentId = currentFolder.getParentFolderId();
-        }
     }
 }
