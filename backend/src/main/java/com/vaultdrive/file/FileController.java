@@ -1,5 +1,6 @@
 package com.vaultdrive.file;
 
+import com.vaultdrive.file.dto.FilePageResponse;
 import com.vaultdrive.file.dto.UploadFileResponse;
 
 import org.springframework.http.HttpStatus;
@@ -9,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -46,5 +48,25 @@ public class FileController {
         return ResponseEntity
                 .status(HttpStatus.CREATED)
                 .body(response);
+    }
+
+    @GetMapping
+    public ResponseEntity<FilePageResponse> listFiles(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(required = false) UUID folderId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size
+    ) {
+        UUID ownerId = UUID.fromString(jwt.getSubject());
+
+        FilePageResponse response =
+                fileService.listFiles(
+                        ownerId,
+                        folderId,
+                        page,
+                        size
+                );
+
+        return ResponseEntity.ok(response);
     }
 }

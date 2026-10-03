@@ -12,6 +12,7 @@ import com.vaultdrive.folder.exception.InvalidFolderMoveException;
 import com.vaultdrive.file.exception.InvalidFileNameException;
 import com.vaultdrive.file.exception.DuplicateFileNameException;
 import com.vaultdrive.file.exception.FileUploadException;
+import com.vaultdrive.file.exception.InvalidFilePaginationException;
 
 import org.hibernate.exception.ConstraintViolationException;
 
@@ -276,6 +277,19 @@ public class GlobalExceptionHandler {
                 .body(new ApiError(
                         500,
                         "Internal Server Error",
+                        ex.getMessage()
+                ));
+    }
+
+    @ExceptionHandler(InvalidFilePaginationException.class)
+    public ResponseEntity<ApiError> handleInvalidFilePagination(
+            InvalidFilePaginationException ex
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(new ApiError(
+                        400,
+                        "BAD_REQUEST",
                         ex.getMessage()
                 ));
     }

@@ -9,6 +9,15 @@ import com.vaultdrive.folder.exception.FolderNotFoundException;
 import com.vaultdrive.storage.ObjectStorageService;
 import com.vaultdrive.storage.StorageKeyGenerator;
 
+import com.vaultdrive.file.dto.FilePageResponse;
+import com.vaultdrive.file.dto.FileResponse;
+import com.vaultdrive.file.exception.InvalidFilePaginationException;
+
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,6 +31,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -45,6 +55,9 @@ class FileServiceTest {
     @Mock
     private StorageKeyGenerator storageKeyGenerator;
 
+    @Mock
+    private StoredFileRepository storedFileRepository;
+
     private FileService fileService;
 
     @BeforeEach
@@ -54,7 +67,8 @@ class FileServiceTest {
                 fileNameValidator,
                 fileMetadataService,
                 objectStorageService,
-                storageKeyGenerator
+                storageKeyGenerator,
+                storedFileRepository
         );
     }
 
@@ -483,5 +497,296 @@ class FileServiceTest {
                         + storedFile.getId(),
                 storedFile.getStorageKey()
         );
+    }
+
+    @Test
+    void shouldListReadyFilesFromRoot() {
+        UUID ownerId = UUID.randomUUID();
+
+        StoredFile alpha = createReadyFile(
+                ownerId,
+                null,
+                "alpha.pdf"
+        );
+
+        StoredFile bravo = createReadyFile(
+                ownerId,
+                null,
+                "bravo.pdf"
+        );
+
+        Pageable expectedPageable = PageRequest.of(
+                0,
+                50,
+                Sort.by("name").ascending()
+        );
+
+        when(storedFileRepository
+                .findByOwnerIdAndFolderIdIsNullAndStatusAndDeletedAtIsNull(
+                        ownerId,
+                        FileStatus.READY,
+                        expectedPageable
+                ))
+                .thenReturn(
+                        new PageImpl<>(
+                                List.of(alpha, bravo),
+                                expectedPageable,
+                                2
+                        )
+                );
+
+        FilePageResponse response =
+                fileService.listFiles(
+                        ownerId,
+                        null,
+                        0,
+                        50
+                );
+
+        assertEquals(2, response.content().size());
+        assertEquals(0, response.page());
+        assertEquals(50, response.size());
+        assertEquals(2, response.totalElements());
+        assertEquals(1, response.totalPages());
+
+        FileResponse first = response.content().get(0);
+
+        assertEquals(alpha.getId(), first.id());
+        assertEquals("alpha.pdf", first.name());
+        assertNull(first.folderId());
+        assertEquals("application/pdf", first.contentType());
+        assertEquals(100L, first.sizeBytes());
+        assertEquals(alpha.getCreatedAt(), first.createdAt());
+        assertEquals(alpha.getUpdatedAt(), first.updatedAt());
+
+        assertEquals(
+                "bravo.pdf",
+                response.content().get(1).name()
+        );
+
+        verifyNoInteractions(folderAccessValidator);
+
+        verify(storedFileRepository)
+                .findByOwnerIdAndFolderIdIsNullAndStatusAndDeletedAtIsNull(
+                        ownerId,
+                        FileStatus.READY,
+                        expectedPageable
+                );
+    }
+
+    @Test
+    void shouldListReadyFilesFromAccessibleFolder() {
+        UUID ownerId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+
+        Folder folder = mock(Folder.class);
+
+        when(folderAccessValidator.requireAccessibleFolder(
+                ownerId,
+                folderId
+        )).thenReturn(folder);
+
+        StoredFile file = createReadyFile(
+                ownerId,
+                folderId,
+                "resume.pdf"
+        );
+
+        Pageable expectedPageable = PageRequest.of(
+                0,
+                25,
+                Sort.by("name").ascending()
+        );
+
+        when(storedFileRepository
+                .findByOwnerIdAndFolderIdAndStatusAndDeletedAtIsNull(
+                        ownerId,
+                        folderId,
+                        FileStatus.READY,
+                        expectedPageable
+                ))
+                .thenReturn(
+                        new PageImpl<>(
+                                List.of(file),
+                                expectedPageable,
+                                30
+                        )
+                );
+
+        FilePageResponse response =
+                fileService.listFiles(
+                        ownerId,
+                        folderId,
+                        0,
+                        25
+                );
+
+        assertEquals(1, response.content().size());
+        assertEquals(0, response.page());
+        assertEquals(25, response.size());
+        assertEquals(30, response.totalElements());
+        assertEquals(2, response.totalPages());
+
+        FileResponse listedFile =
+                response.content().getFirst();
+
+        assertEquals(file.getId(), listedFile.id());
+        assertEquals("resume.pdf", listedFile.name());
+        assertEquals(folderId, listedFile.folderId());
+        assertEquals(
+                "application/pdf",
+                listedFile.contentType()
+        );
+        assertEquals(100L, listedFile.sizeBytes());
+
+        verify(folderAccessValidator)
+                .requireAccessibleFolder(
+                        ownerId,
+                        folderId
+                );
+
+        verify(storedFileRepository)
+                .findByOwnerIdAndFolderIdAndStatusAndDeletedAtIsNull(
+                        ownerId,
+                        folderId,
+                        FileStatus.READY,
+                        expectedPageable
+                );
+    }
+
+    @Test
+    void shouldRejectListingWhenFolderIsNotAccessible() {
+        UUID ownerId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+
+        when(folderAccessValidator.requireAccessibleFolder(
+                ownerId,
+                folderId
+        )).thenThrow(
+                new FolderNotFoundException(
+                        "Folder not found"
+                )
+        );
+
+        FolderNotFoundException exception =
+                assertThrows(
+                        FolderNotFoundException.class,
+                        () -> fileService.listFiles(
+                                ownerId,
+                                folderId,
+                                0,
+                                50
+                        )
+                );
+
+        assertEquals(
+                "Folder not found",
+                exception.getMessage()
+        );
+
+        verify(folderAccessValidator)
+                .requireAccessibleFolder(
+                        ownerId,
+                        folderId
+                );
+
+        verifyNoInteractions(storedFileRepository);
+    }
+
+    @Test
+    void shouldRejectNegativePageNumber() {
+        UUID ownerId = UUID.randomUUID();
+
+        InvalidFilePaginationException exception =
+                assertThrows(
+                        InvalidFilePaginationException.class,
+                        () -> fileService.listFiles(
+                                ownerId,
+                                null,
+                                -1,
+                                50
+                        )
+                );
+
+        assertEquals(
+                "Page must be greater than or equal to 0",
+                exception.getMessage()
+        );
+
+        verifyNoInteractions(folderAccessValidator);
+        verifyNoInteractions(storedFileRepository);
+    }
+
+    @Test
+    void shouldRejectPageSizeBelowOne() {
+        UUID ownerId = UUID.randomUUID();
+
+        InvalidFilePaginationException exception =
+                assertThrows(
+                        InvalidFilePaginationException.class,
+                        () -> fileService.listFiles(
+                                ownerId,
+                                null,
+                                0,
+                                0
+                        )
+                );
+
+        assertEquals(
+                "Size must be between 1 and 100",
+                exception.getMessage()
+        );
+
+        verifyNoInteractions(folderAccessValidator);
+        verifyNoInteractions(storedFileRepository);
+    }
+
+    @Test
+    void shouldRejectPageSizeAboveMaximum() {
+        UUID ownerId = UUID.randomUUID();
+
+        InvalidFilePaginationException exception =
+                assertThrows(
+                        InvalidFilePaginationException.class,
+                        () -> fileService.listFiles(
+                                ownerId,
+                                null,
+                                0,
+                                101
+                        )
+                );
+
+        assertEquals(
+                "Size must be between 1 and 100",
+                exception.getMessage()
+        );
+
+        verifyNoInteractions(folderAccessValidator);
+        verifyNoInteractions(storedFileRepository);
+    }
+
+    private StoredFile createReadyFile(
+            UUID ownerId,
+            UUID folderId,
+            String name
+    ) {
+        UUID fileId = UUID.randomUUID();
+
+        StoredFile storedFile = new StoredFile(
+                fileId,
+                ownerId,
+                folderId,
+                name,
+                "users/"
+                        + ownerId
+                        + "/files/"
+                        + fileId,
+                "application/pdf",
+                100L
+        );
+
+        storedFile.markReady();
+
+        return storedFile;
     }
 }

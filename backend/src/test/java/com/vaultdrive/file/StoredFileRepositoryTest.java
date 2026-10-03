@@ -1,5 +1,7 @@
 package com.vaultdrive.file;
 
+import com.vaultdrive.folder.Folder;
+import com.vaultdrive.folder.FolderRepository;
 import com.vaultdrive.user.User;
 import com.vaultdrive.user.UserRepository;
 
@@ -9,8 +11,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -27,6 +33,9 @@ class StoredFileRepositoryTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private FolderRepository folderRepository;
 
     @Test
     void shouldRejectSameRootNameWhenExistingFileIsUploading() {
@@ -102,6 +111,7 @@ class StoredFileRepositoryTest {
                 storedFileRepository.saveAndFlush(retry);
 
         assertNotNull(savedRetry.getId());
+
         assertEquals(
                 FileStatus.UPLOADING,
                 savedRetry.getStatus()
@@ -161,7 +171,7 @@ class StoredFileRepositoryTest {
                         .existsByOwnerIdAndFolderIdIsNullAndNameAndDeletedAtIsNullAndStatusIn(
                                 owner.getId(),
                                 "retry.pdf",
-                                java.util.Set.of(
+                                Set.of(
                                         FileStatus.UPLOADING,
                                         FileStatus.READY
                                 )
@@ -188,7 +198,7 @@ class StoredFileRepositoryTest {
                         .existsByOwnerIdAndFolderIdIsNullAndNameAndDeletedAtIsNullAndStatusIn(
                                 owner.getId(),
                                 "report.pdf",
-                                java.util.Set.of(
+                                Set.of(
                                         FileStatus.UPLOADING,
                                         FileStatus.READY
                                 )
@@ -217,13 +227,265 @@ class StoredFileRepositoryTest {
                         .existsByOwnerIdAndFolderIdIsNullAndNameAndDeletedAtIsNullAndStatusIn(
                                 owner.getId(),
                                 "report.pdf",
-                                java.util.Set.of(
+                                Set.of(
                                         FileStatus.UPLOADING,
                                         FileStatus.READY
                                 )
                         );
 
         assertTrue(exists);
+    }
+
+    @Test
+    void shouldListOnlyReadyFilesInRequestedFolderForOwner() {
+        User owner =
+                createUser("listing-owner@example.com");
+
+        User otherOwner =
+                createUser("listing-other@example.com");
+
+        Folder requestedFolder =
+                createFolder(
+                        owner.getId(),
+                        "Documents"
+                );
+
+        Folder otherFolder =
+                createFolder(
+                        owner.getId(),
+                        "Pictures"
+                );
+
+        Folder otherOwnerFolder =
+                createFolder(
+                        otherOwner.getId(),
+                        "Documents"
+                );
+
+        StoredFile included =
+                createFile(
+                        owner.getId(),
+                        requestedFolder.getId(),
+                        "included.pdf"
+                );
+        included.markReady();
+
+        StoredFile uploading =
+                createFile(
+                        owner.getId(),
+                        requestedFolder.getId(),
+                        "uploading.pdf"
+                );
+
+        StoredFile failed =
+                createFile(
+                        owner.getId(),
+                        requestedFolder.getId(),
+                        "failed.pdf"
+                );
+        failed.markFailed();
+
+        StoredFile differentFolder =
+                createFile(
+                        owner.getId(),
+                        otherFolder.getId(),
+                        "other-folder.pdf"
+                );
+        differentFolder.markReady();
+
+        StoredFile differentOwner =
+                createFile(
+                        otherOwner.getId(),
+                        otherOwnerFolder.getId(),
+                        "other-owner.pdf"
+                );
+        differentOwner.markReady();
+
+        storedFileRepository.saveAllAndFlush(
+                java.util.List.of(
+                        included,
+                        uploading,
+                        failed,
+                        differentFolder,
+                        differentOwner
+                )
+        );
+
+        Page<StoredFile> result =
+                storedFileRepository
+                        .findByOwnerIdAndFolderIdAndStatusAndDeletedAtIsNull(
+                                owner.getId(),
+                                requestedFolder.getId(),
+                                FileStatus.READY,
+                                PageRequest.of(
+                                        0,
+                                        50,
+                                        Sort.by("name").ascending()
+                                )
+                        );
+
+        assertEquals(1, result.getTotalElements());
+        assertEquals(1, result.getContent().size());
+        assertEquals(
+                included.getId(),
+                result.getContent().getFirst().getId()
+        );
+    }
+
+    @Test
+    void shouldListOnlyReadyRootFilesForOwner() {
+        User owner =
+                createUser("root-listing@example.com");
+
+        Folder folder =
+                createFolder(
+                        owner.getId(),
+                        "Documents"
+                );
+
+        StoredFile rootReady =
+                createFile(
+                        owner.getId(),
+                        null,
+                        "root.pdf"
+                );
+        rootReady.markReady();
+
+        StoredFile rootUploading =
+                createFile(
+                        owner.getId(),
+                        null,
+                        "uploading.pdf"
+                );
+
+        StoredFile rootFailed =
+                createFile(
+                        owner.getId(),
+                        null,
+                        "failed.pdf"
+                );
+        rootFailed.markFailed();
+
+        StoredFile nestedReady =
+                createFile(
+                        owner.getId(),
+                        folder.getId(),
+                        "nested.pdf"
+                );
+        nestedReady.markReady();
+
+        storedFileRepository.saveAllAndFlush(
+                java.util.List.of(
+                        rootReady,
+                        rootUploading,
+                        rootFailed,
+                        nestedReady
+                )
+        );
+
+        Page<StoredFile> result =
+                storedFileRepository
+                        .findByOwnerIdAndFolderIdIsNullAndStatusAndDeletedAtIsNull(
+                                owner.getId(),
+                                FileStatus.READY,
+                                PageRequest.of(
+                                        0,
+                                        50,
+                                        Sort.by("name").ascending()
+                                )
+                        );
+
+        assertEquals(1, result.getTotalElements());
+        assertEquals(1, result.getContent().size());
+        assertEquals(
+                rootReady.getId(),
+                result.getContent().getFirst().getId()
+        );
+    }
+
+    @Test
+    void shouldPaginateAndSortReadyRootFilesByName() {
+        User owner =
+                createUser("pagination@example.com");
+
+        StoredFile charlie =
+                createFile(
+                        owner.getId(),
+                        null,
+                        "charlie.pdf"
+                );
+        charlie.markReady();
+
+        StoredFile alpha =
+                createFile(
+                        owner.getId(),
+                        null,
+                        "alpha.pdf"
+                );
+        alpha.markReady();
+
+        StoredFile bravo =
+                createFile(
+                        owner.getId(),
+                        null,
+                        "bravo.pdf"
+                );
+        bravo.markReady();
+
+        storedFileRepository.saveAllAndFlush(
+                java.util.List.of(
+                        charlie,
+                        alpha,
+                        bravo
+                )
+        );
+
+        Page<StoredFile> firstPage =
+                storedFileRepository
+                        .findByOwnerIdAndFolderIdIsNullAndStatusAndDeletedAtIsNull(
+                                owner.getId(),
+                                FileStatus.READY,
+                                PageRequest.of(
+                                        0,
+                                        2,
+                                        Sort.by("name").ascending()
+                                )
+                        );
+
+        assertEquals(3, firstPage.getTotalElements());
+        assertEquals(2, firstPage.getTotalPages());
+        assertEquals(2, firstPage.getContent().size());
+
+        assertEquals(
+                "alpha.pdf",
+                firstPage.getContent().get(0).getName()
+        );
+
+        assertEquals(
+                "bravo.pdf",
+                firstPage.getContent().get(1).getName()
+        );
+
+        Page<StoredFile> secondPage =
+                storedFileRepository
+                        .findByOwnerIdAndFolderIdIsNullAndStatusAndDeletedAtIsNull(
+                                owner.getId(),
+                                FileStatus.READY,
+                                PageRequest.of(
+                                        1,
+                                        2,
+                                        Sort.by("name").ascending()
+                                )
+                        );
+
+        assertEquals(3, secondPage.getTotalElements());
+        assertEquals(2, secondPage.getTotalPages());
+        assertEquals(1, secondPage.getContent().size());
+
+        assertEquals(
+                "charlie.pdf",
+                secondPage.getContent().getFirst().getName()
+        );
     }
 
     private User createUser(String email) {
@@ -234,6 +496,19 @@ class StoredFileRepositoryTest {
         );
 
         return userRepository.saveAndFlush(user);
+    }
+
+    private Folder createFolder(
+            UUID ownerId,
+            String name
+    ) {
+        Folder folder = new Folder(
+                ownerId,
+                null,
+                name
+        );
+
+        return folderRepository.saveAndFlush(folder);
     }
 
     private StoredFile createFile(

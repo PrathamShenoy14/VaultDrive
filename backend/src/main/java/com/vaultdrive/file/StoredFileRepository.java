@@ -1,5 +1,7 @@
 package com.vaultdrive.file;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Collection;
@@ -25,5 +27,18 @@ public interface StoredFileRepository
     Optional<StoredFile> findByIdAndOwnerIdAndDeletedAtIsNull(
             UUID id,
             UUID ownerId
+    );
+
+    Page<StoredFile> findByOwnerIdAndFolderIdAndStatusAndDeletedAtIsNull(
+            UUID ownerId,
+            UUID folderId,
+            FileStatus status,
+            Pageable pageable
+    );
+
+    Page<StoredFile> findByOwnerIdAndFolderIdIsNullAndStatusAndDeletedAtIsNull(
+            UUID ownerId,
+            FileStatus status,
+            Pageable pageable
     );
 }
