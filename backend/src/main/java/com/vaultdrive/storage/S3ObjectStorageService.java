@@ -7,6 +7,10 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
+import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+
 import java.io.InputStream;
 
 @Service
@@ -42,6 +46,21 @@ public class S3ObjectStorageService implements ObjectStorageService {
                 requestBuilder.build(),
                 RequestBody.fromInputStream(inputStream, contentLength)
         );
+    }
+
+    @Override
+    public StorageObject download(String storageKey) {
+
+        GetObjectRequest request =
+                GetObjectRequest.builder()
+                        .bucket(properties.bucket())
+                        .key(storageKey)
+                        .build();
+
+        ResponseInputStream<GetObjectResponse> responseStream =
+                s3Client.getObject(request);
+
+        return new StorageObject(responseStream);
     }
 
     @Override

@@ -3,11 +3,14 @@ package com.vaultdrive.file;
 import com.vaultdrive.file.dto.FilePageResponse;
 import com.vaultdrive.file.dto.FileResponse;
 import com.vaultdrive.file.dto.UploadFileResponse;
+import com.vaultdrive.file.dto.FileDownload;
 import com.vaultdrive.file.exception.FileUploadException;
 import com.vaultdrive.file.exception.InvalidFilePaginationException;
+import com.vaultdrive.file.exception.FileNotFoundException;
 import com.vaultdrive.folder.FolderAccessValidator;
 import com.vaultdrive.storage.ObjectStorageService;
 import com.vaultdrive.storage.StorageKeyGenerator;
+import com.vaultdrive.storage.StorageObject;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -248,5 +251,40 @@ public class FileService {
              * A future reconciliation process can detect that state.
              */
         }
+    }
+
+    public FileDownload downloadFile(
+            UUID ownerId,
+            UUID fileId
+    ) {
+        StoredFile storedFile =
+                storedFileRepository
+                        .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                                fileId,
+                                ownerId,
+                                FileStatus.READY
+                        )
+                        .orElseThrow(() ->
+                                new FileNotFoundException(
+                                        "File not found"
+                                )
+                        );
+    
+        validateDestinationFolder(
+                ownerId,
+                storedFile.getFolderId()
+        );
+    
+        StorageObject storageObject =
+                objectStorageService.download(
+                        storedFile.getStorageKey()
+                );
+    
+        return new FileDownload(
+                storedFile.getName(),
+                storedFile.getContentType(),
+                storedFile.getSizeBytes(),
+                storageObject.inputStream()
+        );
     }
 }

@@ -21,6 +21,8 @@ import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
+import java.io.InputStream;
+
 @SpringBootTest
 @ActiveProfiles("test")
 class S3StorageIntegrationTest {
@@ -30,6 +32,9 @@ class S3StorageIntegrationTest {
 
     @Autowired
     private S3StorageProperties properties;
+
+    @Autowired
+    private ObjectStorageService objectStorageService;
 
     @Test
     void shouldPutGetAndDeleteObject() {
@@ -77,5 +82,48 @@ class S3StorageIntegrationTest {
                                 .build()
                 )
         );
+    }
+
+    @Test
+    void shouldDownloadObjectThroughStorageService()
+            throws Exception {
+    
+        String key =
+                "integration-tests/storage-service-download.txt";
+    
+        byte[] originalContent =
+                "VaultDrive download integration test"
+                        .getBytes(StandardCharsets.UTF_8);
+    
+        s3Client.putObject(
+                PutObjectRequest.builder()
+                        .bucket(properties.bucket())
+                        .key(key)
+                        .contentType("text/plain")
+                        .build(),
+                RequestBody.fromBytes(originalContent)
+        );
+    
+        try {
+            StorageObject storageObject =
+                    objectStorageService.download(key);
+    
+            try (InputStream inputStream =
+                         storageObject.inputStream()) {
+    
+                byte[] downloadedContent =
+                        inputStream.readAllBytes();
+    
+                assertArrayEquals(
+                        originalContent,
+                        downloadedContent
+                );
+            }
+        } finally {
+            s3Client.deleteObject(builder -> builder
+                    .bucket(properties.bucket())
+                    .key(key)
+            );
+        }
     }
 }

@@ -13,6 +13,8 @@ import com.vaultdrive.file.exception.InvalidFileNameException;
 import com.vaultdrive.file.exception.DuplicateFileNameException;
 import com.vaultdrive.file.exception.FileUploadException;
 import com.vaultdrive.file.exception.InvalidFilePaginationException;
+import com.vaultdrive.file.exception.FileNotFoundException;
+
 
 import org.hibernate.exception.ConstraintViolationException;
 
@@ -290,6 +292,19 @@ public class GlobalExceptionHandler {
                 .body(new ApiError(
                         400,
                         "BAD_REQUEST",
+                        ex.getMessage()
+                ));
+    }
+
+    @ExceptionHandler(FileNotFoundException.class)
+    public ResponseEntity<ApiError> handleFileNotFound(
+            FileNotFoundException ex
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND)
+                .body(new ApiError(
+                        404,
+                        "NOT_FOUND",
                         ex.getMessage()
                 ));
     }

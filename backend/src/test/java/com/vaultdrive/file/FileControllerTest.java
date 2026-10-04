@@ -10,7 +10,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 
 import com.vaultdrive.file.dto.FilePageResponse;
 import com.vaultdrive.file.dto.FileResponse;
+import com.vaultdrive.file.dto.FileDownload;
 import com.vaultdrive.file.exception.InvalidFilePaginationException;
+import com.vaultdrive.file.exception.FileNotFoundException;
 import com.vaultdrive.folder.exception.FolderNotFoundException;
 
 import org.springframework.http.MediaType;
@@ -32,6 +34,9 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 
 
 @SpringBootTest
@@ -418,6 +423,182 @@ class FileControllerTest {
                 )
                 .andExpect(status().isUnauthorized());
 
+        verifyNoInteractions(fileService);
+    }
+
+    @Test
+    void shouldDownloadFileWithCorrectContentAndHeaders()
+            throws Exception {
+    
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        byte[] content =
+                "Hello from VaultDrive"
+                        .getBytes(StandardCharsets.UTF_8);
+    
+        when(fileService.downloadFile(
+                ownerId,
+                fileId
+        )).thenReturn(
+                new FileDownload(
+                        "notes.txt",
+                        "text/plain",
+                        content.length,
+                        new ByteArrayInputStream(content)
+                )
+        );
+    
+        mockMvc.perform(
+                        get(
+                                "/api/v1/files/{fileId}/download",
+                                fileId
+                        )
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                )
+                .andExpect(status().isOk())
+                .andExpect(
+                        header().string(
+                                "Content-Type",
+                                "text/plain"
+                        )
+                )
+                .andExpect(
+                        header().longValue(
+                                "Content-Length",
+                                content.length
+                        )
+                )
+                .andExpect(
+                        header().string(
+                                "Content-Disposition",
+                                org.hamcrest.Matchers.containsString(
+                                        "attachment"
+                                )
+                        )
+                )
+                .andExpect(
+                        header().string(
+                                "Content-Disposition",
+                                org.hamcrest.Matchers.containsString(
+                                        "notes.txt"
+                                )
+                        )
+                )
+                .andExpect(content().bytes(content));
+    
+        verify(fileService).downloadFile(
+                ownerId,
+                fileId
+        );
+    }
+    
+    @Test
+    void shouldUseOctetStreamWhenDownloadContentTypeIsMissing()
+            throws Exception {
+    
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        byte[] content = new byte[]{1, 2, 3, 4};
+    
+        when(fileService.downloadFile(
+                ownerId,
+                fileId
+        )).thenReturn(
+                new FileDownload(
+                        "unknown.bin",
+                        null,
+                        content.length,
+                        new ByteArrayInputStream(content)
+                )
+        );
+    
+        mockMvc.perform(
+                        get(
+                                "/api/v1/files/{fileId}/download",
+                                fileId
+                        )
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                )
+                .andExpect(status().isOk())
+                .andExpect(
+                        header().string(
+                                "Content-Type",
+                                "application/octet-stream"
+                        )
+                )
+                .andExpect(content().bytes(content));
+    
+        verify(fileService).downloadFile(
+                ownerId,
+                fileId
+        );
+    }
+    
+    @Test
+    void shouldReturnNotFoundWhenDownloadingInvisibleFile()
+            throws Exception {
+    
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        when(fileService.downloadFile(
+                ownerId,
+                fileId
+        )).thenThrow(
+                new FileNotFoundException(
+                        "File not found"
+                )
+        );
+    
+        mockMvc.perform(
+                        get(
+                                "/api/v1/files/{fileId}/download",
+                                fileId
+                        )
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                )
+                .andExpect(status().isNotFound())
+                .andExpect(
+                        jsonPath("$.status")
+                                .value(404)
+                )
+                .andExpect(
+                        jsonPath("$.error")
+                                .value("NOT_FOUND")
+                )
+                .andExpect(
+                        jsonPath("$.message")
+                                .value("File not found")
+                );
+    
+        verify(fileService).downloadFile(
+                ownerId,
+                fileId
+        );
+    }
+    
+    @Test
+    void shouldRejectUnauthenticatedFileDownload()
+            throws Exception {
+    
+        UUID fileId = UUID.randomUUID();
+    
+        mockMvc.perform(
+                        get(
+                                "/api/v1/files/{fileId}/download",
+                                fileId
+                        )
+                )
+                .andExpect(status().isUnauthorized());
+    
         verifyNoInteractions(fileService);
     }
 }

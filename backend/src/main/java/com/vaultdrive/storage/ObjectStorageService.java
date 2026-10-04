@@ -11,5 +11,7 @@ public interface ObjectStorageService {
             String contentType
     );
 
+    StorageObject download(String storageKey);
+
     void delete(String storageKey);
 }

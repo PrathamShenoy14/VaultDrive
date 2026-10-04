@@ -488,6 +488,126 @@ class StoredFileRepositoryTest {
         );
     }
 
+    @Test
+    void shouldFindReadyActiveFileForDownload() {
+        User owner =
+                createUser("download-ready@example.com");
+    
+        StoredFile readyFile =
+                createFile(
+                        owner.getId(),
+                        null,
+                        "report.pdf"
+                );
+    
+        readyFile.markReady();
+    
+        storedFileRepository.saveAndFlush(readyFile);
+    
+        var result =
+                storedFileRepository
+                        .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                                readyFile.getId(),
+                                owner.getId(),
+                                FileStatus.READY
+                        );
+    
+        assertTrue(result.isPresent());
+    
+        assertEquals(
+                readyFile.getId(),
+                result.get().getId()
+        );
+    }
+    
+    @Test
+    void shouldNotFindUploadingFileForDownload() {
+        User owner =
+                createUser("download-uploading@example.com");
+    
+        StoredFile uploadingFile =
+                createFile(
+                        owner.getId(),
+                        null,
+                        "uploading.pdf"
+                );
+    
+        storedFileRepository.saveAndFlush(
+                uploadingFile
+        );
+    
+        var result =
+                storedFileRepository
+                        .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                                uploadingFile.getId(),
+                                owner.getId(),
+                                FileStatus.READY
+                        );
+    
+        assertTrue(result.isEmpty());
+    }
+    
+    @Test
+    void shouldNotFindFailedFileForDownload() {
+        User owner =
+                createUser("download-failed@example.com");
+    
+        StoredFile failedFile =
+                createFile(
+                        owner.getId(),
+                        null,
+                        "failed.pdf"
+                );
+    
+        failedFile.markFailed();
+    
+        storedFileRepository.saveAndFlush(
+                failedFile
+        );
+    
+        var result =
+                storedFileRepository
+                        .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                                failedFile.getId(),
+                                owner.getId(),
+                                FileStatus.READY
+                        );
+    
+        assertTrue(result.isEmpty());
+    }
+    
+    @Test
+    void shouldNotFindAnotherUsersFileForDownload() {
+        User owner =
+                createUser("download-owner@example.com");
+    
+        User otherUser =
+                createUser("download-other@example.com");
+    
+        StoredFile readyFile =
+                createFile(
+                        owner.getId(),
+                        null,
+                        "private.pdf"
+                );
+    
+        readyFile.markReady();
+    
+        storedFileRepository.saveAndFlush(
+                readyFile
+        );
+    
+        var result =
+                storedFileRepository
+                        .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                                readyFile.getId(),
+                                otherUser.getId(),
+                                FileStatus.READY
+                        );
+    
+        assertTrue(result.isEmpty());
+    }
+
     private User createUser(String email) {
         User user = new User(
                 email,

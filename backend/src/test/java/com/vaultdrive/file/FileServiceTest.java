@@ -1,13 +1,16 @@
 package com.vaultdrive.file;
 
 import com.vaultdrive.file.dto.UploadFileResponse;
+import com.vaultdrive.file.dto.FileDownload;
 import com.vaultdrive.file.exception.FileUploadException;
 import com.vaultdrive.file.exception.InvalidFileNameException;
+import com.vaultdrive.file.exception.FileNotFoundException;
 import com.vaultdrive.folder.Folder;
 import com.vaultdrive.folder.FolderAccessValidator;
 import com.vaultdrive.folder.exception.FolderNotFoundException;
 import com.vaultdrive.storage.ObjectStorageService;
 import com.vaultdrive.storage.StorageKeyGenerator;
+import com.vaultdrive.storage.StorageObject;
 
 import com.vaultdrive.file.dto.FilePageResponse;
 import com.vaultdrive.file.dto.FileResponse;
@@ -29,6 +32,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.io.InputStream;
+import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.List;
@@ -763,6 +767,176 @@ class FileServiceTest {
 
         verifyNoInteractions(folderAccessValidator);
         verifyNoInteractions(storedFileRepository);
+    }
+
+    @Test
+    void shouldDownloadReadyRootFile() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+    
+        StoredFile storedFile = createReadyFile(
+                ownerId,
+                null,
+                "report.pdf"
+        );
+    
+        byte[] content = "pdf-content"
+                .getBytes(StandardCharsets.UTF_8);
+    
+        InputStream inputStream =
+                new ByteArrayInputStream(content);
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        storedFile.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(java.util.Optional.of(storedFile));
+    
+        when(objectStorageService.download(
+                storedFile.getStorageKey()
+        )).thenReturn(
+                new StorageObject(inputStream)
+        );
+    
+        FileDownload download =
+                fileService.downloadFile(
+                        ownerId,
+                        storedFile.getId()
+                );
+    
+        assertEquals("report.pdf", download.name());
+        assertEquals(
+                "application/pdf",
+                download.contentType()
+        );
+        assertEquals(100L, download.sizeBytes());
+        assertSame(inputStream, download.inputStream());
+    
+        verifyNoInteractions(folderAccessValidator);
+    
+        verify(objectStorageService).download(
+                storedFile.getStorageKey()
+        );
+    }
+    
+    @Test
+    void shouldDownloadReadyFileFromAccessibleFolder() {
+        UUID ownerId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+    
+        StoredFile storedFile = createReadyFile(
+                ownerId,
+                folderId,
+                "resume.pdf"
+        );
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        storedFile.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(java.util.Optional.of(storedFile));
+    
+        when(objectStorageService.download(
+                storedFile.getStorageKey()
+        )).thenReturn(
+                new StorageObject(
+                        new ByteArrayInputStream(
+                                new byte[]{1, 2, 3}
+                        )
+                )
+        );
+    
+        FileDownload download =
+                fileService.downloadFile(
+                        ownerId,
+                        storedFile.getId()
+                );
+    
+        assertEquals("resume.pdf", download.name());
+    
+        verify(folderAccessValidator)
+                .requireAccessibleFolder(
+                        ownerId,
+                        folderId
+                );
+    
+        verify(objectStorageService).download(
+                storedFile.getStorageKey()
+        );
+    }
+    
+    @Test
+    void shouldRejectDownloadWhenFileIsNotVisible() {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        fileId,
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(java.util.Optional.empty());
+    
+        FileNotFoundException exception =
+                assertThrows(
+                        FileNotFoundException.class,
+                        () -> fileService.downloadFile(
+                                ownerId,
+                                fileId
+                        )
+                );
+    
+        assertEquals(
+                "File not found",
+                exception.getMessage()
+        );
+    
+        verifyNoInteractions(folderAccessValidator);
+        verifyNoInteractions(objectStorageService);
+    }
+    
+    @Test
+    void shouldNotAccessStorageWhenDownloadFolderIsInaccessible() {
+        UUID ownerId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+    
+        StoredFile storedFile = createReadyFile(
+                ownerId,
+                folderId,
+                "secret.pdf"
+        );
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        storedFile.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(java.util.Optional.of(storedFile));
+    
+        when(folderAccessValidator.requireAccessibleFolder(
+                ownerId,
+                folderId
+        )).thenThrow(
+                new FolderNotFoundException(
+                        "Folder not found"
+                )
+        );
+    
+        assertThrows(
+                FolderNotFoundException.class,
+                () -> fileService.downloadFile(
+                        ownerId,
+                        storedFile.getId()
+                )
+        );
+    
+        verify(objectStorageService, never())
+                .download(anyString());
     }
 
     private StoredFile createReadyFile(
