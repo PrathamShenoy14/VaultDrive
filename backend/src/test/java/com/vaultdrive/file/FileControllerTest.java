@@ -13,6 +13,8 @@ import com.vaultdrive.file.dto.FileResponse;
 import com.vaultdrive.file.dto.FileDownload;
 import com.vaultdrive.file.exception.InvalidFilePaginationException;
 import com.vaultdrive.file.exception.FileNotFoundException;
+import com.vaultdrive.file.exception.DuplicateFileNameException;
+import com.vaultdrive.file.exception.FileExtensionChangeException;
 import com.vaultdrive.folder.exception.FolderNotFoundException;
 
 import org.springframework.http.MediaType;
@@ -32,8 +34,11 @@ import static org.mockito.Mockito.*;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import org.springframework.test.web.servlet.MvcResult;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -449,14 +454,21 @@ class FileControllerTest {
                 )
         );
     
-        mockMvc.perform(
-                        get(
-                                "/api/v1/files/{fileId}/download",
-                                fileId
+        MvcResult mvcResult =
+                mockMvc.perform(
+                                get(
+                                        "/api/v1/files/{fileId}/download",
+                                        fileId
+                                )
+                                        .with(jwt().jwt(jwt ->
+                                                jwt.subject(ownerId.toString())
+                                        ))
                         )
-                                .with(jwt().jwt(jwt ->
-                                        jwt.subject(ownerId.toString())
-                                ))
+                        .andExpect(request().asyncStarted())
+                        .andReturn();
+    
+        mockMvc.perform(
+                        asyncDispatch(mvcResult)
                 )
                 .andExpect(status().isOk())
                 .andExpect(
@@ -516,14 +528,21 @@ class FileControllerTest {
                 )
         );
     
-        mockMvc.perform(
-                        get(
-                                "/api/v1/files/{fileId}/download",
-                                fileId
+        MvcResult mvcResult =
+                mockMvc.perform(
+                                get(
+                                        "/api/v1/files/{fileId}/download",
+                                        fileId
+                                )
+                                        .with(jwt().jwt(jwt ->
+                                                jwt.subject(ownerId.toString())
+                                        ))
                         )
-                                .with(jwt().jwt(jwt ->
-                                        jwt.subject(ownerId.toString())
-                                ))
+                        .andExpect(request().asyncStarted())
+                        .andReturn();
+    
+        mockMvc.perform(
+                        asyncDispatch(mvcResult)
                 )
                 .andExpect(status().isOk())
                 .andExpect(
@@ -600,5 +619,232 @@ class FileControllerTest {
                 .andExpect(status().isUnauthorized());
     
         verifyNoInteractions(fileService);
+    }
+
+    @Test
+    void shouldRenameFile() throws Exception {
+    
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+    
+        Instant createdAt =
+                Instant.parse("2026-10-05T10:00:00Z");
+    
+        Instant updatedAt =
+                Instant.parse("2026-10-05T10:05:00Z");
+    
+        FileResponse response =
+                new FileResponse(
+                        fileId,
+                        "renamed.pdf",
+                        folderId,
+                        "application/pdf",
+                        500L,
+                        createdAt,
+                        updatedAt
+                );
+    
+        when(fileService.renameFile(
+                ownerId,
+                fileId,
+                "renamed.pdf"
+        )).thenReturn(response);
+    
+        mockMvc.perform(
+                        patch(
+                                "/api/v1/files/{fileId}/name",
+                                fileId
+                        )
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                        {
+                                          "name": "renamed.pdf"
+                                        }
+                                        """)
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id")
+                        .value(fileId.toString()))
+                .andExpect(jsonPath("$.name")
+                        .value("renamed.pdf"))
+                .andExpect(jsonPath("$.folderId")
+                        .value(folderId.toString()))
+                .andExpect(jsonPath("$.contentType")
+                        .value("application/pdf"))
+                .andExpect(jsonPath("$.sizeBytes")
+                        .value(500))
+                .andExpect(jsonPath("$.createdAt")
+                        .value("2026-10-05T10:00:00Z"))
+                .andExpect(jsonPath("$.updatedAt")
+                        .value("2026-10-05T10:05:00Z"));
+    
+        verify(fileService).renameFile(
+                ownerId,
+                fileId,
+                "renamed.pdf"
+        );
+    }
+
+    @Test
+    void shouldReturnNotFoundWhenRenamingInvisibleFile()
+            throws Exception {
+    
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        when(fileService.renameFile(
+                ownerId,
+                fileId,
+                "renamed.pdf"
+        )).thenThrow(
+                new FileNotFoundException(
+                        "File not found"
+                )
+        );
+    
+        mockMvc.perform(
+                        patch(
+                                "/api/v1/files/{fileId}/name",
+                                fileId
+                        )
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                        {
+                                          "name": "renamed.pdf"
+                                        }
+                                        """)
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                )
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status")
+                        .value(404))
+                .andExpect(jsonPath("$.error")
+                        .value("NOT_FOUND"))
+                .andExpect(jsonPath("$.message")
+                        .value("File not found"));
+    
+        verify(fileService).renameFile(
+                ownerId,
+                fileId,
+                "renamed.pdf"
+        );
+    }
+
+    @Test
+    void shouldRejectUnauthenticatedFileRename()
+            throws Exception {
+    
+        UUID fileId = UUID.randomUUID();
+    
+        mockMvc.perform(
+                        patch(
+                                "/api/v1/files/{fileId}/name",
+                                fileId
+                        )
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                        {
+                                          "name": "renamed.pdf"
+                                        }
+                                        """)
+                )
+                .andExpect(status().isUnauthorized());
+    
+        verifyNoInteractions(fileService);
+    }
+
+    @Test
+    void shouldReturnConflictWhenRenameNameAlreadyExists()
+            throws Exception {
+    
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        when(fileService.renameFile(
+                ownerId,
+                fileId,
+                "existing.pdf"
+        )).thenThrow(
+                new DuplicateFileNameException(
+                        "A file with this name already exists"
+                )
+        );
+    
+        mockMvc.perform(
+                        patch(
+                                "/api/v1/files/{fileId}/name",
+                                fileId
+                        )
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                        {
+                                          "name": "existing.pdf"
+                                        }
+                                        """)
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                )
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status")
+                        .value(409))
+                .andExpect(jsonPath("$.error")
+                        .value("Conflict"))
+                .andExpect(jsonPath("$.message")
+                        .value(
+                                "A file with this name already exists"
+                        ));
+    
+        verify(fileService).renameFile(
+                ownerId,
+                fileId,
+                "existing.pdf"
+        );
+    }
+
+    @Test
+    void shouldReturnBadRequestWhenRenameChangesFileExtension() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        when(fileService.renameFile(
+                ownerId,
+                fileId,
+                "report.txt"
+        )).thenThrow(
+                new FileExtensionChangeException(
+                        "File extension cannot be changed"
+                )
+        );
+    
+        mockMvc.perform(
+                        patch("/api/v1/files/{fileId}/name", fileId)
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                        {
+                                          "name": "report.txt"
+                                        }
+                                        """)
+                )
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"))
+                .andExpect(jsonPath("$.message")
+                        .value("File extension cannot be changed"));
+    
+        verify(fileService).renameFile(
+                ownerId,
+                fileId,
+                "report.txt"
+        );
     }
 }

@@ -608,6 +608,126 @@ class StoredFileRepositoryTest {
         assertTrue(result.isEmpty());
     }
 
+    @Test
+    void shouldExcludeCurrentFileWhenCheckingNestedRenameDuplicate() {
+        User user = createUser(
+                "rename-self-nested@example.com"
+        );
+    
+        Folder folder = createFolder(
+                user.getId(),
+                "Documents"
+        );
+    
+        StoredFile file = createFile(
+                user.getId(),
+                folder.getId(),
+                "report.pdf"
+        );
+    
+        file.markReady();
+        storedFileRepository.saveAndFlush(file);
+    
+        boolean exists =
+                storedFileRepository
+                        .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusInAndIdNot(
+                                user.getId(),
+                                folder.getId(),
+                                "report.pdf",
+                                Set.of(
+                                        FileStatus.UPLOADING,
+                                        FileStatus.READY
+                                ),
+                                file.getId()
+                        );
+    
+        assertFalse(exists);
+    }
+
+    @Test
+    void shouldFindAnotherFileWithSameNameForNestedRename() {
+        User user = createUser(
+                "rename-duplicate-nested@example.com"
+        );
+    
+        Folder folder = createFolder(
+                user.getId(),
+                "Documents"
+        );
+    
+        StoredFile firstFile = createFile(
+                user.getId(),
+                folder.getId(),
+                "report.pdf"
+        );
+    
+        firstFile.markReady();
+        storedFileRepository.saveAndFlush(firstFile);
+    
+        StoredFile secondFile = createFile(
+                user.getId(),
+                folder.getId(),
+                "invoice.pdf"
+        );
+    
+        secondFile.markReady();
+        storedFileRepository.saveAndFlush(secondFile);
+    
+        boolean exists =
+                storedFileRepository
+                        .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusInAndIdNot(
+                                user.getId(),
+                                folder.getId(),
+                                "report.pdf",
+                                Set.of(
+                                        FileStatus.UPLOADING,
+                                        FileStatus.READY
+                                ),
+                                secondFile.getId()
+                        );
+    
+        assertTrue(exists);
+    }
+
+    @Test
+    void shouldFindAnotherRootFileWithSameNameForRename() {
+        User user = createUser(
+                "rename-duplicate-root@example.com"
+        );
+    
+        StoredFile firstFile = createFile(
+                user.getId(),
+                null,
+                "report.pdf"
+        );
+    
+        firstFile.markReady();
+        storedFileRepository.saveAndFlush(firstFile);
+    
+        StoredFile secondFile = createFile(
+                user.getId(),
+                null,
+                "invoice.pdf"
+        );
+    
+        secondFile.markReady();
+        storedFileRepository.saveAndFlush(secondFile);
+    
+        boolean exists =
+                storedFileRepository
+                        .existsByOwnerIdAndFolderIdIsNullAndNameAndDeletedAtIsNullAndStatusInAndIdNot(
+                                user.getId(),
+                                "report.pdf",
+                                Set.of(
+                                        FileStatus.UPLOADING,
+                                        FileStatus.READY
+                                ),
+                                secondFile.getId()
+                        );
+    
+        assertTrue(exists);
+    }
+
     private User createUser(String email) {
         User user = new User(
                 email,

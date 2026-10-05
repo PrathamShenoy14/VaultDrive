@@ -5,6 +5,7 @@ import com.vaultdrive.file.dto.FileDownload;
 import com.vaultdrive.file.exception.FileUploadException;
 import com.vaultdrive.file.exception.InvalidFileNameException;
 import com.vaultdrive.file.exception.FileNotFoundException;
+import com.vaultdrive.file.exception.FileExtensionChangeException;
 import com.vaultdrive.folder.Folder;
 import com.vaultdrive.folder.FolderAccessValidator;
 import com.vaultdrive.folder.exception.FolderNotFoundException;
@@ -36,6 +37,7 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -63,16 +65,21 @@ class FileServiceTest {
     private StoredFileRepository storedFileRepository;
 
     private FileService fileService;
+    private FileNameExtensionResolver fileNameExtensionResolver;
 
     @BeforeEach
     void setUp() {
+        fileNameExtensionResolver =
+                    new FileNameExtensionResolver();
+        
         fileService = new FileService(
                 folderAccessValidator,
                 fileNameValidator,
                 fileMetadataService,
                 objectStorageService,
                 storageKeyGenerator,
-                storedFileRepository
+                storedFileRepository,
+                fileNameExtensionResolver
         );
     }
 
@@ -937,6 +944,483 @@ class FileServiceTest {
     
         verify(objectStorageService, never())
                 .download(anyString());
+    }
+
+    @Test
+    void shouldRenameReadyRootFile() {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        StoredFile storedFile = new StoredFile(
+                fileId,
+                ownerId,
+                null,
+                "old-name.txt",
+                "users/" + ownerId + "/files/" + fileId,
+                "text/plain",
+                100L
+        );
+    
+        storedFile.markReady();
+    
+        // Tell the mocked FileNameValidator what to return
+        when(fileNameValidator
+                .validateAndNormalize("new-name.txt"))
+                .thenReturn("new-name.txt");
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        fileId,
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(storedFile));
+    
+        when(fileMetadataService.rename(
+                storedFile,
+                "new-name.txt"
+        ))
+                .thenAnswer(invocation -> {
+                    storedFile.rename("new-name.txt");
+                    return storedFile;
+                });
+    
+        FileResponse response =
+                fileService.renameFile(
+                        ownerId,
+                        fileId,
+                        "new-name.txt"
+                );
+    
+        assertEquals("new-name.txt", response.name());
+        assertEquals(fileId, response.id());
+        assertNull(response.folderId());
+    
+        verify(fileNameValidator, times(2))
+                .validateAndNormalize("new-name.txt");
+    
+        verify(fileMetadataService)
+                .rename(
+                        storedFile,
+                        "new-name.txt"
+                );
+    
+        verifyNoInteractions(folderAccessValidator);
+    
+        verify(objectStorageService, never())
+                .download(anyString());
+    
+        verify(objectStorageService, never())
+                .upload(
+                        anyString(),
+                        any(),
+                        anyLong(),
+                        any()
+                );
+    
+        verify(objectStorageService, never())
+                .delete(anyString());
+    }
+
+    @Test
+    void shouldRenameReadyFileInsideAccessibleFolder() {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+    
+        StoredFile storedFile = new StoredFile(
+                fileId,
+                ownerId,
+                folderId,
+                "old.pdf",
+                "users/" + ownerId + "/files/" + fileId,
+                "application/pdf",
+                500L
+        );
+    
+        storedFile.markReady();
+    
+        when(fileNameValidator
+                .validateAndNormalize("renamed.pdf"))
+                .thenReturn("renamed.pdf");
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        fileId,
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(storedFile));
+    
+        when(fileMetadataService.rename(
+                storedFile,
+                "renamed.pdf"
+        ))
+                .thenAnswer(invocation -> {
+                    storedFile.rename("renamed.pdf");
+                    return storedFile;
+                });
+    
+        FileResponse response =
+                fileService.renameFile(
+                        ownerId,
+                        fileId,
+                        "renamed.pdf"
+                );
+    
+        assertEquals("renamed.pdf", response.name());
+        assertEquals(folderId, response.folderId());
+    
+        verify(folderAccessValidator)
+                .requireAccessibleFolder(
+                        ownerId,
+                        folderId
+                );
+    
+        verify(fileMetadataService)
+                .rename(
+                        storedFile,
+                        "renamed.pdf"
+                );
+    
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldRejectRenameWhenFileIsNotVisible() {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        when(fileNameValidator
+                .validateAndNormalize("new-name.txt"))
+                .thenReturn("new-name.txt");
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        fileId,
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.empty());
+    
+        FileNotFoundException exception =
+                assertThrows(
+                        FileNotFoundException.class,
+                        () -> fileService.renameFile(
+                                ownerId,
+                                fileId,
+                                "new-name.txt"
+                        )
+                );
+    
+        assertEquals(
+                "File not found",
+                exception.getMessage()
+        );
+    
+        verifyNoInteractions(fileMetadataService);
+        verifyNoInteractions(folderAccessValidator);
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldNotRenameWhenFolderIsInaccessible() {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+    
+        StoredFile storedFile = new StoredFile(
+                fileId,
+                ownerId,
+                folderId,
+                "report.pdf",
+                "users/" + ownerId + "/files/" + fileId,
+                "application/pdf",
+                500L
+        );
+    
+        storedFile.markReady();
+    
+        when(fileNameValidator
+                .validateAndNormalize("final.pdf"))
+                .thenReturn("final.pdf");
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        fileId,
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(storedFile));
+    
+        doThrow(new FolderNotFoundException(
+                "Parent folder not found"
+        ))
+                .when(folderAccessValidator)
+                .requireAccessibleFolder(
+                        ownerId,
+                        folderId
+                );
+    
+        assertThrows(
+                FolderNotFoundException.class,
+                () -> fileService.renameFile(
+                        ownerId,
+                        fileId,
+                        "final.pdf"
+                )
+        );
+    
+        verifyNoInteractions(fileMetadataService);
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldPreserveExistingExtensionWhenRenamingWithoutExtension() {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        StoredFile storedFile = new StoredFile(
+                fileId,
+                ownerId,
+                null,
+                "Platform FDE - JD.pdf",
+                "users/" + ownerId + "/files/" + fileId,
+                "application/pdf",
+                500L
+        );
+    
+        storedFile.markReady();
+    
+        when(fileNameValidator
+                .validateAndNormalize("Job Description"))
+                .thenReturn("Job Description");
+    
+        when(fileNameValidator
+                .validateAndNormalize("Job Description.pdf"))
+                .thenReturn("Job Description.pdf");
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        fileId,
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(storedFile));
+    
+        when(fileMetadataService.rename(
+                storedFile,
+                "Job Description.pdf"
+        )).thenAnswer(invocation -> {
+            storedFile.rename("Job Description.pdf");
+            return storedFile;
+        });
+    
+        FileResponse response =
+                fileService.renameFile(
+                        ownerId,
+                        fileId,
+                        "Job Description"
+                );
+    
+        assertEquals(
+                "Job Description.pdf",
+                response.name()
+        );
+    
+        verify(fileNameValidator)
+                .validateAndNormalize("Job Description");
+    
+        verify(fileNameValidator)
+                .validateAndNormalize("Job Description.pdf");
+    
+        verify(fileMetadataService)
+                .rename(
+                        storedFile,
+                        "Job Description.pdf"
+                );
+    
+        verifyNoInteractions(folderAccessValidator);
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldRejectRenameWhenExtensionIsChanged() {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        StoredFile storedFile = new StoredFile(
+                fileId,
+                ownerId,
+                null,
+                "report.pdf",
+                "users/" + ownerId + "/files/" + fileId,
+                "application/pdf",
+                500L
+        );
+    
+        storedFile.markReady();
+    
+        when(fileNameValidator
+                .validateAndNormalize("report.txt"))
+                .thenReturn("report.txt");
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        fileId,
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(storedFile));
+    
+        FileExtensionChangeException exception =
+                assertThrows(
+                        FileExtensionChangeException.class,
+                        () -> fileService.renameFile(
+                                ownerId,
+                                fileId,
+                                "report.txt"
+                        )
+                );
+    
+        assertEquals(
+                "File extension cannot be changed",
+                exception.getMessage()
+        );
+    
+        verify(fileNameValidator)
+                .validateAndNormalize("report.txt");
+    
+        verifyNoInteractions(fileMetadataService);
+        verifyNoInteractions(folderAccessValidator);
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldAllowSameExtensionWithDifferentCase() {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        StoredFile storedFile = new StoredFile(
+                fileId,
+                ownerId,
+                null,
+                "report.pdf",
+                "users/" + ownerId + "/files/" + fileId,
+                "application/pdf",
+                500L
+        );
+    
+        storedFile.markReady();
+    
+        when(fileNameValidator
+                .validateAndNormalize("Final Report.PDF"))
+                .thenReturn("Final Report.PDF");
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        fileId,
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(storedFile));
+    
+        when(fileMetadataService.rename(
+                storedFile,
+                "Final Report.PDF"
+        )).thenAnswer(invocation -> {
+            storedFile.rename("Final Report.PDF");
+            return storedFile;
+        });
+    
+        FileResponse response =
+                fileService.renameFile(
+                        ownerId,
+                        fileId,
+                        "Final Report.PDF"
+                );
+    
+        assertEquals(
+                "Final Report.PDF",
+                response.name()
+        );
+    
+        verify(fileNameValidator, times(2))
+                .validateAndNormalize("Final Report.PDF");
+    
+        verify(fileMetadataService)
+                .rename(
+                        storedFile,
+                        "Final Report.PDF"
+                );
+    
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldRejectRenameWhenPreservedExtensionMakesFinalNameInvalid() {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        String requestedName = "a".repeat(254);
+        String resolvedName = requestedName + ".pdf";
+    
+        StoredFile storedFile = new StoredFile(
+                fileId,
+                ownerId,
+                null,
+                "report.pdf",
+                "users/" + ownerId + "/files/" + fileId,
+                "application/pdf",
+                500L
+        );
+    
+        storedFile.markReady();
+    
+        when(fileNameValidator
+                .validateAndNormalize(requestedName))
+                .thenReturn(requestedName);
+    
+        when(fileNameValidator
+                .validateAndNormalize(resolvedName))
+                .thenThrow(
+                        new InvalidFileNameException(
+                                "File name must not exceed 255 characters"
+                        )
+                );
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        fileId,
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(storedFile));
+    
+        InvalidFileNameException exception =
+                assertThrows(
+                        InvalidFileNameException.class,
+                        () -> fileService.renameFile(
+                                ownerId,
+                                fileId,
+                                requestedName
+                        )
+                );
+    
+        assertEquals(
+                "File name must not exceed 255 characters",
+                exception.getMessage()
+        );
+    
+        verify(fileNameValidator)
+                .validateAndNormalize(requestedName);
+    
+        verify(fileNameValidator)
+                .validateAndNormalize(resolvedName);
+    
+        verifyNoInteractions(fileMetadataService);
+        verifyNoInteractions(folderAccessValidator);
+        verifyNoInteractions(objectStorageService);
     }
 
     private StoredFile createReadyFile(

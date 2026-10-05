@@ -61,7 +61,7 @@ public class StoredFile {
             long sizeBytes
     ) {
         Instant now = Instant.now();
-    
+
         this.id = id;
         this.ownerId = ownerId;
         this.folderId = folderId;
@@ -125,6 +125,11 @@ public class StoredFile {
 
     public void markFailed() {
         this.status = FileStatus.FAILED;
+        this.updatedAt = Instant.now();
+    }
+
+    public void rename(String name) {
+        this.name = name;
         this.updatedAt = Instant.now();
     }
 }

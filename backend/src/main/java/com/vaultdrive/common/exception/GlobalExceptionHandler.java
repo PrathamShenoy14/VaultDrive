@@ -14,6 +14,7 @@ import com.vaultdrive.file.exception.DuplicateFileNameException;
 import com.vaultdrive.file.exception.FileUploadException;
 import com.vaultdrive.file.exception.InvalidFilePaginationException;
 import com.vaultdrive.file.exception.FileNotFoundException;
+import com.vaultdrive.file.exception.FileExtensionChangeException;
 
 
 import org.hibernate.exception.ConstraintViolationException;
@@ -307,5 +308,20 @@ public class GlobalExceptionHandler {
                         "NOT_FOUND",
                         ex.getMessage()
                 ));
+    }
+
+    @ExceptionHandler(FileExtensionChangeException.class)
+    public ResponseEntity<ApiError> handleFileExtensionChange(
+            FileExtensionChangeException exception
+    ) {
+        ApiError error = new ApiError(
+                400,
+                "BAD_REQUEST",
+                exception.getMessage()
+        );
+    
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(error);
     }
 }

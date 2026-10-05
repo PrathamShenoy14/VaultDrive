@@ -35,6 +35,7 @@ public class FileService {
     private final ObjectStorageService objectStorageService;
     private final StorageKeyGenerator storageKeyGenerator;
     private final StoredFileRepository storedFileRepository;
+    private final FileNameExtensionResolver fileNameExtensionResolver;
 
     public FileService(
             FolderAccessValidator folderAccessValidator,
@@ -42,7 +43,8 @@ public class FileService {
             FileMetadataService fileMetadataService,
             ObjectStorageService objectStorageService,
             StorageKeyGenerator storageKeyGenerator,
-            StoredFileRepository storedFileRepository
+            StoredFileRepository storedFileRepository,
+            FileNameExtensionResolver fileNameExtensionResolver
     ) {
         this.folderAccessValidator = folderAccessValidator;
         this.fileNameValidator = fileNameValidator;
@@ -50,6 +52,7 @@ public class FileService {
         this.objectStorageService = objectStorageService;
         this.storageKeyGenerator = storageKeyGenerator;
         this.storedFileRepository = storedFileRepository;
+        this.fileNameExtensionResolver = fileNameExtensionResolver;
     }
 
     public UploadFileResponse uploadFile(
@@ -61,7 +64,7 @@ public class FileService {
                 multipartFile.getOriginalFilename()
         );
 
-        validateDestinationFolder(ownerId, folderId);
+        validateFolderAccess(ownerId, folderId);
 
         UUID fileId = UUID.randomUUID();
 
@@ -140,7 +143,7 @@ public class FileService {
     ) {
         validatePagination(page, size);
 
-        validateDestinationFolder(
+        validateFolderAccess(
                 ownerId,
                 folderId
         );
@@ -222,14 +225,14 @@ public class FileService {
         }
     }
 
-    private void validateDestinationFolder(
+    private void validateFolderAccess(
             UUID ownerId,
             UUID folderId
     ) {
         if (folderId == null) {
             return;
         }
-
+    
         folderAccessValidator.requireAccessibleFolder(
                 ownerId,
                 folderId
@@ -270,7 +273,7 @@ public class FileService {
                                 )
                         );
     
-        validateDestinationFolder(
+        validateFolderAccess(
                 ownerId,
                 storedFile.getFolderId()
         );
@@ -286,5 +289,49 @@ public class FileService {
                 storedFile.getSizeBytes(),
                 storageObject.inputStream()
         );
+    }
+
+    public FileResponse renameFile(
+            UUID ownerId,
+            UUID fileId,
+            String newName
+    ) {
+        String normalizedRequestedName =
+                fileNameValidator.validateAndNormalize(newName);
+    
+        StoredFile storedFile =
+                storedFileRepository
+                        .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                                fileId,
+                                ownerId,
+                                FileStatus.READY
+                        )
+                        .orElseThrow(() ->
+                                new FileNotFoundException("File not found")
+                        );
+    
+        String resolvedName =
+                fileNameExtensionResolver.preserveExtension(
+                        storedFile.getName(),
+                        normalizedRequestedName
+                );
+    
+        String finalName =
+                fileNameValidator.validateAndNormalize(
+                        resolvedName
+                );
+    
+        validateFolderAccess(
+                ownerId,
+                storedFile.getFolderId()
+        );
+    
+        StoredFile renamedFile =
+                fileMetadataService.rename(
+                        storedFile,
+                        finalName
+                );
+    
+        return toFileResponse(renamedFile);
     }
 }

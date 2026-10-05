@@ -1,7 +1,9 @@
 package com.vaultdrive.file;
 
+import com.vaultdrive.file.dto.FileResponse;
 import com.vaultdrive.file.dto.FilePageResponse;
 import com.vaultdrive.file.dto.UploadFileResponse;
+import com.vaultdrive.file.dto.RenameFileRequest;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -12,6 +14,8 @@ import org.springframework.security.oauth2.jwt.Jwt;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -87,22 +91,22 @@ public class FileController {
     ) {
         UUID ownerId =
                 UUID.fromString(jwt.getSubject());
-    
+
         FileDownload download =
                 fileService.downloadFile(
                         ownerId,
                         fileId
                 );
-    
+
         StreamingResponseBody responseBody =
                 outputStream -> {
                     try (InputStream inputStream =
                                  download.inputStream()) {
-    
+
                         inputStream.transferTo(outputStream);
                     }
                 };
-    
+
         ContentDisposition contentDisposition =
                 ContentDisposition
                         .attachment()
@@ -111,7 +115,7 @@ public class FileController {
                                 StandardCharsets.UTF_8
                         )
                         .build();
-    
+
         return ResponseEntity.ok()
                 .header(
                         HttpHeaders.CONTENT_DISPOSITION,
@@ -126,15 +130,34 @@ public class FileController {
                 .body(responseBody);
     }
 
+    @PatchMapping("/{fileId}/name")
+    public ResponseEntity<FileResponse> renameFile(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID fileId,
+            @RequestBody RenameFileRequest request
+    ) {
+        UUID ownerId =
+                UUID.fromString(jwt.getSubject());
+
+        FileResponse response =
+                fileService.renameFile(
+                        ownerId,
+                        fileId,
+                        request.name()
+                );
+
+        return ResponseEntity.ok(response);
+    }
+
     private MediaType resolveContentType(
             String contentType
     ) {
         if (contentType == null ||
                 contentType.isBlank()) {
-    
+
             return MediaType.APPLICATION_OCTET_STREAM;
         }
-    
+
         try {
             return MediaType.parseMediaType(
                     contentType

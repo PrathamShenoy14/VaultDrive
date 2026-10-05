@@ -230,6 +230,194 @@ class FileMetadataServiceTest {
                 .saveAndFlush(file);
     }
 
+    @Test
+    void shouldRenameRootFile() {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+
+        StoredFile file = new StoredFile(
+                fileId,
+                ownerId,
+                null,
+                "old.txt",
+                "users/" + ownerId + "/files/" + fileId,
+                "text/plain",
+                100L
+        );
+
+        file.markReady();
+
+        when(userRepository.findByIdForUpdate(ownerId))
+                .thenReturn(Optional.of(mock(User.class)));
+
+        when(storedFileRepository
+                .existsByOwnerIdAndFolderIdIsNullAndNameAndDeletedAtIsNullAndStatusInAndIdNot(
+                        eq(ownerId),
+                        eq("new.txt"),
+                        anyCollection(),
+                        eq(fileId)
+                ))
+                .thenReturn(false);
+
+        when(storedFileRepository.saveAndFlush(file))
+                .thenReturn(file);
+
+        StoredFile result =
+                fileMetadataService.rename(
+                        file,
+                        "new.txt"
+                );
+
+        assertEquals("new.txt", result.getName());
+
+        verify(userRepository)
+                .findByIdForUpdate(ownerId);
+
+        verify(storedFileRepository)
+                .saveAndFlush(file);
+    }
+
+    @Test
+    void shouldRenameNestedFile() {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+
+        StoredFile file = new StoredFile(
+                fileId,
+                ownerId,
+                folderId,
+                "old.pdf",
+                "users/" + ownerId + "/files/" + fileId,
+                "application/pdf",
+                500L
+        );
+
+        file.markReady();
+
+        when(userRepository.findByIdForUpdate(ownerId))
+                .thenReturn(Optional.of(mock(User.class)));
+
+        when(storedFileRepository
+                .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusInAndIdNot(
+                        eq(ownerId),
+                        eq(folderId),
+                        eq("new.pdf"),
+                        anyCollection(),
+                        eq(fileId)
+                ))
+                .thenReturn(false);
+
+        when(storedFileRepository.saveAndFlush(file))
+                .thenReturn(file);
+
+        StoredFile result =
+                fileMetadataService.rename(
+                        file,
+                        "new.pdf"
+                );
+
+        assertEquals("new.pdf", result.getName());
+
+        verify(userRepository)
+                .findByIdForUpdate(ownerId);
+
+        verify(storedFileRepository)
+                .saveAndFlush(file);
+    }
+
+    @Test
+    void shouldRejectRenameWhenNameAlreadyExists() {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+
+        StoredFile file = new StoredFile(
+                fileId,
+                ownerId,
+                folderId,
+                "report.pdf",
+                "users/" + ownerId + "/files/" + fileId,
+                "application/pdf",
+                500L
+        );
+
+        file.markReady();
+
+        when(userRepository.findByIdForUpdate(ownerId))
+                .thenReturn(Optional.of(mock(User.class)));
+
+        when(storedFileRepository
+                .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusInAndIdNot(
+                        eq(ownerId),
+                        eq(folderId),
+                        eq("invoice.pdf"),
+                        anyCollection(),
+                        eq(fileId)
+                ))
+                .thenReturn(true);
+
+        DuplicateFileNameException exception =
+                assertThrows(
+                        DuplicateFileNameException.class,
+                        () -> fileMetadataService.rename(
+                                file,
+                                "invoice.pdf"
+                        )
+                );
+
+        assertEquals(
+                "A file with this name already exists",
+                exception.getMessage()
+        );
+
+        assertEquals(
+                "report.pdf",
+                file.getName()
+        );
+
+        verify(storedFileRepository, never())
+                .saveAndFlush(any());
+    }
+
+    @Test
+    void shouldTreatSameNameRenameAsNoOp() {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        StoredFile file = new StoredFile(
+                fileId,
+                ownerId,
+                null,
+                "report.pdf",
+                "users/" + ownerId + "/files/" + fileId,
+                "application/pdf",
+                500L
+        );
+    
+        file.markReady();
+    
+        when(userRepository.findByIdForUpdate(ownerId))
+                .thenReturn(Optional.of(mock(User.class)));
+    
+        StoredFile result =
+                fileMetadataService.rename(
+                        file,
+                        "report.pdf"
+                );
+    
+        assertSame(file, result);
+        assertEquals("report.pdf", result.getName());
+    
+        verify(userRepository)
+                .findByIdForUpdate(ownerId);
+    
+        verify(storedFileRepository, never())
+                .saveAndFlush(any());
+    
+        verifyNoMoreInteractions(storedFileRepository);
+    }
+
     private StoredFile createFile(
             UUID folderId,
             String name

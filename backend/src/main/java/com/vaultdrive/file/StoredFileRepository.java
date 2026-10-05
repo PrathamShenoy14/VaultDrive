@@ -24,6 +24,21 @@ public interface StoredFileRepository
             Collection<FileStatus> statuses
     );
 
+    boolean existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusInAndIdNot(
+            UUID ownerId,
+            UUID folderId,
+            String name,
+            Collection<FileStatus> statuses,
+            UUID excludedFileId
+    );
+
+    boolean existsByOwnerIdAndFolderIdIsNullAndNameAndDeletedAtIsNullAndStatusInAndIdNot(
+            UUID ownerId,
+            String name,
+            Collection<FileStatus> statuses,
+            UUID excludedFileId
+    );
+
     Optional<StoredFile> findByIdAndOwnerIdAndDeletedAtIsNull(
             UUID id,
             UUID ownerId
