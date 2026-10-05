@@ -4,6 +4,7 @@ import com.vaultdrive.file.dto.FileResponse;
 import com.vaultdrive.file.dto.FilePageResponse;
 import com.vaultdrive.file.dto.UploadFileResponse;
 import com.vaultdrive.file.dto.RenameFileRequest;
+import com.vaultdrive.file.dto.MoveFileRequest;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -149,6 +150,25 @@ public class FileController {
         return ResponseEntity.ok(response);
     }
 
+    @PatchMapping("/{fileId}/move")
+    public ResponseEntity<FileResponse> moveFile(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID fileId,
+            @RequestBody MoveFileRequest request
+    ) {
+        UUID ownerId =
+                UUID.fromString(jwt.getSubject());
+    
+        FileResponse response =
+                fileService.moveFile(
+                        ownerId,
+                        fileId,
+                        request.folderId()
+                );
+    
+        return ResponseEntity.ok(response);
+    }
+    
     private MediaType resolveContentType(
             String contentType
     ) {

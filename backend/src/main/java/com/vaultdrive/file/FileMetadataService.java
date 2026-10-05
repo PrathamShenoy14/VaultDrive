@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Set;
 import java.util.UUID;
+import java.util.Objects;
 
 @Service
 public class FileMetadataService {
@@ -77,6 +78,38 @@ public class FileMetadataService {
 
         file.rename(newName);
 
+        return storedFileRepository.saveAndFlush(file);
+    }
+
+    @Transactional
+    public StoredFile move(
+            StoredFile file,
+            UUID destinationFolderId
+    ) {
+        lockFileNamespace(file.getOwnerId());
+    
+        if (Objects.equals(
+                file.getFolderId(),
+                destinationFolderId
+        )) {
+            return file;
+        }
+    
+        boolean duplicate =
+                fileNameExists(
+                        file.getOwnerId(),
+                        destinationFolderId,
+                        file.getName()
+                );
+    
+        if (duplicate) {
+            throw new DuplicateFileNameException(
+                    "A file with this name already exists"
+            );
+        }
+    
+        file.move(destinationFolderId);
+    
         return storedFileRepository.saveAndFlush(file);
     }
 

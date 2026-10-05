@@ -1423,6 +1423,332 @@ class FileServiceTest {
         verifyNoInteractions(objectStorageService);
     }
 
+    @Test
+    void shouldMoveReadyFileToAccessibleFolder() {
+        UUID ownerId = UUID.randomUUID();
+        UUID sourceFolderId = UUID.randomUUID();
+        UUID destinationFolderId = UUID.randomUUID();
+    
+        StoredFile storedFile = createReadyFile(
+                ownerId,
+                sourceFolderId,
+                "report.pdf"
+        );
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        storedFile.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(storedFile));
+    
+        when(fileMetadataService.move(
+                storedFile,
+                destinationFolderId
+        )).thenAnswer(invocation -> {
+            storedFile.move(destinationFolderId);
+            return storedFile;
+        });
+    
+        FileResponse response =
+                fileService.moveFile(
+                        ownerId,
+                        storedFile.getId(),
+                        destinationFolderId
+                );
+    
+        assertEquals(
+                destinationFolderId,
+                response.folderId()
+        );
+    
+        assertEquals(
+                "report.pdf",
+                response.name()
+        );
+    
+        verify(folderAccessValidator)
+                .requireAccessibleFolder(
+                        ownerId,
+                        sourceFolderId
+                );
+    
+        verify(folderAccessValidator)
+                .requireAccessibleFolder(
+                        ownerId,
+                        destinationFolderId
+                );
+    
+        verify(fileMetadataService)
+                .move(
+                        storedFile,
+                        destinationFolderId
+                );
+    
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldMoveReadyFileToRoot() {
+        UUID ownerId = UUID.randomUUID();
+        UUID sourceFolderId = UUID.randomUUID();
+    
+        StoredFile storedFile = createReadyFile(
+                ownerId,
+                sourceFolderId,
+                "report.pdf"
+        );
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        storedFile.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(storedFile));
+    
+        when(fileMetadataService.move(
+                storedFile,
+                null
+        )).thenAnswer(invocation -> {
+            storedFile.move(null);
+            return storedFile;
+        });
+    
+        FileResponse response =
+                fileService.moveFile(
+                        ownerId,
+                        storedFile.getId(),
+                        null
+                );
+    
+        assertNull(response.folderId());
+    
+        verify(folderAccessValidator)
+                .requireAccessibleFolder(
+                        ownerId,
+                        sourceFolderId
+                );
+    
+        /*
+         * Destination is root, so validateFolderAccess()
+         * returns immediately and does not call the validator.
+         */
+        verify(folderAccessValidator, times(1))
+                .requireAccessibleFolder(
+                        ownerId,
+                        sourceFolderId
+                );
+    
+        verify(fileMetadataService)
+                .move(
+                        storedFile,
+                        null
+                );
+    
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldRejectMoveWhenSourceFolderIsInaccessible() {
+        UUID ownerId = UUID.randomUUID();
+        UUID sourceFolderId = UUID.randomUUID();
+        UUID destinationFolderId = UUID.randomUUID();
+    
+        StoredFile storedFile = createReadyFile(
+                ownerId,
+                sourceFolderId,
+                "secret.pdf"
+        );
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        storedFile.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(storedFile));
+    
+        when(folderAccessValidator.requireAccessibleFolder(
+                ownerId,
+                sourceFolderId
+        )).thenThrow(
+                new FolderNotFoundException(
+                        "Parent folder not found"
+                )
+        );
+    
+        assertThrows(
+                FolderNotFoundException.class,
+                () -> fileService.moveFile(
+                        ownerId,
+                        storedFile.getId(),
+                        destinationFolderId
+                )
+        );
+    
+        verify(folderAccessValidator)
+                .requireAccessibleFolder(
+                        ownerId,
+                        sourceFolderId
+                );
+    
+        verify(folderAccessValidator, never())
+                .requireAccessibleFolder(
+                        ownerId,
+                        destinationFolderId
+                );
+    
+        verifyNoInteractions(fileMetadataService);
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldRejectMoveWhenDestinationFolderIsInaccessible() {
+        UUID ownerId = UUID.randomUUID();
+        UUID sourceFolderId = UUID.randomUUID();
+        UUID destinationFolderId = UUID.randomUUID();
+    
+        StoredFile storedFile = createReadyFile(
+                ownerId,
+                sourceFolderId,
+                "report.pdf"
+        );
+        
+        Folder sourceFolder = mock(Folder.class);
+        
+        when(folderAccessValidator.requireAccessibleFolder(
+                ownerId,
+                sourceFolderId
+        )).thenReturn(sourceFolder);
+        
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        storedFile.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(storedFile));
+    
+        when(folderAccessValidator.requireAccessibleFolder(
+                ownerId,
+                destinationFolderId
+        )).thenThrow(
+                new FolderNotFoundException(
+                        "Folder not found"
+                )
+        );
+    
+        assertThrows(
+                FolderNotFoundException.class,
+                () -> fileService.moveFile(
+                        ownerId,
+                        storedFile.getId(),
+                        destinationFolderId
+                )
+        );
+    
+        verify(folderAccessValidator)
+                .requireAccessibleFolder(
+                        ownerId,
+                        sourceFolderId
+                );
+    
+        verify(folderAccessValidator)
+                .requireAccessibleFolder(
+                        ownerId,
+                        destinationFolderId
+                );
+    
+        verifyNoInteractions(fileMetadataService);
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldRejectMoveWhenFileIsNotVisible() {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+        UUID destinationFolderId = UUID.randomUUID();
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        fileId,
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.empty());
+    
+        FileNotFoundException exception =
+                assertThrows(
+                        FileNotFoundException.class,
+                        () -> fileService.moveFile(
+                                ownerId,
+                                fileId,
+                                destinationFolderId
+                        )
+                );
+    
+        assertEquals(
+                "File not found",
+                exception.getMessage()
+        );
+    
+        verifyNoInteractions(folderAccessValidator);
+        verifyNoInteractions(fileMetadataService);
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldAllowMoveToSameFolderAsNoOp() {
+        UUID ownerId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+    
+        StoredFile storedFile = createReadyFile(
+                ownerId,
+                folderId,
+                "report.pdf"
+        );
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        storedFile.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(storedFile));
+    
+        Folder folder = mock(Folder.class);
+    
+        when(folderAccessValidator.requireAccessibleFolder(
+                ownerId,
+                folderId
+        )).thenReturn(folder);
+    
+        when(fileMetadataService.move(
+                storedFile,
+                folderId
+        )).thenReturn(storedFile);
+    
+        FileResponse response =
+                fileService.moveFile(
+                        ownerId,
+                        storedFile.getId(),
+                        folderId
+                );
+    
+        assertEquals(folderId, response.folderId());
+        assertEquals("report.pdf", response.name());
+    
+        verify(fileMetadataService)
+                .move(
+                        storedFile,
+                        folderId
+                );
+    
+        verifyNoInteractions(objectStorageService);
+    }
+
     private StoredFile createReadyFile(
             UUID ownerId,
             UUID folderId,

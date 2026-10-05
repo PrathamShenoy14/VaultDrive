@@ -132,4 +132,9 @@ public class StoredFile {
         this.name = name;
         this.updatedAt = Instant.now();
     }
+
+    public void move(UUID folderId) {
+        this.folderId = folderId;
+        this.updatedAt = Instant.now();
+    }
 }

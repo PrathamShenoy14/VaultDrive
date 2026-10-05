@@ -193,69 +193,6 @@ public class FileService {
         );
     }
 
-    private FileResponse toFileResponse(
-            StoredFile storedFile
-    ) {
-        return new FileResponse(
-                storedFile.getId(),
-                storedFile.getName(),
-                storedFile.getFolderId(),
-                storedFile.getContentType(),
-                storedFile.getSizeBytes(),
-                storedFile.getCreatedAt(),
-                storedFile.getUpdatedAt()
-        );
-    }
-
-    private void validatePagination(
-            int page,
-            int size
-    ) {
-        if (page < 0) {
-            throw new InvalidFilePaginationException(
-                    "Page must be greater than or equal to 0"
-            );
-        }
-
-        if (size < 1 || size > MAX_PAGE_SIZE) {
-            throw new InvalidFilePaginationException(
-                    "Size must be between 1 and "
-                            + MAX_PAGE_SIZE
-            );
-        }
-    }
-
-    private void validateFolderAccess(
-            UUID ownerId,
-            UUID folderId
-    ) {
-        if (folderId == null) {
-            return;
-        }
-    
-        folderAccessValidator.requireAccessibleFolder(
-                ownerId,
-                folderId
-        );
-    }
-
-    private void markFailedSafely(
-            StoredFile storedFile
-    ) {
-        try {
-            fileMetadataService.markFailed(storedFile);
-
-        } catch (RuntimeException ignored) {
-
-            /*
-             * The original storage failure is more important.
-             *
-             * If updating FAILED also fails, the row may remain UPLOADING.
-             * A future reconciliation process can detect that state.
-             */
-        }
-    }
-
     public FileDownload downloadFile(
             UUID ownerId,
             UUID fileId
@@ -333,5 +270,105 @@ public class FileService {
                 );
     
         return toFileResponse(renamedFile);
+    }
+
+    public FileResponse moveFile(
+            UUID ownerId,
+            UUID fileId,
+            UUID destinationFolderId
+    ) {
+        StoredFile storedFile =
+                storedFileRepository
+                        .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                                fileId,
+                                ownerId,
+                                FileStatus.READY
+                        )
+                        .orElseThrow(() ->
+                                new FileNotFoundException("File not found")
+                        );
+    
+        // The source file must currently be accessible.
+        validateFolderAccess(
+                ownerId,
+                storedFile.getFolderId()
+        );
+    
+        // The destination must also be accessible.
+        validateFolderAccess(
+                ownerId,
+                destinationFolderId
+        );
+    
+        StoredFile movedFile =
+                fileMetadataService.move(
+                        storedFile,
+                        destinationFolderId
+                );
+    
+        return toFileResponse(movedFile);
+    }
+
+    private FileResponse toFileResponse(
+            StoredFile storedFile
+    ) {
+        return new FileResponse(
+                storedFile.getId(),
+                storedFile.getName(),
+                storedFile.getFolderId(),
+                storedFile.getContentType(),
+                storedFile.getSizeBytes(),
+                storedFile.getCreatedAt(),
+                storedFile.getUpdatedAt()
+        );
+    }
+
+    private void validatePagination(
+            int page,
+            int size
+    ) {
+        if (page < 0) {
+            throw new InvalidFilePaginationException(
+                    "Page must be greater than or equal to 0"
+            );
+        }
+
+        if (size < 1 || size > MAX_PAGE_SIZE) {
+            throw new InvalidFilePaginationException(
+                    "Size must be between 1 and "
+                            + MAX_PAGE_SIZE
+            );
+        }
+    }
+
+    private void validateFolderAccess(
+            UUID ownerId,
+            UUID folderId
+    ) {
+        if (folderId == null) {
+            return;
+        }
+    
+        folderAccessValidator.requireAccessibleFolder(
+                ownerId,
+                folderId
+        );
+    }
+
+    private void markFailedSafely(
+            StoredFile storedFile
+    ) {
+        try {
+            fileMetadataService.markFailed(storedFile);
+
+        } catch (RuntimeException ignored) {
+
+            /*
+             * The original storage failure is more important.
+             *
+             * If updating FAILED also fails, the row may remain UPLOADING.
+             * A future reconciliation process can detect that state.
+             */
+        }
     }
 }

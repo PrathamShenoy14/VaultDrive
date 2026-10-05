@@ -418,6 +418,184 @@ class FileMetadataServiceTest {
         verifyNoMoreInteractions(storedFileRepository);
     }
 
+    @Test
+    void shouldMoveFileToAnotherFolder() {
+        UUID sourceFolderId = UUID.randomUUID();
+        UUID destinationFolderId = UUID.randomUUID();
+    
+        StoredFile file = createFile(
+                sourceFolderId,
+                "report.pdf"
+        );
+
+        UUID ownerId = file.getOwnerId();
+    
+        when(userRepository.findByIdForUpdate(ownerId))
+                .thenReturn(Optional.of(mock(User.class)));
+    
+        when(storedFileRepository
+                .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusIn(
+                        eq(ownerId),
+                        eq(destinationFolderId),
+                        eq("report.pdf"),
+                        anyCollection()
+                ))
+                .thenReturn(false);
+    
+        when(storedFileRepository.saveAndFlush(file))
+                .thenReturn(file);
+    
+        StoredFile result =
+                fileMetadataService.move(
+                        file,
+                        destinationFolderId
+                );
+    
+        assertSame(file, result);
+        assertEquals(
+                destinationFolderId,
+                file.getFolderId()
+        );
+    
+        verify(userRepository)
+                .findByIdForUpdate(ownerId);
+    
+        verify(storedFileRepository)
+                .saveAndFlush(file);
+    }
+
+    @Test
+    void shouldMoveFileToRoot() {
+        UUID sourceFolderId = UUID.randomUUID();
+    
+        StoredFile file = createFile(
+                sourceFolderId,
+                "report.pdf"
+        );
+
+        UUID ownerId = file.getOwnerId();
+    
+        when(userRepository.findByIdForUpdate(ownerId))
+                .thenReturn(Optional.of(mock(User.class)));
+    
+        when(storedFileRepository
+                .existsByOwnerIdAndFolderIdIsNullAndNameAndDeletedAtIsNullAndStatusIn(
+                        eq(ownerId),
+                        eq("report.pdf"),
+                        anyCollection()
+                ))
+                .thenReturn(false);
+    
+        when(storedFileRepository.saveAndFlush(file))
+                .thenReturn(file);
+    
+        StoredFile result =
+                fileMetadataService.move(
+                        file,
+                        null
+                );
+    
+        assertSame(file, result);
+        assertNull(file.getFolderId());
+    
+        verify(storedFileRepository)
+                .existsByOwnerIdAndFolderIdIsNullAndNameAndDeletedAtIsNullAndStatusIn(
+                        eq(ownerId),
+                        eq("report.pdf"),
+                        anyCollection()
+                );
+    
+        verify(storedFileRepository)
+                .saveAndFlush(file);
+    }
+
+    @Test
+    void shouldRejectMoveWhenDestinationContainsDuplicateFileName() {
+        UUID sourceFolderId = UUID.randomUUID();
+        UUID destinationFolderId = UUID.randomUUID();
+    
+        StoredFile file = createFile(
+                sourceFolderId,
+                "report.pdf"
+        );
+
+        UUID ownerId = file.getOwnerId();
+    
+        when(userRepository.findByIdForUpdate(ownerId))
+                .thenReturn(Optional.of(mock(User.class)));
+    
+        when(storedFileRepository
+                .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusIn(
+                        eq(ownerId),
+                        eq(destinationFolderId),
+                        eq("report.pdf"),
+                        anyCollection()
+                ))
+                .thenReturn(true);
+    
+        assertThrows(
+                DuplicateFileNameException.class,
+                () -> fileMetadataService.move(
+                        file,
+                        destinationFolderId
+                )
+        );
+    
+        // The entity must remain in its original folder.
+        assertEquals(
+                sourceFolderId,
+                file.getFolderId()
+        );
+    
+        verify(storedFileRepository, never())
+                .saveAndFlush(any(StoredFile.class));
+    }
+
+    @Test
+    void shouldTreatMoveToSameFolderAsNoOp() {
+        UUID folderId = UUID.randomUUID();
+    
+        StoredFile file = createFile(
+                folderId,
+                "report.pdf"
+        );
+
+        UUID ownerId = file.getOwnerId();
+    
+        when(userRepository.findByIdForUpdate(ownerId))
+                .thenReturn(Optional.of(mock(User.class)));
+    
+        StoredFile result =
+                fileMetadataService.move(
+                        file,
+                        folderId
+                );
+    
+        assertSame(file, result);
+        assertEquals(folderId, file.getFolderId());
+    
+        verify(userRepository)
+                .findByIdForUpdate(ownerId);
+    
+        verify(storedFileRepository, never())
+                .saveAndFlush(any(StoredFile.class));
+    
+        verify(storedFileRepository, never())
+                .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusIn(
+                        any(),
+                        any(),
+                        anyString(),
+                        anyCollection()
+                );
+    
+        verify(storedFileRepository, never())
+                .existsByOwnerIdAndFolderIdIsNullAndNameAndDeletedAtIsNullAndStatusIn(
+                        any(),
+                        anyString(),
+                        anyCollection()
+                );
+    }
+
     private StoredFile createFile(
             UUID folderId,
             String name

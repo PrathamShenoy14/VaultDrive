@@ -847,4 +847,212 @@ class FileControllerTest {
                 "report.txt"
         );
     }
+
+    @Test
+    void shouldMoveFileToFolder() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+        UUID destinationFolderId = UUID.randomUUID();
+    
+        FileResponse response = new FileResponse(
+                fileId,
+                "report.pdf",
+                destinationFolderId,
+                "application/pdf",
+                100L,
+                Instant.now(),
+                Instant.now()
+        );
+    
+        when(fileService.moveFile(
+                ownerId,
+                fileId,
+                destinationFolderId
+        )).thenReturn(response);
+    
+        mockMvc.perform(
+                        patch("/api/v1/files/{fileId}/move", fileId)
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                        {
+                                          "folderId": "%s"
+                                        }
+                                        """.formatted(destinationFolderId))
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(fileId.toString()))
+                .andExpect(jsonPath("$.name").value("report.pdf"))
+                .andExpect(jsonPath("$.folderId")
+                        .value(destinationFolderId.toString()));
+    
+        verify(fileService).moveFile(
+                ownerId,
+                fileId,
+                destinationFolderId
+        );
+    }
+
+    @Test
+    void shouldMoveFileToRoot() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        FileResponse response = new FileResponse(
+                fileId,
+                "report.pdf",
+                null,
+                "application/pdf",
+                100L,
+                Instant.now(),
+                Instant.now()
+        );
+    
+        when(fileService.moveFile(
+                ownerId,
+                fileId,
+                null
+        )).thenReturn(response);
+    
+        mockMvc.perform(
+                        patch("/api/v1/files/{fileId}/move", fileId)
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                        {
+                                          "folderId": null
+                                        }
+                                        """)
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(fileId.toString()))
+                .andExpect(jsonPath("$.name").value("report.pdf"))
+                .andExpect(jsonPath("$.folderId").doesNotExist());
+    
+        verify(fileService).moveFile(
+                ownerId,
+                fileId,
+                null
+        );
+    }
+
+    @Test
+    void shouldReturnConflictWhenMoveCausesDuplicateFileName() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+        UUID destinationFolderId = UUID.randomUUID();
+    
+        when(fileService.moveFile(
+                ownerId,
+                fileId,
+                destinationFolderId
+        )).thenThrow(
+                new DuplicateFileNameException(
+                        "A file with this name already exists"
+                )
+        );
+    
+        mockMvc.perform(
+                        patch("/api/v1/files/{fileId}/move", fileId)
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                        {
+                                          "folderId": "%s"
+                                        }
+                                        """.formatted(destinationFolderId))
+                )
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.error").value("Conflict"))
+                .andExpect(jsonPath("$.message")
+                        .value("A file with this name already exists"));
+    }
+
+    @Test
+    void shouldReturnNotFoundWhenMovingInvisibleFile() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+        UUID destinationFolderId = UUID.randomUUID();
+    
+        when(fileService.moveFile(
+                ownerId,
+                fileId,
+                destinationFolderId
+        )).thenThrow(
+                new FileNotFoundException("File not found")
+        );
+    
+        mockMvc.perform(
+                        patch("/api/v1/files/{fileId}/move", fileId)
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                        {
+                                          "folderId": "%s"
+                                        }
+                                        """.formatted(destinationFolderId))
+                )
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.message").value("File not found"));
+    }
+
+    @Test
+    void shouldReturnNotFoundWhenMoveFolderIsInaccessible() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+        UUID destinationFolderId = UUID.randomUUID();
+    
+        when(fileService.moveFile(
+                ownerId,
+                fileId,
+                destinationFolderId
+        )).thenThrow(
+                new FolderNotFoundException("Folder not found")
+        );
+    
+        mockMvc.perform(
+                        patch("/api/v1/files/{fileId}/move", fileId)
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                        {
+                                          "folderId": "%s"
+                                        }
+                                        """.formatted(destinationFolderId))
+                )
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.message").value("Folder not found"));
+    }
+
+    @Test
+    void shouldRejectUnauthenticatedFileMove() throws Exception {
+        UUID fileId = UUID.randomUUID();
+        UUID destinationFolderId = UUID.randomUUID();
+    
+        mockMvc.perform(
+                        patch("/api/v1/files/{fileId}/move", fileId)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                        {
+                                          "folderId": "%s"
+                                        }
+                                        """.formatted(destinationFolderId))
+                )
+                .andExpect(status().isUnauthorized());
+    
+        verifyNoInteractions(fileService);
+    }
 }
