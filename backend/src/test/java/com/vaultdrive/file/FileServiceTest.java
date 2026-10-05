@@ -17,6 +17,7 @@ import com.vaultdrive.file.dto.FilePageResponse;
 import com.vaultdrive.file.dto.FileResponse;
 import com.vaultdrive.file.exception.InvalidFilePaginationException;
 
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -1746,6 +1747,485 @@ class FileServiceTest {
                         folderId
                 );
     
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldTrashReadyRootFile() {
+        UUID ownerId = UUID.randomUUID();
+    
+        StoredFile storedFile =
+                createReadyFile(
+                        ownerId,
+                        null,
+                        "report.pdf"
+                );
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        storedFile.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(storedFile));
+    
+        storedFile.softDelete();
+    
+        when(fileMetadataService.softDelete(storedFile))
+                .thenReturn(storedFile);
+    
+        FileResponse response =
+                fileService.trashFile(
+                        ownerId,
+                        storedFile.getId()
+                );
+    
+        assertEquals(storedFile.getId(), response.id());
+        assertEquals("report.pdf", response.name());
+        assertNull(response.folderId());
+    
+        verify(fileMetadataService)
+                .softDelete(storedFile);
+    
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldTrashReadyFileInsideAccessibleFolder() {
+        UUID ownerId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+    
+        StoredFile storedFile =
+                createReadyFile(
+                        ownerId,
+                        folderId,
+                        "report.pdf"
+                );
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        storedFile.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(storedFile));
+    
+        Folder folder = mock(Folder.class);
+    
+        when(folderAccessValidator.requireAccessibleFolder(
+                ownerId,
+                folderId
+        )).thenReturn(folder);
+    
+        storedFile.softDelete();
+    
+        when(fileMetadataService.softDelete(storedFile))
+                .thenReturn(storedFile);
+    
+        FileResponse response =
+                fileService.trashFile(
+                        ownerId,
+                        storedFile.getId()
+                );
+    
+        assertEquals(storedFile.getId(), response.id());
+        assertEquals(folderId, response.folderId());
+    
+        verify(folderAccessValidator)
+                .requireAccessibleFolder(
+                        ownerId,
+                        folderId
+                );
+    
+        verify(fileMetadataService)
+                .softDelete(storedFile);
+    
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldRejectTrashWhenFileIsNotVisible() {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        fileId,
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.empty());
+    
+        FileNotFoundException exception =
+                assertThrows(
+                        FileNotFoundException.class,
+                        () -> fileService.trashFile(
+                                ownerId,
+                                fileId
+                        )
+                );
+    
+        assertEquals(
+                "File not found",
+                exception.getMessage()
+        );
+    
+        verifyNoInteractions(folderAccessValidator);
+        verifyNoInteractions(fileMetadataService);
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldRejectTrashWhenParentFolderIsInaccessible() {
+        UUID ownerId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+    
+        StoredFile storedFile =
+                createReadyFile(
+                        ownerId,
+                        folderId,
+                        "report.pdf"
+                );
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        storedFile.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(storedFile));
+    
+        when(folderAccessValidator.requireAccessibleFolder(
+                ownerId,
+                folderId
+        )).thenThrow(
+                new FolderNotFoundException("Folder not found")
+        );
+    
+        FolderNotFoundException exception =
+                assertThrows(
+                        FolderNotFoundException.class,
+                        () -> fileService.trashFile(
+                                ownerId,
+                                storedFile.getId()
+                        )
+                );
+    
+        assertEquals(
+                "Folder not found",
+                exception.getMessage()
+        );
+    
+        verify(folderAccessValidator)
+                .requireAccessibleFolder(
+                        ownerId,
+                        folderId
+                );
+    
+        verifyNoInteractions(fileMetadataService);
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldListTrashedFilesForOwner() {
+        UUID ownerId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+    
+        StoredFile first =
+                createReadyFile(
+                        ownerId,
+                        folderId,
+                        "alpha.pdf"
+                );
+    
+        StoredFile second =
+                createReadyFile(
+                        ownerId,
+                        null,
+                        "bravo.pdf"
+                );
+    
+        first.softDelete();
+        second.softDelete();
+    
+        Page<StoredFile> page =
+                new PageImpl<>(
+                        List.of(first, second),
+                        PageRequest.of(
+                                0,
+                                50,
+                                Sort.by("name").ascending()
+                        ),
+                        2
+                );
+    
+        when(storedFileRepository
+                .findByOwnerIdAndStatusAndDeletedAtIsNotNull(
+                        eq(ownerId),
+                        eq(FileStatus.READY),
+                        any(Pageable.class)
+                ))
+                .thenReturn(page);
+    
+        FilePageResponse response =
+                fileService.listTrash(
+                        ownerId,
+                        0,
+                        50
+                );
+    
+        assertEquals(2, response.content().size());
+        assertEquals(2, response.totalElements());
+        assertEquals(1, response.totalPages());
+    
+        assertEquals(
+                "alpha.pdf",
+                response.content().get(0).name()
+        );
+    
+        assertEquals(
+                "bravo.pdf",
+                response.content().get(1).name()
+        );
+    
+        verifyNoInteractions(folderAccessValidator);
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldRejectInvalidTrashPageSize() {
+        UUID ownerId = UUID.randomUUID();
+    
+        assertThrows(
+                InvalidFilePaginationException.class,
+                () -> fileService.listTrash(
+                        ownerId,
+                        0,
+                        101
+                )
+        );
+    
+        verifyNoInteractions(storedFileRepository);
+        verifyNoInteractions(folderAccessValidator);
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldRestoreFileToRootWhenOriginalFolderIsInaccessible() {
+        UUID ownerId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+    
+        StoredFile storedFile =
+                createReadyFile(
+                        ownerId,
+                        folderId,
+                        "report.pdf"
+                );
+    
+        storedFile.softDelete();
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNull(
+                        storedFile.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(storedFile));
+    
+        when(folderAccessValidator.requireAccessibleFolder(
+                ownerId,
+                folderId
+        )).thenThrow(
+                new FolderNotFoundException("Folder not found")
+        );
+    
+        when(fileMetadataService.restore(
+                storedFile,
+                null
+        )).thenAnswer(invocation -> {
+            storedFile.restore(
+                    null,
+                    storedFile.getName()
+            );
+            return storedFile;
+        });
+    
+        FileResponse response =
+                fileService.restoreFile(
+                        ownerId,
+                        storedFile.getId()
+                );
+    
+        assertNull(response.folderId());
+        assertEquals("report.pdf", response.name());
+    
+        verify(folderAccessValidator)
+                .requireAccessibleFolder(
+                        ownerId,
+                        folderId
+                );
+    
+        verify(fileMetadataService)
+                .restore(
+                        storedFile,
+                        null
+                );
+    
+        verifyNoInteractions(objectStorageService);
+    }
+    
+    @Test
+    void shouldRestoreRootFileToRoot() {
+        UUID ownerId = UUID.randomUUID();
+    
+        StoredFile storedFile =
+                createReadyFile(
+                        ownerId,
+                        null,
+                        "report.pdf"
+                );
+    
+        storedFile.softDelete();
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNull(
+                        storedFile.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(storedFile));
+    
+        when(fileMetadataService.restore(
+                storedFile,
+                null
+        )).thenAnswer(invocation -> {
+            storedFile.restore(
+                    null,
+                    storedFile.getName()
+            );
+            return storedFile;
+        });
+    
+        FileResponse response =
+                fileService.restoreFile(
+                        ownerId,
+                        storedFile.getId()
+                );
+    
+        assertNull(response.folderId());
+        assertEquals("report.pdf", response.name());
+    
+        verifyNoInteractions(folderAccessValidator);
+    
+        verify(fileMetadataService)
+                .restore(
+                        storedFile,
+                        null
+                );
+    
+        verifyNoInteractions(objectStorageService);
+    }
+    
+    @Test
+    void shouldRestoreFileToAccessibleOriginalFolder() {
+        UUID ownerId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+    
+        StoredFile storedFile =
+                createReadyFile(
+                        ownerId,
+                        folderId,
+                        "report.pdf"
+                );
+    
+        storedFile.softDelete();
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNull(
+                        storedFile.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(storedFile));
+    
+        Folder folder = mock(Folder.class);
+    
+        when(folderAccessValidator.requireAccessibleFolder(
+                ownerId,
+                folderId
+        )).thenReturn(folder);
+    
+        when(fileMetadataService.restore(
+                storedFile,
+                folderId
+        )).thenAnswer(invocation -> {
+            storedFile.restore(
+                    folderId,
+                    storedFile.getName()
+            );
+            return storedFile;
+        });
+    
+        FileResponse response =
+                fileService.restoreFile(
+                        ownerId,
+                        storedFile.getId()
+                );
+    
+        assertEquals(
+                folderId,
+                response.folderId()
+        );
+    
+        assertEquals(
+                "report.pdf",
+                response.name()
+        );
+    
+        verify(folderAccessValidator)
+                .requireAccessibleFolder(
+                        ownerId,
+                        folderId
+                );
+    
+        verify(fileMetadataService)
+                .restore(
+                        storedFile,
+                        folderId
+                );
+    
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldRejectRestoreWhenFileIsNotInTrash() {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNull(
+                        fileId,
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.empty());
+    
+        FileNotFoundException exception =
+                assertThrows(
+                        FileNotFoundException.class,
+                        () -> fileService.restoreFile(
+                                ownerId,
+                                fileId
+                        )
+                );
+    
+        assertEquals(
+                "File not found",
+                exception.getMessage()
+        );
+    
+        verifyNoInteractions(folderAccessValidator);
+        verifyNoInteractions(fileMetadataService);
         verifyNoInteractions(objectStorageService);
     }
 

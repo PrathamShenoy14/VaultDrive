@@ -62,4 +62,17 @@ public interface StoredFileRepository
             UUID ownerId,
             FileStatus status
     );
+
+    Page<StoredFile> findByOwnerIdAndStatusAndDeletedAtIsNotNull(
+            UUID ownerId,
+            FileStatus status,
+            Pageable pageable
+    );
+
+    Optional<StoredFile>
+    findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNull(
+            UUID id,
+            UUID ownerId,
+            FileStatus status
+    );
 }

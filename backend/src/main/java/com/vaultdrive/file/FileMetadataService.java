@@ -114,6 +114,37 @@ public class FileMetadataService {
     }
 
     @Transactional
+    public StoredFile softDelete(StoredFile file) {
+        lockFileNamespace(file.getOwnerId());
+    
+        file.softDelete();
+    
+        return storedFileRepository.saveAndFlush(file);
+    }
+
+    @Transactional
+    public StoredFile restore(
+            StoredFile file,
+            UUID destinationFolderId
+    ) {
+        lockFileNamespace(file.getOwnerId());
+    
+        String restoredName =
+                generateRestoredName(
+                        file.getOwnerId(),
+                        destinationFolderId,
+                        file.getName()
+                );
+    
+        file.restore(
+                destinationFolderId,
+                restoredName
+        );
+    
+        return storedFileRepository.saveAndFlush(file);
+    }
+
+    @Transactional
     public void markReady(StoredFile file) {
         file.markReady();
         storedFileRepository.saveAndFlush(file);
@@ -181,5 +212,70 @@ public class FileMetadataService {
                                 "User not found"
                         )
                 );
+    }
+
+    private String generateRestoredName(
+            UUID ownerId,
+            UUID folderId,
+            String originalName
+    ) {
+        if (!fileNameExists(
+                ownerId,
+                folderId,
+                originalName
+        )) {
+            return originalName;
+        }
+    
+        String baseName = originalName;
+        String extension = "";
+    
+        int lastDot = originalName.lastIndexOf('.');
+    
+        // ".env" is treated as extensionless.
+        // "file." is also treated as extensionless.
+        if (lastDot > 0 && lastDot < originalName.length() - 1) {
+            baseName = originalName.substring(0, lastDot);
+            extension = originalName.substring(lastDot);
+        }
+    
+        int suffix = 1;
+    
+        while (true) {
+            String suffixText =
+                    suffix == 1
+                            ? " (restored)"
+                            : " (restored " + suffix + ")";
+    
+            // name column is VARCHAR(255)
+            int maximumBaseLength =
+                    255
+                            - suffixText.length()
+                            - extension.length();
+    
+            String truncatedBase =
+                    baseName.substring(
+                            0,
+                            Math.min(
+                                    baseName.length(),
+                                    maximumBaseLength
+                            )
+                    );
+    
+            String candidate =
+                    truncatedBase
+                            + suffixText
+                            + extension;
+    
+            if (!fileNameExists(
+                    ownerId,
+                    folderId,
+                    candidate
+            )) {
+                return candidate;
+            }
+    
+            suffix++;
+        }
     }
 }

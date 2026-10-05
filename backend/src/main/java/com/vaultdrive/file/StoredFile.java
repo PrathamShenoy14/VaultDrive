@@ -137,4 +137,23 @@ public class StoredFile {
         this.folderId = folderId;
         this.updatedAt = Instant.now();
     }
+
+    public void softDelete() {
+        Instant now = Instant.now();
+    
+        this.deletedAt = now;
+        this.updatedAt = now;
+    }
+
+    public void restore(
+            UUID destinationFolderId,
+            String restoredName
+    ) {
+        Instant now = Instant.now();
+    
+        this.folderId = destinationFolderId;
+        this.name = restoredName;
+        this.deletedAt = null;
+        this.updatedAt = now;
+    }
 }

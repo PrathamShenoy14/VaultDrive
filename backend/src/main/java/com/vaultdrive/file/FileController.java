@@ -16,6 +16,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -164,6 +165,57 @@ public class FileController {
                         ownerId,
                         fileId,
                         request.folderId()
+                );
+    
+        return ResponseEntity.ok(response);
+    }
+
+    @DeleteMapping("/{fileId}")
+    public ResponseEntity<Void> trashFile(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID fileId
+    ) {
+        UUID ownerId =
+                UUID.fromString(jwt.getSubject());
+    
+        fileService.trashFile(
+                ownerId,
+                fileId
+        );
+    
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/trash")
+    public ResponseEntity<FilePageResponse> listTrash(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size
+    ) {
+        UUID ownerId =
+                UUID.fromString(jwt.getSubject());
+    
+        FilePageResponse response =
+                fileService.listTrash(
+                        ownerId,
+                        page,
+                        size
+                );
+    
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{fileId}/restore")
+    public ResponseEntity<FileResponse> restoreFile(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID fileId
+    ) {
+        UUID ownerId = UUID.fromString(jwt.getSubject());
+    
+        FileResponse response =
+                fileService.restoreFile(
+                        ownerId,
+                        fileId
                 );
     
         return ResponseEntity.ok(response);

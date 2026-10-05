@@ -34,7 +34,9 @@ import static org.mockito.Mockito.*;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -1050,6 +1052,339 @@ class FileControllerTest {
                                           "folderId": "%s"
                                         }
                                         """.formatted(destinationFolderId))
+                )
+                .andExpect(status().isUnauthorized());
+    
+        verifyNoInteractions(fileService);
+    }
+
+    @Test
+    void shouldTrashFile() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        mockMvc.perform(
+                        delete("/api/v1/files/{fileId}", fileId)
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                )
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+    
+        verify(fileService).trashFile(
+                ownerId,
+                fileId
+        );
+    }
+
+    @Test
+    void shouldReturnNotFoundWhenTrashingInvisibleFile() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        when(fileService.trashFile(
+                ownerId,
+                fileId
+        )).thenThrow(
+                new FileNotFoundException("File not found")
+        );
+    
+        mockMvc.perform(
+                        delete("/api/v1/files/{fileId}", fileId)
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                )
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"))
+                .andExpect(jsonPath("$.message").value("File not found"));
+    }
+
+    @Test
+    void shouldReturnNotFoundWhenTrashingFileInInaccessibleFolder() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        when(fileService.trashFile(
+                ownerId,
+                fileId
+        )).thenThrow(
+                new FolderNotFoundException("Folder not found")
+        );
+    
+        mockMvc.perform(
+                        delete("/api/v1/files/{fileId}", fileId)
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                )
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"))
+                .andExpect(jsonPath("$.message").value("Folder not found"));
+    }
+
+    @Test
+    void shouldRejectUnauthenticatedFileTrash() throws Exception {
+        UUID fileId = UUID.randomUUID();
+    
+        mockMvc.perform(
+                        delete("/api/v1/files/{fileId}", fileId)
+                )
+                .andExpect(status().isUnauthorized());
+    
+        verifyNoInteractions(fileService);
+    }
+
+    @Test
+    void shouldListTrashedFilesWithDefaultPagination() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        FileResponse file = new FileResponse(
+                fileId,
+                "report.pdf",
+                null,
+                "application/pdf",
+                100L,
+                Instant.now(),
+                Instant.now()
+        );
+    
+        FilePageResponse response = new FilePageResponse(
+                List.of(file),
+                0,
+                50,
+                1,
+                1
+        );
+    
+        when(fileService.listTrash(
+                ownerId,
+                0,
+                50
+        )).thenReturn(response);
+    
+        mockMvc.perform(
+                        get("/api/v1/files/trash")
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].id")
+                        .value(fileId.toString()))
+                .andExpect(jsonPath("$.content[0].name")
+                        .value("report.pdf"))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(50))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.totalPages").value(1));
+    
+        verify(fileService).listTrash(
+                ownerId,
+                0,
+                50
+        );
+    }
+
+    @Test
+    void shouldListTrashedFilesWithCustomPagination() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+    
+        FilePageResponse response = new FilePageResponse(
+                List.of(),
+                2,
+                20,
+                0,
+                0
+        );
+    
+        when(fileService.listTrash(
+                ownerId,
+                2,
+                20
+        )).thenReturn(response);
+    
+        mockMvc.perform(
+                        get("/api/v1/files/trash")
+                                .param("page", "2")
+                                .param("size", "20")
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(0))
+                .andExpect(jsonPath("$.page").value(2))
+                .andExpect(jsonPath("$.size").value(20));
+    
+        verify(fileService).listTrash(
+                ownerId,
+                2,
+                20
+        );
+    }
+
+    @Test
+    void shouldReturnBadRequestForInvalidTrashPagination() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+    
+        when(fileService.listTrash(
+                ownerId,
+                0,
+                101
+        )).thenThrow(
+                new InvalidFilePaginationException(
+                        "Size must be between 1 and 100"
+                )
+        );
+    
+        mockMvc.perform(
+                        get("/api/v1/files/trash")
+                                .param("size", "101")
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                )
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message")
+                        .value("Size must be between 1 and 100"));
+    }
+
+    @Test
+    void shouldRejectUnauthenticatedTrashListing() throws Exception {
+        mockMvc.perform(
+                        get("/api/v1/files/trash")
+                )
+                .andExpect(status().isUnauthorized());
+    
+        verifyNoInteractions(fileService);
+    }
+
+    @Test
+    void shouldRestoreFile() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+    
+        FileResponse response =
+                new FileResponse(
+                        fileId,
+                        "report.pdf",
+                        folderId,
+                        "application/pdf",
+                        1024L,
+                        Instant.parse("2026-10-06T00:00:00Z"),
+                        Instant.parse("2026-10-06T00:10:00Z")
+                );
+    
+        when(fileService.restoreFile(
+                ownerId,
+                fileId
+        )).thenReturn(response);
+    
+        mockMvc.perform(
+                        post("/api/v1/files/{fileId}/restore", fileId)
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(fileId.toString()))
+                .andExpect(jsonPath("$.name").value("report.pdf"))
+                .andExpect(jsonPath("$.folderId").value(folderId.toString()))
+                .andExpect(jsonPath("$.contentType").value("application/pdf"))
+                .andExpect(jsonPath("$.sizeBytes").value(1024));
+    
+        verify(fileService)
+                .restoreFile(
+                        ownerId,
+                        fileId
+                );
+    }
+
+    @Test
+    void shouldReturnAutomaticallyRenamedFileAfterRestore() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+    
+        FileResponse response =
+                new FileResponse(
+                        fileId,
+                        "report (restored).pdf",
+                        folderId,
+                        "application/pdf",
+                        1024L,
+                        Instant.parse("2026-10-06T00:00:00Z"),
+                        Instant.parse("2026-10-06T00:10:00Z")
+                );
+    
+        when(fileService.restoreFile(
+                ownerId,
+                fileId
+        )).thenReturn(response);
+    
+        mockMvc.perform(
+                        post("/api/v1/files/{fileId}/restore", fileId)
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(fileId.toString()))
+                .andExpect(jsonPath("$.name")
+                        .value("report (restored).pdf"))
+                .andExpect(jsonPath("$.folderId")
+                        .value(folderId.toString()));
+    
+        verify(fileService)
+                .restoreFile(
+                        ownerId,
+                        fileId
+                );
+    }
+
+    @Test
+    void shouldReturnNotFoundWhenRestoringInvisibleFile() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+    
+        when(fileService.restoreFile(
+                ownerId,
+                fileId
+        )).thenThrow(
+                new FileNotFoundException("File not found")
+        );
+    
+        mockMvc.perform(
+                        post("/api/v1/files/{fileId}/restore", fileId)
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                )
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.message").value("File not found"));
+    
+        verify(fileService)
+                .restoreFile(
+                        ownerId,
+                        fileId
+                );
+    }
+
+    @Test
+    void shouldRejectUnauthenticatedFileRestore() throws Exception {
+        UUID fileId = UUID.randomUUID();
+    
+        mockMvc.perform(
+                        post("/api/v1/files/{fileId}/restore", fileId)
                 )
                 .andExpect(status().isUnauthorized());
     

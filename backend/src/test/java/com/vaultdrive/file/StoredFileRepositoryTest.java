@@ -728,6 +728,109 @@ class StoredFileRepositoryTest {
         assertTrue(exists);
     }
 
+    @Test
+    void shouldListOnlyReadyTrashedFilesForOwner() {
+        User owner =
+                createUser("trash-listing-owner@example.com");
+    
+        User otherOwner =
+                createUser("trash-listing-other@example.com");
+    
+        Folder folder =
+                createFolder(
+                        owner.getId(),
+                        "Documents"
+                );
+    
+        // Should be included:
+        // READY + deleted + correct owner
+        StoredFile trashedReady =
+                createFile(
+                        owner.getId(),
+                        folder.getId(),
+                        "trashed.pdf"
+                );
+    
+        trashedReady.markReady();
+        trashedReady.softDelete();
+    
+        // Should NOT be included:
+        // READY but still active
+        StoredFile activeReady =
+                createFile(
+                        owner.getId(),
+                        folder.getId(),
+                        "active.pdf"
+                );
+    
+        activeReady.markReady();
+    
+        // Should NOT be included:
+        // FAILED + deleted
+        StoredFile trashedFailed =
+                createFile(
+                        owner.getId(),
+                        folder.getId(),
+                        "failed.pdf"
+                );
+    
+        trashedFailed.markFailed();
+        trashedFailed.softDelete();
+    
+        // Should NOT be included:
+        // another user's READY + deleted file
+        StoredFile otherUsersTrashedFile =
+                createFile(
+                        otherOwner.getId(),
+                        null,
+                        "other.pdf"
+                );
+    
+        otherUsersTrashedFile.markReady();
+        otherUsersTrashedFile.softDelete();
+    
+        storedFileRepository.saveAllAndFlush(
+                java.util.List.of(
+                        trashedReady,
+                        activeReady,
+                        trashedFailed,
+                        otherUsersTrashedFile
+                )
+        );
+    
+        Page<StoredFile> result =
+                storedFileRepository
+                        .findByOwnerIdAndStatusAndDeletedAtIsNotNull(
+                                owner.getId(),
+                                FileStatus.READY,
+                                PageRequest.of(
+                                        0,
+                                        50,
+                                        Sort.by("name").ascending()
+                                )
+                        );
+    
+        assertEquals(1, result.getTotalElements());
+        assertEquals(1, result.getContent().size());
+    
+        StoredFile resultFile =
+                result.getContent().getFirst();
+    
+        assertEquals(
+                trashedReady.getId(),
+                resultFile.getId()
+        );
+    
+        assertEquals(
+                "trashed.pdf",
+                resultFile.getName()
+        );
+    
+        assertNotNull(
+                resultFile.getDeletedAt()
+        );
+    }
+
     private User createUser(String email) {
         User user = new User(
                 email,

@@ -13,6 +13,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -594,6 +595,376 @@ class FileMetadataServiceTest {
                         anyString(),
                         anyCollection()
                 );
+    }
+
+    @Test
+    void shouldSoftDeleteFile() {
+        UUID folderId = UUID.randomUUID();
+    
+        StoredFile file =
+                createFile(folderId, "report.pdf");
+    
+        UUID ownerId = file.getOwnerId();
+    
+        assertNull(file.getDeletedAt());
+    
+        when(userRepository.findByIdForUpdate(ownerId))
+                .thenReturn(Optional.of(mock(User.class)));
+    
+        when(storedFileRepository.saveAndFlush(file))
+                .thenReturn(file);
+    
+        StoredFile result =
+                fileMetadataService.softDelete(file);
+    
+        assertNotNull(result.getDeletedAt());
+        assertEquals(file, result);
+    
+        verify(userRepository)
+                .findByIdForUpdate(ownerId);
+    
+        verify(storedFileRepository)
+                .saveAndFlush(file);
+    }
+
+    @Test
+    void shouldRestoreFileToOriginalFolder() {
+        UUID folderId = UUID.randomUUID();
+    
+        StoredFile file =
+                createFile(
+                        folderId,
+                        "report.pdf"
+                );
+    
+        UUID ownerId = file.getOwnerId();
+    
+        file.softDelete();
+    
+        when(userRepository.findByIdForUpdate(ownerId))
+                .thenReturn(Optional.of(mock(User.class)));
+    
+        when(storedFileRepository
+                .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusIn(
+                        ownerId,
+                        folderId,
+                        "report.pdf",
+                        Set.of(
+                                FileStatus.UPLOADING,
+                                FileStatus.READY
+                        )
+                ))
+                .thenReturn(false);
+    
+        when(storedFileRepository.saveAndFlush(file))
+                .thenReturn(file);
+    
+        StoredFile restored =
+                fileMetadataService.restore(
+                        file,
+                        folderId
+                );
+    
+        assertEquals(
+                "report.pdf",
+                restored.getName()
+        );
+    
+        assertEquals(
+                folderId,
+                restored.getFolderId()
+        );
+    
+        assertNull(restored.getDeletedAt());
+    
+        verify(storedFileRepository)
+                .saveAndFlush(file);
+    }
+
+    @Test
+    void shouldRestoreFileToRoot() {
+        UUID originalFolderId = UUID.randomUUID();
+    
+        StoredFile file =
+                createFile(
+                        originalFolderId,
+                        "report.pdf"
+                );
+    
+        UUID ownerId = file.getOwnerId();
+    
+        file.softDelete();
+    
+        when(userRepository.findByIdForUpdate(ownerId))
+                .thenReturn(Optional.of(mock(User.class)));
+    
+        when(storedFileRepository
+                .existsByOwnerIdAndFolderIdIsNullAndNameAndDeletedAtIsNullAndStatusIn(
+                        ownerId,
+                        "report.pdf",
+                        Set.of(
+                                FileStatus.UPLOADING,
+                                FileStatus.READY
+                        )
+                ))
+                .thenReturn(false);
+    
+        when(storedFileRepository.saveAndFlush(file))
+                .thenReturn(file);
+    
+        StoredFile restored =
+                fileMetadataService.restore(
+                        file,
+                        null
+                );
+    
+        assertEquals(
+                "report.pdf",
+                restored.getName()
+        );
+    
+        assertNull(restored.getFolderId());
+        assertNull(restored.getDeletedAt());
+    
+        verify(storedFileRepository)
+                .saveAndFlush(file);
+    }
+
+    @Test
+    void shouldAutomaticallyRenameFileWhenRestoreNameAlreadyExists() {
+        UUID folderId = UUID.randomUUID();
+    
+        StoredFile file =
+                createFile(
+                        folderId,
+                        "report.pdf"
+                );
+    
+        UUID ownerId = file.getOwnerId();
+    
+        file.softDelete();
+    
+        when(userRepository.findByIdForUpdate(ownerId))
+                .thenReturn(Optional.of(mock(User.class)));
+    
+        when(storedFileRepository
+                .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusIn(
+                        ownerId,
+                        folderId,
+                        "report.pdf",
+                        Set.of(
+                                FileStatus.UPLOADING,
+                                FileStatus.READY
+                        )
+                ))
+                .thenReturn(true);
+    
+        when(storedFileRepository
+                .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusIn(
+                        ownerId,
+                        folderId,
+                        "report (restored).pdf",
+                        Set.of(
+                                FileStatus.UPLOADING,
+                                FileStatus.READY
+                        )
+                ))
+                .thenReturn(false);
+    
+        when(storedFileRepository.saveAndFlush(file))
+                .thenReturn(file);
+    
+        StoredFile restored =
+                fileMetadataService.restore(
+                        file,
+                        folderId
+                );
+    
+        assertEquals(
+                "report (restored).pdf",
+                restored.getName()
+        );
+    
+        assertEquals(
+                folderId,
+                restored.getFolderId()
+        );
+    
+        assertNull(restored.getDeletedAt());
+    
+        verify(storedFileRepository)
+                .saveAndFlush(file);
+    }
+
+    @Test
+    void shouldIncrementRestoredSuffixUntilAvailableNameIsFound() {
+        UUID folderId = UUID.randomUUID();
+    
+        StoredFile file =
+                createFile(
+                        folderId,
+                        "report.pdf"
+                );
+    
+        UUID ownerId = file.getOwnerId();
+    
+        file.softDelete();
+    
+        when(userRepository.findByIdForUpdate(ownerId))
+                .thenReturn(Optional.of(mock(User.class)));
+    
+        when(storedFileRepository
+                .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusIn(
+                        eq(ownerId),
+                        eq(folderId),
+                        anyString(),
+                        eq(Set.of(
+                                FileStatus.UPLOADING,
+                                FileStatus.READY
+                        ))
+                ))
+                .thenAnswer(invocation -> {
+                    String name = invocation.getArgument(2);
+    
+                    return name.equals("report.pdf")
+                            || name.equals("report (restored).pdf")
+                            || name.equals("report (restored 2).pdf");
+                });
+    
+        when(storedFileRepository.saveAndFlush(file))
+                .thenReturn(file);
+    
+        StoredFile restored =
+                fileMetadataService.restore(
+                        file,
+                        folderId
+                );
+    
+        assertEquals(
+                "report (restored 3).pdf",
+                restored.getName()
+        );
+    
+        assertNull(restored.getDeletedAt());
+    }
+
+    @Test
+    void shouldAutomaticallyRenameExtensionlessFileOnRestoreConflict() {
+        UUID folderId = UUID.randomUUID();
+    
+        StoredFile file =
+                createFile(
+                        folderId,
+                        "README"
+                );
+    
+        UUID ownerId = file.getOwnerId();
+    
+        file.softDelete();
+    
+        when(userRepository.findByIdForUpdate(ownerId))
+                .thenReturn(Optional.of(mock(User.class)));
+    
+        when(storedFileRepository
+                .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusIn(
+                        ownerId,
+                        folderId,
+                        "README",
+                        Set.of(
+                                FileStatus.UPLOADING,
+                                FileStatus.READY
+                        )
+                ))
+                .thenReturn(true);
+    
+        when(storedFileRepository
+                .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusIn(
+                        ownerId,
+                        folderId,
+                        "README (restored)",
+                        Set.of(
+                                FileStatus.UPLOADING,
+                                FileStatus.READY
+                        )
+                ))
+                .thenReturn(false);
+    
+        when(storedFileRepository.saveAndFlush(file))
+                .thenReturn(file);
+    
+        StoredFile restored =
+                fileMetadataService.restore(
+                        file,
+                        folderId
+                );
+    
+        assertEquals(
+                "README (restored)",
+                restored.getName()
+        );
+    
+        assertNull(restored.getDeletedAt());
+    }
+
+    @Test
+    void shouldTruncateLongFileNameWhenGeneratingRestoredName() {
+        UUID folderId = UUID.randomUUID();
+    
+        // 251 chars + ".pdf" = 255 chars
+        String originalName =
+                "a".repeat(251) + ".pdf";
+    
+        StoredFile file =
+                createFile(
+                        folderId,
+                        originalName
+                );
+    
+        UUID ownerId = file.getOwnerId();
+    
+        file.softDelete();
+    
+        when(userRepository.findByIdForUpdate(ownerId))
+                .thenReturn(Optional.of(mock(User.class)));
+    
+        when(storedFileRepository
+                .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusIn(
+                        eq(ownerId),
+                        eq(folderId),
+                        anyString(),
+                        eq(Set.of(
+                                FileStatus.UPLOADING,
+                                FileStatus.READY
+                        ))
+                ))
+                .thenAnswer(invocation -> {
+                    String name = invocation.getArgument(2);
+    
+                    // Only the original 255-character name is occupied.
+                    return name.equals(originalName);
+                });
+    
+        when(storedFileRepository.saveAndFlush(file))
+                .thenReturn(file);
+    
+        StoredFile restored =
+                fileMetadataService.restore(
+                        file,
+                        folderId
+                );
+    
+        assertEquals(
+                255,
+                restored.getName().length()
+        );
+    
+        assertTrue(
+                restored.getName().endsWith(
+                        " (restored).pdf"
+                )
+        );
+    
+        assertNull(restored.getDeletedAt());
     }
 
     private StoredFile createFile(
