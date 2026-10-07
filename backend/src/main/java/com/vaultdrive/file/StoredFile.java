@@ -48,6 +48,9 @@ public class StoredFile {
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
+    @Column(name = "purge_requested_at")
+    private Instant purgeRequestedAt;
+
     protected StoredFile() {
     }
 
@@ -118,6 +121,10 @@ public class StoredFile {
         return deletedAt;
     }
 
+    public Instant getPurgeRequestedAt() {
+        return purgeRequestedAt;
+    }
+
     public void markReady() {
         this.status = FileStatus.READY;
         this.updatedAt = Instant.now();
@@ -155,5 +162,10 @@ public class StoredFile {
         this.name = restoredName;
         this.deletedAt = null;
         this.updatedAt = now;
+    }
+
+    public void requestPermanentDeletion() {
+        this.purgeRequestedAt = Instant.now();
+        this.updatedAt = this.purgeRequestedAt;
     }
 }

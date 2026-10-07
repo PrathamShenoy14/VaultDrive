@@ -1960,7 +1960,7 @@ class FileServiceTest {
                 );
     
         when(storedFileRepository
-                .findByOwnerIdAndStatusAndDeletedAtIsNotNull(
+                .findByOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
                         eq(ownerId),
                         eq(FileStatus.READY),
                         any(Pageable.class)
@@ -2025,7 +2025,7 @@ class FileServiceTest {
         storedFile.softDelete();
     
         when(storedFileRepository
-                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNull(
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
                         storedFile.getId(),
                         ownerId,
                         FileStatus.READY
@@ -2088,7 +2088,7 @@ class FileServiceTest {
         storedFile.softDelete();
     
         when(storedFileRepository
-                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNull(
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
                         storedFile.getId(),
                         ownerId,
                         FileStatus.READY
@@ -2141,7 +2141,7 @@ class FileServiceTest {
         storedFile.softDelete();
     
         when(storedFileRepository
-                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNull(
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
                         storedFile.getId(),
                         ownerId,
                         FileStatus.READY
@@ -2203,7 +2203,7 @@ class FileServiceTest {
         UUID fileId = UUID.randomUUID();
     
         when(storedFileRepository
-                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNull(
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
                         fileId,
                         ownerId,
                         FileStatus.READY

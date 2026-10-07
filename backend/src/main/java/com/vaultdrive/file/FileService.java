@@ -353,7 +353,7 @@ public class FileService {
     
         Page<StoredFile> files =
                 storedFileRepository
-                        .findByOwnerIdAndStatusAndDeletedAtIsNotNull(
+                        .findByOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
                                 ownerId,
                                 FileStatus.READY,
                                 pageable
@@ -377,7 +377,7 @@ public class FileService {
     ) {
         StoredFile storedFile =
                 storedFileRepository
-                        .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNull(
+                        .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
                                 fileId,
                                 ownerId,
                                 FileStatus.READY

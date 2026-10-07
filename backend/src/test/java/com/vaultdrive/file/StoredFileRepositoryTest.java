@@ -18,6 +18,7 @@ import org.springframework.test.context.ActiveProfiles;
 
 import java.util.Set;
 import java.util.UUID;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -743,7 +744,7 @@ class StoredFileRepositoryTest {
                 );
     
         // Should be included:
-        // READY + deleted + correct owner
+        // READY + deleted + correct owner + purge NOT requested
         StoredFile trashedReady =
                 createFile(
                         owner.getId(),
@@ -789,18 +790,33 @@ class StoredFileRepositoryTest {
         otherUsersTrashedFile.markReady();
         otherUsersTrashedFile.softDelete();
     
+        // Should NOT be included:
+        // READY + deleted + correct owner,
+        // but permanent deletion has already been requested
+        StoredFile pendingPurgeFile =
+                createFile(
+                        owner.getId(),
+                        folder.getId(),
+                        "pending-purge.pdf"
+                );
+    
+        pendingPurgeFile.markReady();
+        pendingPurgeFile.softDelete();
+        pendingPurgeFile.requestPermanentDeletion();
+    
         storedFileRepository.saveAllAndFlush(
                 java.util.List.of(
                         trashedReady,
                         activeReady,
                         trashedFailed,
-                        otherUsersTrashedFile
+                        otherUsersTrashedFile,
+                        pendingPurgeFile
                 )
         );
     
         Page<StoredFile> result =
                 storedFileRepository
-                        .findByOwnerIdAndStatusAndDeletedAtIsNotNull(
+                        .findByOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
                                 owner.getId(),
                                 FileStatus.READY,
                                 PageRequest.of(
@@ -829,6 +845,55 @@ class StoredFileRepositoryTest {
         assertNotNull(
                 resultFile.getDeletedAt()
         );
+    
+        assertNull(
+                resultFile.getPurgeRequestedAt()
+        );
+    
+        assertFalse(
+                result.getContent()
+                        .stream()
+                        .anyMatch(file ->
+                                file.getId().equals(
+                                        pendingPurgeFile.getId()
+                                )
+                        )
+        );
+    }
+
+    @Test
+    void shouldNotFindPendingPurgeFileForRestore() {
+        User owner =
+                createUser("pending-purge-restore@example.com");
+    
+        Folder folder =
+                createFolder(
+                        owner.getId(),
+                        "Documents"
+                );
+    
+        StoredFile file =
+                createFile(
+                        owner.getId(),
+                        folder.getId(),
+                        "report.pdf"
+                );
+    
+        file.markReady();
+        file.softDelete();
+        file.requestPermanentDeletion();
+    
+        storedFileRepository.saveAndFlush(file);
+    
+        Optional<StoredFile> result =
+                storedFileRepository
+                        .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                                file.getId(),
+                                owner.getId(),
+                                FileStatus.READY
+                        );
+    
+        assertTrue(result.isEmpty());
     }
 
     private User createUser(String email) {
