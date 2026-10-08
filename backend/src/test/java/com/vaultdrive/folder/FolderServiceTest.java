@@ -4,11 +4,13 @@ import com.vaultdrive.folder.exception.DuplicateFolderNameException;
 import com.vaultdrive.folder.exception.FolderNotFoundException;
 import com.vaultdrive.folder.exception.InvalidFolderNameException;
 import com.vaultdrive.folder.exception.InvalidFolderMoveException;
+import com.vaultdrive.hierarchy.HierarchyCoordinator;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import org.mockito.Mock;
+import org.mockito.InOrder;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -29,7 +31,6 @@ import com.vaultdrive.folder.dto.RestoreFolderResponse;
 
 import java.util.List;
 
-import com.vaultdrive.user.User;
 import com.vaultdrive.user.UserRepository;
 
 import java.time.Instant;
@@ -43,6 +44,9 @@ class FolderServiceTest {
    
    @Mock
    private UserRepository userRepository;
+
+   @Mock
+   private HierarchyCoordinator hierarchyCoordinator;
 
    private FolderService folderService;
    private FolderNameValidator folderNameValidator;
@@ -58,18 +62,13 @@ class FolderServiceTest {
             folderRepository,
             folderAccessValidator,
             folderNameValidator,
-            userRepository
+            userRepository,
+            hierarchyCoordinator
         );
 
         lenient()
-                .when(userRepository.findByIdForUpdate(any(UUID.class)))
-                .thenReturn(Optional.of(
-                        new User(
-                                "test@example.com",
-                                "test-password-hash",
-                                "Test User"
-                        )
-                ));
+                .when(userRepository.existsById(any(UUID.class)))
+                .thenReturn(true);
     }
 
     // TEST 1: Successfully create a root folder
@@ -106,6 +105,21 @@ class FolderServiceTest {
                         && folder.getName().equals("Documents")
                 )
         );
+
+        InOrder order = inOrder(
+                hierarchyCoordinator,
+                userRepository,
+                folderRepository
+        );
+
+        order.verify(hierarchyCoordinator)
+                .acquireExclusive(ownerId);
+        order.verify(userRepository).existsById(ownerId);
+        order.verify(folderRepository)
+                .existsByOwnerIdAndParentFolderIdIsNullAndNameAndDeletedAtIsNull(
+                        ownerId,
+                        "Documents"
+                );
     }
 
     // TEST 2: Successfully create a nested folder

@@ -7,6 +7,7 @@ import com.vaultdrive.folder.dto.RestoreFolderResponse;
 import com.vaultdrive.folder.exception.DuplicateFolderNameException;
 import com.vaultdrive.folder.exception.FolderNotFoundException;
 import com.vaultdrive.folder.exception.InvalidFolderMoveException;
+import com.vaultdrive.hierarchy.HierarchyCoordinator;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,17 +27,20 @@ public class FolderService {
     private final FolderAccessValidator folderAccessValidator;
     private final FolderNameValidator folderNameValidator;
     private final UserRepository userRepository;
+    private final HierarchyCoordinator hierarchyCoordinator;
 
     public FolderService(
             FolderRepository folderRepository,
             FolderAccessValidator folderAccessValidator,
             FolderNameValidator folderNameValidator,
-            UserRepository userRepository
+            UserRepository userRepository,
+            HierarchyCoordinator hierarchyCoordinator
     ) {
         this.folderRepository = folderRepository;
         this.folderAccessValidator = folderAccessValidator;
         this.folderNameValidator = folderNameValidator;
         this.userRepository = userRepository;
+        this.hierarchyCoordinator = hierarchyCoordinator;
     }
 
     @Transactional
@@ -402,10 +406,11 @@ public class FolderService {
     }
 
     private void lockFolderNamespace(UUID ownerId) {
-        userRepository.findByIdForUpdate(ownerId)
-                .orElseThrow(() ->
-                        new AccessDeniedException("User not found")
-                );
+        hierarchyCoordinator.acquireExclusive(ownerId);
+
+        if (!userRepository.existsById(ownerId)) {
+            throw new AccessDeniedException("User not found");
+        }
     }
     
     private String generateRestoredName(

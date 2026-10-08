@@ -30,9 +30,9 @@ Once `deleted_at` exists, every active read and uniqueness rule must define whet
 
 Storage keys use immutable owner/file UUIDs rather than display names or folder paths. Rename, move, trash, and restore update PostgreSQL only; they do not copy large objects. User-facing hierarchy is a metadata concern.
 
-## A coarse lock is a valid correctness baseline, not a scaling result
+## Lock migrations must preserve one coordination domain
 
-Locking the user row serializes namespace mutations and makes name selection easier to reason about. It also blocks unrelated work for the same user. Without a contention benchmark, the repository can state the trade-off but cannot claim the lock is fast enough or that a granular alternative is faster in practice.
+The folder path now uses an owner-scoped PostgreSQL transaction advisory lock while the file path still locks the user row. Each mechanism can serialize its own callers, but different mechanisms do not coordinate. The staged change is therefore not complete concurrency safety. Stable advisory-key derivation, same-transaction connection use, lock-before-read ordering, and migrating every competing path matter more than merely replacing one lock call.
 
 ## Lock-before-read matters for competing transitions
 

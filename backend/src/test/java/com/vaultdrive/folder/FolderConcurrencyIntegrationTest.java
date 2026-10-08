@@ -8,8 +8,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.transaction.PlatformTransactionManager;
 
 import java.util.UUID;
 import java.util.concurrent.*;
@@ -29,103 +27,10 @@ class FolderConcurrencyIntegrationTest {
     private UserRepository userRepository;
 
     @Autowired
-    private PlatformTransactionManager transactionManager;
-
-    @Autowired
     private FolderRepository folderRepository;
 
     @Autowired
     private FolderService folderService;
-
-    @Test
-    void shouldBlockSecondTransactionUntilFirstReleasesLock()
-            throws Exception {
-
-        User user = userRepository.saveAndFlush(
-                new User(
-                        UUID.randomUUID() + "@example.com",
-                        "temporary-test-hash",
-                        "Concurrency Test"
-                )
-        );
-
-        UUID userId = user.getId();
-
-        CountDownLatch firstLockAcquired = new CountDownLatch(1);
-        CountDownLatch releaseFirstLock = new CountDownLatch(1);
-        CountDownLatch secondAttemptStarted = new CountDownLatch(1);
-
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-
-        TransactionTemplate transactionTemplate =
-                new TransactionTemplate(transactionManager);
-
-        try {
-            Future<?> firstTransaction = executor.submit(() -> {
-
-                transactionTemplate.executeWithoutResult(status -> {
-
-                    userRepository.findByIdForUpdate(userId)
-                            .orElseThrow();
-
-                    firstLockAcquired.countDown();
-
-                    try {
-                        if (!releaseFirstLock.await(
-                                10,
-                                TimeUnit.SECONDS
-                        )) {
-                            throw new IllegalStateException(
-                                    "Timed out waiting to release first lock"
-                            );
-                        }
-                    } catch (InterruptedException exception) {
-                        Thread.currentThread().interrupt();
-                        throw new RuntimeException(exception);
-                    }
-                });
-            });
-
-            assertThat(firstLockAcquired.await(5, TimeUnit.SECONDS))
-                    .isTrue();
-
-            Future<?> secondTransaction = executor.submit(() -> {
-
-                transactionTemplate.executeWithoutResult(status -> {
-
-                    secondAttemptStarted.countDown();
-
-                    userRepository.findByIdForUpdate(userId)
-                            .orElseThrow();
-                });
-            });
-
-            assertThat(secondAttemptStarted.await(5, TimeUnit.SECONDS))
-                    .isTrue();
-
-            // The second transaction should still be waiting.
-            Thread.sleep(500);
-
-            assertThat(secondTransaction.isDone())
-                    .isFalse();
-
-            // Release the first transaction.
-            releaseFirstLock.countDown();
-
-            firstTransaction.get(5, TimeUnit.SECONDS);
-            secondTransaction.get(5, TimeUnit.SECONDS);
-
-            assertThat(secondTransaction.isDone())
-                    .isTrue();
-
-        } finally {
-            releaseFirstLock.countDown();
-
-            executor.shutdownNow();
-
-            userRepository.deleteById(userId);
-        }
-    }
 
     @Test
     void shouldRestoreConcurrentFoldersWithUniqueNames()

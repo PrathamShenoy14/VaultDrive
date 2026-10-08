@@ -79,25 +79,20 @@ This completes only the durable request transition. No purge worker exists. Gara
 
 PostgreSQL partial unique indexes are the final defense against duplicate active names. Services also perform pre-checks for clearer errors.
 
-Folder and file namespace mutations acquire a pessimistic write lock on the owner's `users` row. Because both subsystems lock the same row, all namespace-changing operations for one user are effectively serialized. Different users can proceed concurrently.
+Folder create, rename, move, trash, and restore acquire an exclusive owner-scoped PostgreSQL transaction advisory lock before protected reads. The hierarchy coordinator also provides shared mode for later migration work. It requires an active transaction and uses the transaction's JPA connection, so PostgreSQL releases locks on commit or rollback. Folder mutations perform no Garage I/O while holding the lock.
 
-This is deliberately simple and correctness-oriented, but it is coarse:
+File mutations have not migrated: they still acquire a pessimistic write lock on the owner's `users` row. Restore and permanent-delete request take that lock before reading eligible state, while rename, move, and trash currently load a file before the metadata transaction takes the row lock. The two lock mechanisms do not coordinate. Cross-path folder/file concurrency safety is therefore an explicit gap until file operations use the hierarchy coordinator with the necessary lock-before-read ordering.
 
-- unrelated folders for one user block each other;
-- file and folder mutations for one user can block each other;
-- restore and permanent-delete request acquire the owner lock before reading the eligible file, while other file flows still require audit before any lock refactor;
-- no throughput or contention benchmark currently exists.
-
-Restore and permanent-delete request demonstrate the required lock-before-read pattern for mutually exclusive state transitions. A granular replacement is planned, but the lock key and mechanism are not yet decided. See ADR-0007.
+The advisory key derivation and staged migration constraints are recorded in ADR-0007. Folder operations for one owner remain serialized, key collisions can conservatively serialize different owners, database uniqueness constraints remain authoritative, and no throughput claim is made.
 
 ## Test evidence
 
-The repository contains unit tests, MockMvc controller tests, Spring Security integration tests, PostgreSQL repository tests, folder concurrency integration tests, and a live S3-compatible storage integration test. The permanent-delete request has controller tests for accepted, not-found, and unauthenticated outcomes; service tests for delegation, errors, and no object-storage access; and metadata-service tests for the durable transition and lock-before-read call order. A PostgreSQL-backed restore-versus-permanent-delete race test is not yet implemented. The presence of a test is evidence of intended coverage, not proof that it passed on every machine; current verification results belong in the task/commit report.
+The repository contains unit tests, MockMvc controller tests, Spring Security integration tests, PostgreSQL repository tests, folder concurrency integration tests, and a live S3-compatible storage integration test. PostgreSQL coordinator tests cover shared/shared compatibility, shared/exclusive and exclusive/exclusive blocking, transaction release, and rejection outside a transaction. The permanent-delete request has controller tests for accepted, not-found, and unauthenticated outcomes; service tests for delegation, errors, and no object-storage access; and metadata-service tests for the durable transition and lock-before-read call order. A PostgreSQL-backed restore-versus-permanent-delete race test is not yet implemented. The presence of a test is evidence of intended coverage, not proof that it passed on every machine; current verification results belong in the task/commit report.
 
 ## Known gaps and pending decisions
 
 - Async purge worker topology: database polling first versus a queue/outbox, plus retry and ownership semantics.
-- Granular namespace locking and a safe migration path from the per-user lock.
+- File-side migration to the hierarchy coordinator, including lock-before-read repair and cross-path race tests.
 - Reconciliation for stale `UPLOADING`, `FAILED`, orphaned objects, and uncertain finalization.
 - Folder permanent deletion and subtree semantics.
 - Sharing/permissions, versioning, presigned or resumable transfers, quotas, malware scanning, audit logs, observability, and client applications.
