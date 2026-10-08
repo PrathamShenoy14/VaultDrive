@@ -32,11 +32,11 @@ Storage keys use immutable owner/file UUIDs rather than display names or folder 
 
 ## Lock migrations must preserve one coordination domain
 
-The folder path now uses an owner-scoped PostgreSQL transaction advisory lock while the file path still locks the user row. Each mechanism can serialize its own callers, but different mechanisms do not coordinate. The staged change is therefore not complete concurrency safety. Stable advisory-key derivation, same-transaction connection use, lock-before-read ordering, and migrating every competing path matter more than merely replacing one lock call.
+Folder structural operations use an owner-scoped exclusive PostgreSQL transaction advisory lock. File rename, move, and trash use its shared counterpart before reading current hierarchy state, so these paths coordinate while unrelated file mutations may overlap. Optimistic file versions then prevent compatible shared-lock requests from losing same-row updates. Upload, restore, permanent-delete request, and lifecycle finalization remain outside this advisory-lock domain, so the staged change is still not complete concurrency safety.
 
 ## Lock-before-read matters for competing transitions
 
-If restore reads an eligible Trash row before acquiring the lock while permanent delete does the same, both can act on stale eligibility. The implemented pattern is: acquire the shared owner lock, re-read the eligible state inside that transaction, then mutate. Unit tests verify this interaction order for restore and permanent-delete request; a PostgreSQL-backed race test is still needed to prove transaction-level behavior.
+Reading a file or its ancestor chain before acquiring the hierarchy lock permits a folder mutation to invalidate that state. The implemented rename/move/trash pattern is: acquire the shared owner lock, read and validate current state inside the same transaction, then mutate. Restore and permanent-delete request correctly take their existing user-row lock before reading eligible Trash state, but still need migration to the common hierarchy coordination domain.
 
 ## Failure handling should preserve the most useful truth
 

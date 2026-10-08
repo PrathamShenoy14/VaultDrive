@@ -63,8 +63,6 @@ public class FileMetadataService {
             StoredFile file,
             String newName
     ) {
-        lockFileNamespace(file.getOwnerId());
-
         if (file.getName().equals(newName)) {
             return file;
         }
@@ -93,8 +91,6 @@ public class FileMetadataService {
             StoredFile file,
             UUID destinationFolderId
     ) {
-        lockFileNamespace(file.getOwnerId());
-    
         if (Objects.equals(
                 file.getFolderId(),
                 destinationFolderId
@@ -122,8 +118,6 @@ public class FileMetadataService {
 
     @Transactional
     public StoredFile softDelete(StoredFile file) {
-        lockFileNamespace(file.getOwnerId());
-    
         file.softDelete();
     
         return storedFileRepository.saveAndFlush(file);

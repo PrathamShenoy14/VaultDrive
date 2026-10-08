@@ -28,7 +28,7 @@ PostgreSQL and Garage do not share a transaction. Code must make cross-system fa
 ### Platform and persistence — Committed
 
 - Java 21, Spring Boot 4.1.1, Maven wrapper, Spring MVC, Spring Data JPA, validation, and Spring Security.
-- PostgreSQL schema managed by Flyway migrations V1-V9. Hibernate validates the schema (`ddl-auto=validate`) rather than creating it.
+- PostgreSQL schema managed by Flyway migrations V1-V10. Hibernate validates the schema (`ddl-auto=validate`) rather than creating it.
 - Configuration comes from properties and environment variables. Secrets are not intended for source control.
 
 ### Authentication and security — Committed
@@ -79,20 +79,20 @@ This completes only the durable request transition. No purge worker exists. Gara
 
 PostgreSQL partial unique indexes are the final defense against duplicate active names. Services also perform pre-checks for clearer errors.
 
-Folder create, rename, move, trash, and restore acquire an exclusive owner-scoped PostgreSQL transaction advisory lock before protected reads. The hierarchy coordinator also provides shared mode for later migration work. It requires an active transaction and uses the transaction's JPA connection, so PostgreSQL releases locks on commit or rollback. Folder mutations perform no Garage I/O while holding the lock.
+Folder create, rename, move, trash, and restore acquire an exclusive owner-scoped PostgreSQL transaction advisory lock before protected reads. File rename, move, and trash acquire the matching shared lock before loading current file or ancestor state, then validate and flush inside the same short transaction. The coordinator requires an active transaction and uses the transaction's JPA connection, so PostgreSQL releases locks on commit or rollback. These metadata-only operations perform no Garage I/O while holding the lock.
 
-File mutations have not migrated: they still acquire a pessimistic write lock on the owner's `users` row. Restore and permanent-delete request take that lock before reading eligible state, while rename, move, and trash currently load a file before the metadata transaction takes the row lock. The two lock mechanisms do not coordinate. Cross-path folder/file concurrency safety is therefore an explicit gap until file operations use the hierarchy coordinator with the necessary lock-before-read ordering.
+`files.version` supplies optimistic concurrency control between compatible shared-lock file mutations. A stale same-file write fails with HTTP `409 Conflict` rather than overwriting another committed mutation. File upload, restore, permanent-delete request, and lifecycle finalization retain their existing coordination and do not yet share the folder advisory-lock domain.
 
 The advisory key derivation and staged migration constraints are recorded in ADR-0007. Folder operations for one owner remain serialized, key collisions can conservatively serialize different owners, database uniqueness constraints remain authoritative, and no throughput claim is made.
 
 ## Test evidence
 
-The repository contains unit tests, MockMvc controller tests, Spring Security integration tests, PostgreSQL repository tests, folder concurrency integration tests, and a live S3-compatible storage integration test. PostgreSQL coordinator tests cover shared/shared compatibility, shared/exclusive and exclusive/exclusive blocking, transaction release, and rejection outside a transaction. The permanent-delete request has controller tests for accepted, not-found, and unauthenticated outcomes; service tests for delegation, errors, and no object-storage access; and metadata-service tests for the durable transition and lock-before-read call order. A PostgreSQL-backed restore-versus-permanent-delete race test is not yet implemented. The presence of a test is evidence of intended coverage, not proof that it passed on every machine; current verification results belong in the task/commit report.
+The repository contains unit tests, MockMvc controller tests, Spring Security integration tests, PostgreSQL repository tests, folder concurrency integration tests, and a live S3-compatible storage integration test. PostgreSQL coordinator tests cover shared/shared compatibility, shared/exclusive and exclusive/exclusive blocking, transaction release, and rejection outside a transaction. PostgreSQL races cover file move versus folder trash, file rename versus folder trash, and optimistic same-file mutation conflicts. The permanent-delete request has controller tests for accepted, not-found, and unauthenticated outcomes; service tests for delegation, errors, and no object-storage access; and metadata-service tests for the durable transition and lock-before-read call order. A PostgreSQL-backed restore-versus-permanent-delete race test is not yet implemented. The presence of a test is evidence of intended coverage, not proof that it passed on every machine; current verification results belong in the task/commit report.
 
 ## Known gaps and pending decisions
 
 - Async purge worker topology: database polling first versus a queue/outbox, plus retry and ownership semantics.
-- File-side migration to the hierarchy coordinator, including lock-before-read repair and cross-path race tests.
+- Remaining file-side coordination: upload, restore, permanent-delete request, upload finalization, and future workers.
 - Reconciliation for stale `UPLOADING`, `FAILED`, orphaned objects, and uncertain finalization.
 - Folder permanent deletion and subtree semantics.
 - Sharing/permissions, versioning, presigned or resumable transfers, quotas, malware scanning, audit logs, observability, and client applications.

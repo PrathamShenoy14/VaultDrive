@@ -9,6 +9,7 @@ import com.vaultdrive.file.exception.FileExtensionChangeException;
 import com.vaultdrive.folder.Folder;
 import com.vaultdrive.folder.FolderAccessValidator;
 import com.vaultdrive.folder.exception.FolderNotFoundException;
+import com.vaultdrive.hierarchy.HierarchyCoordinator;
 import com.vaultdrive.storage.ObjectStorageService;
 import com.vaultdrive.storage.StorageKeyGenerator;
 import com.vaultdrive.storage.StorageObject;
@@ -65,6 +66,9 @@ class FileServiceTest {
     @Mock
     private StoredFileRepository storedFileRepository;
 
+    @Mock
+    private HierarchyCoordinator hierarchyCoordinator;
+
     private FileService fileService;
     private FileNameExtensionResolver fileNameExtensionResolver;
 
@@ -80,7 +84,8 @@ class FileServiceTest {
                 objectStorageService,
                 storageKeyGenerator,
                 storedFileRepository,
-                fileNameExtensionResolver
+                fileNameExtensionResolver,
+                hierarchyCoordinator
         );
     }
 
@@ -996,6 +1001,18 @@ class FileServiceTest {
         assertEquals("new-name.txt", response.name());
         assertEquals(fileId, response.id());
         assertNull(response.folderId());
+
+        var lockOrder = inOrder(
+                hierarchyCoordinator,
+                storedFileRepository
+        );
+        lockOrder.verify(hierarchyCoordinator).acquireShared(ownerId);
+        lockOrder.verify(storedFileRepository)
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        fileId,
+                        ownerId,
+                        FileStatus.READY
+                );
     
         verify(fileNameValidator, times(2))
                 .validateAndNormalize("new-name.txt");
@@ -1468,6 +1485,18 @@ class FileServiceTest {
                 "report.pdf",
                 response.name()
         );
+
+        var lockOrder = inOrder(
+                hierarchyCoordinator,
+                storedFileRepository
+        );
+        lockOrder.verify(hierarchyCoordinator).acquireShared(ownerId);
+        lockOrder.verify(storedFileRepository)
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        storedFile.getId(),
+                        ownerId,
+                        FileStatus.READY
+                );
     
         verify(folderAccessValidator)
                 .requireAccessibleFolder(
@@ -1783,6 +1812,18 @@ class FileServiceTest {
         assertEquals(storedFile.getId(), response.id());
         assertEquals("report.pdf", response.name());
         assertNull(response.folderId());
+
+        var lockOrder = inOrder(
+                hierarchyCoordinator,
+                storedFileRepository
+        );
+        lockOrder.verify(hierarchyCoordinator).acquireShared(ownerId);
+        lockOrder.verify(storedFileRepository)
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        storedFile.getId(),
+                        ownerId,
+                        FileStatus.READY
+                );
     
         verify(fileMetadataService)
                 .softDelete(storedFile);

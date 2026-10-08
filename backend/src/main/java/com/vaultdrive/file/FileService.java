@@ -8,6 +8,7 @@ import com.vaultdrive.file.exception.FileUploadException;
 import com.vaultdrive.file.exception.InvalidFilePaginationException;
 import com.vaultdrive.file.exception.FileNotFoundException;
 import com.vaultdrive.folder.FolderAccessValidator;
+import com.vaultdrive.hierarchy.HierarchyCoordinator;
 import com.vaultdrive.storage.ObjectStorageService;
 import com.vaultdrive.storage.StorageKeyGenerator;
 import com.vaultdrive.storage.StorageObject;
@@ -17,6 +18,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -36,6 +38,7 @@ public class FileService {
     private final StorageKeyGenerator storageKeyGenerator;
     private final StoredFileRepository storedFileRepository;
     private final FileNameExtensionResolver fileNameExtensionResolver;
+    private final HierarchyCoordinator hierarchyCoordinator;
 
     public FileService(
             FolderAccessValidator folderAccessValidator,
@@ -44,7 +47,8 @@ public class FileService {
             ObjectStorageService objectStorageService,
             StorageKeyGenerator storageKeyGenerator,
             StoredFileRepository storedFileRepository,
-            FileNameExtensionResolver fileNameExtensionResolver
+            FileNameExtensionResolver fileNameExtensionResolver,
+            HierarchyCoordinator hierarchyCoordinator
     ) {
         this.folderAccessValidator = folderAccessValidator;
         this.fileNameValidator = fileNameValidator;
@@ -53,6 +57,7 @@ public class FileService {
         this.storageKeyGenerator = storageKeyGenerator;
         this.storedFileRepository = storedFileRepository;
         this.fileNameExtensionResolver = fileNameExtensionResolver;
+        this.hierarchyCoordinator = hierarchyCoordinator;
     }
 
     public UploadFileResponse uploadFile(
@@ -228,6 +233,7 @@ public class FileService {
         );
     }
 
+    @Transactional
     public FileResponse renameFile(
             UUID ownerId,
             UUID fileId,
@@ -235,7 +241,9 @@ public class FileService {
     ) {
         String normalizedRequestedName =
                 fileNameValidator.validateAndNormalize(newName);
-    
+
+        hierarchyCoordinator.acquireShared(ownerId);
+
         StoredFile storedFile =
                 storedFileRepository
                         .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
@@ -246,18 +254,16 @@ public class FileService {
                         .orElseThrow(() ->
                                 new FileNotFoundException("File not found")
                         );
-    
+
         String resolvedName =
                 fileNameExtensionResolver.preserveExtension(
                         storedFile.getName(),
                         normalizedRequestedName
                 );
-    
+
         String finalName =
-                fileNameValidator.validateAndNormalize(
-                        resolvedName
-                );
-    
+                fileNameValidator.validateAndNormalize(resolvedName);
+
         validateFolderAccess(
                 ownerId,
                 storedFile.getFolderId()
@@ -272,11 +278,14 @@ public class FileService {
         return toFileResponse(renamedFile);
     }
 
+    @Transactional
     public FileResponse moveFile(
             UUID ownerId,
             UUID fileId,
             UUID destinationFolderId
     ) {
+        hierarchyCoordinator.acquireShared(ownerId);
+
         StoredFile storedFile =
                 storedFileRepository
                         .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
@@ -287,19 +296,19 @@ public class FileService {
                         .orElseThrow(() ->
                                 new FileNotFoundException("File not found")
                         );
-    
+
         // The source file must currently be accessible.
         validateFolderAccess(
                 ownerId,
                 storedFile.getFolderId()
         );
-    
+
         // The destination must also be accessible.
         validateFolderAccess(
                 ownerId,
                 destinationFolderId
         );
-    
+
         StoredFile movedFile =
                 fileMetadataService.move(
                         storedFile,
@@ -309,10 +318,13 @@ public class FileService {
         return toFileResponse(movedFile);
     }
 
+    @Transactional
     public FileResponse trashFile(
             UUID ownerId,
             UUID fileId
     ) {
+        hierarchyCoordinator.acquireShared(ownerId);
+
         StoredFile storedFile =
                 storedFileRepository
                         .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
@@ -323,13 +335,12 @@ public class FileService {
                         .orElseThrow(() ->
                                 new FileNotFoundException("File not found")
                         );
-    
+
         validateFolderAccess(
                 ownerId,
-                
                 storedFile.getFolderId()
         );
-    
+
         StoredFile trashedFile =
                 fileMetadataService.softDelete(storedFile);
     

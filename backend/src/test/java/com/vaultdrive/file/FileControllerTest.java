@@ -18,6 +18,7 @@ import com.vaultdrive.file.exception.FileExtensionChangeException;
 import com.vaultdrive.folder.exception.FolderNotFoundException;
 
 import org.springframework.http.MediaType;
+import org.springframework.dao.OptimisticLockingFailureException;
 
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -56,6 +57,36 @@ class FileControllerTest {
 
     @MockitoBean
     private FileService fileService;
+
+    @Test
+    void shouldReturnConflictWhenConcurrentFileMutationWins()
+            throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+
+        when(fileService.renameFile(
+                ownerId,
+                fileId,
+                "renamed.pdf"
+        )).thenThrow(new OptimisticLockingFailureException(
+                "stale file version"
+        ));
+
+        mockMvc.perform(
+                        patch("/api/v1/files/{fileId}/name", fileId)
+                                .with(jwt().jwt(jwt ->
+                                        jwt.subject(ownerId.toString())
+                                ))
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"name\":\"renamed.pdf\"}")
+                )
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.error").value("CONFLICT"))
+                .andExpect(jsonPath("$.message").value(
+                        "File was modified by another request"
+                ));
+    }
 
     @Test
     void shouldUploadFileToRoot() throws Exception {

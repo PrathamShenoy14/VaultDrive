@@ -1,6 +1,6 @@
 # ADR-0007: Transaction-scoped hierarchy coordination
 
-- Status: Accepted; folder-side migration implemented, file-side migration pending
+- Status: Accepted; folder operations and file rename/move/trash implemented
 - Date: 2026-10-09
 
 ## Context
@@ -15,23 +15,26 @@ The signed `bigint` key has a stable derivation: fixed namespace `0x5641554C5444
 
 Folder create, rename, move, trash, and restore acquire the exclusive hierarchy lock before any protected read. They remain PostgreSQL-only operations, so the advisory lock is never held across Garage I/O.
 
-This is intentionally a staged migration. File operations still acquire the pessimistic write lock on the owner's `users` row. Rename, move, and trash also load a file before the metadata service obtains that row lock. Until file operations migrate to the coordinator with lock-before-read where required, folder and file paths do not mutually exclude each other and the system must not claim complete cross-path concurrency safety.
+File rename, move, and trash acquire the shared hierarchy lock before loading current file or ancestor state. Each performs fresh validation and flushes inside that short transaction. Because shared locks allow file mutations for the same owner to overlap, the file row has an optimistic version; a stale same-file write returns `409 Conflict` instead of silently overwriting another mutation.
+
+This remains a staged migration. Upload, restore, permanent-delete request, upload finalization, and future workers retain their existing coordination and are not claimed to coordinate with folder structural operations.
 
 ## Consequences
 
 - All folder mutations for one owner still serialize; different owners normally proceed independently.
-- Shared mode is available for a later file-side migration but is not yet used by production paths.
+- Shared mode coordinates file rename, move, and trash with folder structural operations while allowing unrelated file metadata mutations to overlap.
 - A rare derived-key collision can serialize different owners without weakening correctness.
 - The existing file restore and permanent-delete paths retain their user-row lock-before-read ordering, but that lock does not coordinate with the folder advisory lock.
-- File rename, move, and trash require lock-before-read repair as part of their migration.
+- Upload and metadata finalization also remain outside the hierarchy coordinator.
 - Database constraints remain mandatory after any lock refactor.
 
 ## Verification and remaining migration
 
 - PostgreSQL integration tests cover shared/shared compatibility, shared/exclusive blocking, exclusive/exclusive blocking, rollback release, and the transaction requirement.
 - The existing concurrent folder-restore integration test exercises the migrated folder path.
-- Migrate file operations to the same coordinator without holding a transaction lock over Garage calls.
-- Add PostgreSQL-backed folder/file and restore/permanent-delete race coverage after both paths share the coordinator.
+- PostgreSQL-backed races cover file move versus folder trash, rename versus folder trash, and same-file optimistic conflicts.
+- Migrate remaining competing file lifecycle paths without holding a transaction lock over Garage calls.
+- Add restore/permanent-delete and other lifecycle race coverage when those paths share the coordinator.
 - A reproducible baseline and post-change contention measurement.
 
 No performance benchmark currently exists, so this ADR makes no throughput claim.

@@ -256,9 +256,6 @@ class FileMetadataServiceTest {
 
         file.markReady();
 
-        when(userRepository.findByIdForUpdate(ownerId))
-                .thenReturn(Optional.of(mock(User.class)));
-
         when(storedFileRepository
                 .existsByOwnerIdAndFolderIdIsNullAndNameAndDeletedAtIsNullAndStatusInAndIdNot(
                         eq(ownerId),
@@ -278,9 +275,6 @@ class FileMetadataServiceTest {
                 );
 
         assertEquals("new.txt", result.getName());
-
-        verify(userRepository)
-                .findByIdForUpdate(ownerId);
 
         verify(storedFileRepository)
                 .saveAndFlush(file);
@@ -304,9 +298,6 @@ class FileMetadataServiceTest {
 
         file.markReady();
 
-        when(userRepository.findByIdForUpdate(ownerId))
-                .thenReturn(Optional.of(mock(User.class)));
-
         when(storedFileRepository
                 .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusInAndIdNot(
                         eq(ownerId),
@@ -327,9 +318,6 @@ class FileMetadataServiceTest {
                 );
 
         assertEquals("new.pdf", result.getName());
-
-        verify(userRepository)
-                .findByIdForUpdate(ownerId);
 
         verify(storedFileRepository)
                 .saveAndFlush(file);
@@ -352,9 +340,6 @@ class FileMetadataServiceTest {
         );
 
         file.markReady();
-
-        when(userRepository.findByIdForUpdate(ownerId))
-                .thenReturn(Optional.of(mock(User.class)));
 
         when(storedFileRepository
                 .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusInAndIdNot(
@@ -406,9 +391,6 @@ class FileMetadataServiceTest {
     
         file.markReady();
     
-        when(userRepository.findByIdForUpdate(ownerId))
-                .thenReturn(Optional.of(mock(User.class)));
-    
         StoredFile result =
                 fileMetadataService.rename(
                         file,
@@ -417,9 +399,6 @@ class FileMetadataServiceTest {
     
         assertSame(file, result);
         assertEquals("report.pdf", result.getName());
-    
-        verify(userRepository)
-                .findByIdForUpdate(ownerId);
     
         verify(storedFileRepository, never())
                 .saveAndFlush(any());
@@ -438,9 +417,6 @@ class FileMetadataServiceTest {
         );
 
         UUID ownerId = file.getOwnerId();
-    
-        when(userRepository.findByIdForUpdate(ownerId))
-                .thenReturn(Optional.of(mock(User.class)));
     
         when(storedFileRepository
                 .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusIn(
@@ -466,9 +442,6 @@ class FileMetadataServiceTest {
                 file.getFolderId()
         );
     
-        verify(userRepository)
-                .findByIdForUpdate(ownerId);
-    
         verify(storedFileRepository)
                 .saveAndFlush(file);
     }
@@ -483,9 +456,6 @@ class FileMetadataServiceTest {
         );
 
         UUID ownerId = file.getOwnerId();
-    
-        when(userRepository.findByIdForUpdate(ownerId))
-                .thenReturn(Optional.of(mock(User.class)));
     
         when(storedFileRepository
                 .existsByOwnerIdAndFolderIdIsNullAndNameAndDeletedAtIsNullAndStatusIn(
@@ -530,9 +500,6 @@ class FileMetadataServiceTest {
 
         UUID ownerId = file.getOwnerId();
     
-        when(userRepository.findByIdForUpdate(ownerId))
-                .thenReturn(Optional.of(mock(User.class)));
-    
         when(storedFileRepository
                 .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusIn(
                         eq(ownerId),
@@ -571,9 +538,6 @@ class FileMetadataServiceTest {
 
         UUID ownerId = file.getOwnerId();
     
-        when(userRepository.findByIdForUpdate(ownerId))
-                .thenReturn(Optional.of(mock(User.class)));
-    
         StoredFile result =
                 fileMetadataService.move(
                         file,
@@ -582,9 +546,6 @@ class FileMetadataServiceTest {
     
         assertSame(file, result);
         assertEquals(folderId, file.getFolderId());
-    
-        verify(userRepository)
-                .findByIdForUpdate(ownerId);
     
         verify(storedFileRepository, never())
                 .saveAndFlush(any(StoredFile.class));
@@ -616,9 +577,6 @@ class FileMetadataServiceTest {
     
         assertNull(file.getDeletedAt());
     
-        when(userRepository.findByIdForUpdate(ownerId))
-                .thenReturn(Optional.of(mock(User.class)));
-    
         when(storedFileRepository.saveAndFlush(file))
                 .thenReturn(file);
     
@@ -627,9 +585,6 @@ class FileMetadataServiceTest {
     
         assertNotNull(result.getDeletedAt());
         assertEquals(file, result);
-    
-        verify(userRepository)
-                .findByIdForUpdate(ownerId);
     
         verify(storedFileRepository)
                 .saveAndFlush(file);

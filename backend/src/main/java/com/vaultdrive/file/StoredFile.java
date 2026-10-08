@@ -6,6 +6,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -50,6 +51,10 @@ public class StoredFile {
 
     @Column(name = "purge_requested_at")
     private Instant purgeRequestedAt;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
 
     protected StoredFile() {
     }
@@ -123,6 +128,10 @@ public class StoredFile {
 
     public Instant getPurgeRequestedAt() {
         return purgeRequestedAt;
+    }
+
+    public long getVersion() {
+        return version;
     }
 
     public void markReady() {
