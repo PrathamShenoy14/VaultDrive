@@ -1,0 +1,27 @@
+# ADR-0005: File upload and trash lifecycle
+
+- Status: Accepted and implemented
+- Date: 2026-10-09 (retrospective record)
+
+## Context
+
+File operations span relational metadata and object storage. Users need listing, download, rename, move, Trash, and restore while incomplete uploads remain invisible.
+
+## Decision
+
+Use `UPLOADING`, `READY`, and `FAILED` for storage readiness. Create metadata as `UPLOADING`, stream to object storage, then mark `READY`; best-effort mark `FAILED` on upload error. Expose only active `READY` files. Represent Trash with `deleted_at`, leaving the Garage object and storage key unchanged. Restore the same row/object to its original accessible folder or root and resolve name collisions with extension-preserving suffixes.
+
+## Consequences
+
+- Incomplete uploads do not appear as usable files.
+- User-visible metadata operations avoid object copies.
+- Trash/restore are fast database operations and preserve bytes.
+- A successful object upload followed by uncertain metadata finalization may leave stale `UPLOADING` metadata or an orphan; reconciliation is required but not implemented.
+- Trashing releases the active name, so restore may need an automatic new name.
+- Folder accessibility must be checked in addition to file ownership because a file below a deleted ancestor is not accessible.
+
+## Alternatives considered
+
+- Upload object first, then create metadata: avoids `UPLOADING` rows but creates untracked objects on database failure.
+- Store object state and user lifecycle in one enum: fewer columns, but conflates independent state machines.
+- Copy/delete objects on rename or move: unnecessary because storage keys are intentionally independent of display paths.

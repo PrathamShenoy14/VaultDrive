@@ -6,6 +6,8 @@ The project focuses on learning backend engineering, system design, database man
 
 VaultDrive is being developed incrementally, starting with a Spring Boot backend. A Next.js web application and a React Native mobile application are planned for later phases.
 
+For the current implementation boundary and design rationale, see [Architecture](docs/architecture.md), [Development roadmap](docs/development-roadmap.md), and [Architecture decisions](docs/decisions/).
+
 ## Tech Stack
 
 ### Backend
@@ -84,6 +86,15 @@ VaultDrive is being developed incrementally, starting with a Spring Boot backend
 - Centralized authentication and validation error handling
 - HTTP 401 responses for unauthenticated requests
 
+### 6. Folder and File Management
+
+- Owner-scoped folder hierarchy with create, list, rename, move, soft-delete, trash, and restore
+- S3-compatible file upload and streaming download through Garage
+- Paginated file listing, rename, move, trash, and restore
+- PostgreSQL metadata separated from immutable object-storage keys
+- Upload lifecycle states (`UPLOADING`, `READY`, `FAILED`)
+- Pending-purge lifecycle state in the database; the asynchronous purge worker is not yet implemented
+
 ## API Endpoints
 
 The following endpoints are currently implemented.
@@ -94,6 +105,23 @@ The following endpoints are currently implemented.
 | POST | `/api/v1/auth/register` | Public | Register a new user |
 | POST | `/api/v1/auth/login` | Public | Authenticate and receive a JWT |
 | GET | `/api/v1/users/me` | Required | Retrieve the authenticated user's UUID |
+| POST | `/api/v1/folders` | Required | Create a folder |
+| GET | `/api/v1/folders` | Required | List root folders |
+| GET | `/api/v1/folders/{folderId}` | Required | Retrieve a folder |
+| GET | `/api/v1/folders/{folderId}/children` | Required | List child folders |
+| PATCH | `/api/v1/folders/{folderId}` | Required | Rename a folder |
+| PATCH | `/api/v1/folders/{folderId}/move` | Required | Move a folder |
+| DELETE | `/api/v1/folders/{folderId}` | Required | Move a folder to Trash |
+| GET | `/api/v1/trash/folders` | Required | List explicitly trashed folders |
+| POST | `/api/v1/trash/folders/{folderId}/restore` | Required | Restore a folder |
+| POST | `/api/v1/files` | Required | Upload a file |
+| GET | `/api/v1/files` | Required | List files in a folder or root |
+| GET | `/api/v1/files/{fileId}/download` | Required | Stream a file download |
+| PATCH | `/api/v1/files/{fileId}/name` | Required | Rename a file |
+| PATCH | `/api/v1/files/{fileId}/move` | Required | Move a file |
+| DELETE | `/api/v1/files/{fileId}` | Required | Move a file to Trash |
+| GET | `/api/v1/files/trash` | Required | List trashed files |
+| POST | `/api/v1/files/{fileId}/restore` | Required | Restore a file |
 
 ### Authentication Flow
 
@@ -266,12 +294,10 @@ backend/
 
 ### File Management
 
-- File uploads and downloads
-- Folder creation and management
-- File renaming and moving
-- File deletion and restoration
-- File metadata management
-- Object storage integration
+- Reliable asynchronous Garage purge worker and retry handling
+- Reconciliation for stale uploads and orphaned objects
+- Presigned and resumable transfers
+- File versioning and quotas
 
 ### Sharing and Permissions
 
@@ -315,10 +341,14 @@ These features are planned and have not yet been implemented.
 - Spring Security authentication
 - Protected endpoint implementation
 - Authentication and security tests
+- Folder management, Trash, and restoration
+- File upload/download/list/rename/move/Trash/restore
+- Garage S3-compatible storage adapter
+- Pending-purge schema and lifecycle state
 
 **Current milestone:**
 
-Designing and implementing file and folder management, including the separation of file metadata in PostgreSQL from actual file contents in object storage.
+Completing the durable permanent-delete request flow, then implementing a retryable asynchronous purge worker. A concurrency refactor is planned after the current behavior is documented and protected by integration tests.
 
 ## Project Goals
 
