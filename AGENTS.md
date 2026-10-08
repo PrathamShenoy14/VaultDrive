@@ -41,10 +41,10 @@ Use the workflow in `docs/development-workflow.md`. In short: discuss the what/w
 
 ## Baseline verification
 
-From `backend/` on Windows:
+In PowerShell, load the ignored local environment file in the same shell that runs Maven:
 
 ```powershell
-.\mvnw.cmd test
+cd backend; . .\.env.local.ps1; .\mvnw test
 ```
 
 Repository and S3 integration tests require the configured PostgreSQL test database and, for the S3 suite, a reachable S3-compatible service with credentials. If infrastructure is unavailable, report the exact skipped or failed checks; do not call the task fully verified.

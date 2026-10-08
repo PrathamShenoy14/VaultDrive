@@ -1,0 +1,5 @@
+$env:JAVA_TOOL_OPTIONS="-Duser.timezone=UTC"
+$env:DB_PASSWORD="replace-with-local-postgres-password"
+$env:JWT_SECRET="replace-with-base64-encoded-secret"
+$env:S3_ACCESS_KEY="replace-with-local-s3-access-key"
+$env:S3_SECRET_KEY="replace-with-local-s3-secret-key"
