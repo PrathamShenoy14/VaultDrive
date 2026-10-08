@@ -2024,24 +2024,9 @@ class FileServiceTest {
     
         storedFile.softDelete();
     
-        when(storedFileRepository
-                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
-                        storedFile.getId(),
-                        ownerId,
-                        FileStatus.READY
-                ))
-                .thenReturn(Optional.of(storedFile));
-    
-        when(folderAccessValidator.requireAccessibleFolder(
-                ownerId,
-                folderId
-        )).thenThrow(
-                new FolderNotFoundException("Folder not found")
-        );
-    
         when(fileMetadataService.restore(
-                storedFile,
-                null
+            ownerId,
+            storedFile.getId()
         )).thenAnswer(invocation -> {
             storedFile.restore(
                     null,
@@ -2059,18 +2044,14 @@ class FileServiceTest {
         assertNull(response.folderId());
         assertEquals("report.pdf", response.name());
     
-        verify(folderAccessValidator)
-                .requireAccessibleFolder(
-                        ownerId,
-                        folderId
-                );
-    
         verify(fileMetadataService)
                 .restore(
-                        storedFile,
-                        null
+                    ownerId,
+                    storedFile.getId()
                 );
-    
+
+        verifyNoInteractions(folderAccessValidator);
+        verifyNoInteractions(storedFileRepository);
         verifyNoInteractions(objectStorageService);
     }
     
@@ -2087,17 +2068,9 @@ class FileServiceTest {
     
         storedFile.softDelete();
     
-        when(storedFileRepository
-                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
-                        storedFile.getId(),
-                        ownerId,
-                        FileStatus.READY
-                ))
-                .thenReturn(Optional.of(storedFile));
-    
         when(fileMetadataService.restore(
-                storedFile,
-                null
+            ownerId,
+            storedFile.getId()
         )).thenAnswer(invocation -> {
             storedFile.restore(
                     null,
@@ -2116,11 +2089,12 @@ class FileServiceTest {
         assertEquals("report.pdf", response.name());
     
         verifyNoInteractions(folderAccessValidator);
-    
+        verifyNoInteractions(storedFileRepository);
+
         verify(fileMetadataService)
                 .restore(
-                        storedFile,
-                        null
+                    ownerId,
+                    storedFile.getId()
                 );
     
         verifyNoInteractions(objectStorageService);
@@ -2140,24 +2114,9 @@ class FileServiceTest {
     
         storedFile.softDelete();
     
-        when(storedFileRepository
-                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
-                        storedFile.getId(),
-                        ownerId,
-                        FileStatus.READY
-                ))
-                .thenReturn(Optional.of(storedFile));
-    
-        Folder folder = mock(Folder.class);
-    
-        when(folderAccessValidator.requireAccessibleFolder(
-                ownerId,
-                folderId
-        )).thenReturn(folder);
-    
         when(fileMetadataService.restore(
-                storedFile,
-                folderId
+            ownerId,
+            storedFile.getId()
         )).thenAnswer(invocation -> {
             storedFile.restore(
                     folderId,
@@ -2182,18 +2141,14 @@ class FileServiceTest {
                 response.name()
         );
     
-        verify(folderAccessValidator)
-                .requireAccessibleFolder(
-                        ownerId,
-                        folderId
-                );
-    
         verify(fileMetadataService)
                 .restore(
-                        storedFile,
-                        folderId
+                    ownerId,
+                    storedFile.getId()
                 );
-    
+
+        verifyNoInteractions(folderAccessValidator);
+        verifyNoInteractions(storedFileRepository);
         verifyNoInteractions(objectStorageService);
     }
 
@@ -2202,13 +2157,8 @@ class FileServiceTest {
         UUID ownerId = UUID.randomUUID();
         UUID fileId = UUID.randomUUID();
     
-        when(storedFileRepository
-                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
-                        fileId,
-                        ownerId,
-                        FileStatus.READY
-                ))
-                .thenReturn(Optional.empty());
+        when(fileMetadataService.restore(ownerId, fileId))
+                .thenThrow(new FileNotFoundException("File not found"));
     
         FileNotFoundException exception =
                 assertThrows(
@@ -2225,7 +2175,46 @@ class FileServiceTest {
         );
     
         verifyNoInteractions(folderAccessValidator);
-        verifyNoInteractions(fileMetadataService);
+        verify(fileMetadataService).restore(ownerId, fileId);
+        verifyNoInteractions(storedFileRepository);
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldRequestPermanentDeletionForTrashedFile() {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+
+        fileService.requestPermanentDeletion(ownerId, fileId);
+
+        verify(fileMetadataService)
+                .requestPermanentDeletion(
+                    ownerId,
+                    fileId
+                );
+
+        verifyNoInteractions(folderAccessValidator);
+        verifyNoInteractions(storedFileRepository);
+        verifyNoInteractions(objectStorageService);
+    }
+
+    @Test
+    void shouldRejectPermanentDeletionForActiveFile() {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+
+        when(fileMetadataService.requestPermanentDeletion(ownerId, fileId))
+                .thenThrow(new FileNotFoundException("File not found"));
+
+        assertThrows(
+                FileNotFoundException.class,
+                () -> fileService.requestPermanentDeletion(ownerId, fileId)
+        );
+
+        verify(fileMetadataService)
+                .requestPermanentDeletion(ownerId, fileId);
+        verifyNoInteractions(storedFileRepository);
+        verifyNoInteractions(folderAccessValidator);
         verifyNoInteractions(objectStorageService);
     }
 

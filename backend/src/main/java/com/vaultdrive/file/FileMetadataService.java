@@ -1,10 +1,14 @@
 package com.vaultdrive.file;
 
 import com.vaultdrive.file.exception.DuplicateFileNameException;
+import com.vaultdrive.file.exception.FileNotFoundException;
 import com.vaultdrive.user.UserRepository;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import com.vaultdrive.folder.FolderAccessValidator;
+import com.vaultdrive.folder.exception.FolderNotFoundException;
 
 import java.util.Set;
 import java.util.UUID;
@@ -21,13 +25,16 @@ public class FileMetadataService {
 
     private final StoredFileRepository storedFileRepository;
     private final UserRepository userRepository;
+    private final FolderAccessValidator folderAccessValidator;
 
     public FileMetadataService(
             StoredFileRepository storedFileRepository,
-            UserRepository userRepository
+            UserRepository userRepository,
+            FolderAccessValidator folderAccessValidator
     ) {
         this.storedFileRepository = storedFileRepository;
         this.userRepository = userRepository;
+        this.folderAccessValidator = folderAccessValidator;
     }
 
     @Transactional
@@ -124,22 +131,59 @@ public class FileMetadataService {
 
     @Transactional
     public StoredFile restore(
-            StoredFile file,
-            UUID destinationFolderId
+            UUID ownerId,
+            UUID fileId
     ) {
-        lockFileNamespace(file.getOwnerId());
+        lockFileNamespace(ownerId);
+
+        StoredFile file =
+                storedFileRepository
+                        .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                                fileId,
+                                ownerId,
+                                FileStatus.READY
+                        )
+                        .orElseThrow(() ->
+                                new FileNotFoundException("File not found")
+                        );
+
+        UUID destinationFolderId =
+                resolveRestoreDestination(
+                        ownerId,
+                        file.getFolderId()
+                );
     
         String restoredName =
                 generateRestoredName(
-                        file.getOwnerId(),
+                        ownerId,
                         destinationFolderId,
                         file.getName()
                 );
     
-        file.restore(
-                destinationFolderId,
-                restoredName
-        );
+        file.restore(destinationFolderId, restoredName);
+
+        return storedFileRepository.saveAndFlush(file);
+    }
+
+    @Transactional
+    public StoredFile requestPermanentDeletion(
+            UUID ownerId,
+            UUID fileId
+    ) {
+        lockFileNamespace(ownerId);
+
+        StoredFile file =
+                storedFileRepository
+                        .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                                fileId,
+                                ownerId,
+                                FileStatus.READY
+                        )
+                        .orElseThrow(() ->
+                                new FileNotFoundException("File not found")
+                        );
+
+        file.requestPermanentDeletion();
     
         return storedFileRepository.saveAndFlush(file);
     }
@@ -212,6 +256,27 @@ public class FileMetadataService {
                                 "User not found"
                         )
                 );
+    }
+
+    private UUID resolveRestoreDestination(
+            UUID ownerId,
+            UUID originalFolderId
+    ) {
+        if (originalFolderId == null) {
+            return null;
+        }
+
+        try {
+            folderAccessValidator.requireAccessibleFolder(
+                    ownerId,
+                    originalFolderId
+            );
+
+            return originalFolderId;
+
+        } catch (FolderNotFoundException exception) {
+            return null;
+        }
     }
 
     private String generateRestoredName(

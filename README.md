@@ -345,10 +345,11 @@ These features are planned and have not yet been implemented.
 - File upload/download/list/rename/move/Trash/restore
 - Garage S3-compatible storage adapter
 - Pending-purge schema and lifecycle state
+- Durable permanent-delete request endpoint
 
 **Current milestone:**
 
-Completing the durable permanent-delete request flow, then implementing a retryable asynchronous purge worker. A concurrency refactor is planned after the current behavior is documented and protected by integration tests.
+Implementing a retryable asynchronous purge worker. A granular concurrency refactor remains planned after the current behavior is protected by database-backed concurrency tests.
 
 ## Project Goals
 

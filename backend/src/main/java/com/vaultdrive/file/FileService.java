@@ -7,7 +7,6 @@ import com.vaultdrive.file.dto.FileDownload;
 import com.vaultdrive.file.exception.FileUploadException;
 import com.vaultdrive.file.exception.InvalidFilePaginationException;
 import com.vaultdrive.file.exception.FileNotFoundException;
-import com.vaultdrive.folder.exception.FolderNotFoundException;
 import com.vaultdrive.folder.FolderAccessValidator;
 import com.vaultdrive.storage.ObjectStorageService;
 import com.vaultdrive.storage.StorageKeyGenerator;
@@ -375,30 +374,23 @@ public class FileService {
             UUID ownerId,
             UUID fileId
     ) {
-        StoredFile storedFile =
-                storedFileRepository
-                        .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
-                                fileId,
-                                ownerId,
-                                FileStatus.READY
-                        )
-                        .orElseThrow(() ->
-                                new FileNotFoundException("File not found")
-                        );
-    
-        UUID destinationFolderId =
-                resolveRestoreDestination(
-                        ownerId,
-                        storedFile.getFolderId()
-                );
-    
         StoredFile restoredFile =
                 fileMetadataService.restore(
-                        storedFile,
-                        destinationFolderId
+                        ownerId,
+                        fileId
                 );
     
         return toFileResponse(restoredFile);
+    }
+
+    public void requestPermanentDeletion(
+            UUID ownerId,
+            UUID fileId
+    ) {
+        fileMetadataService.requestPermanentDeletion(
+                ownerId,
+                fileId
+        );
     }
 
     private FileResponse toFileResponse(
@@ -461,27 +453,6 @@ public class FileService {
              * If updating FAILED also fails, the row may remain UPLOADING.
              * A future reconciliation process can detect that state.
              */
-        }
-    }
-
-    private UUID resolveRestoreDestination(
-            UUID ownerId,
-            UUID originalFolderId
-    ) {
-        if (originalFolderId == null) {
-            return null;
-        }
-    
-        try {
-            folderAccessValidator.requireAccessibleFolder(
-                    ownerId,
-                    originalFolderId
-            );
-    
-            return originalFolderId;
-    
-        } catch (FolderNotFoundException exception) {
-            return null;
         }
     }
 }

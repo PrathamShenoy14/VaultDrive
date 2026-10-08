@@ -36,7 +36,7 @@ Locking the user row serializes namespace mutations and makes name selection eas
 
 ## Lock-before-read matters for competing transitions
 
-If restore reads an eligible Trash row before acquiring the lock while permanent delete does the same, both can act on stale eligibility. The safer pattern is: acquire the shared lock, re-read the eligible state inside that transaction, then mutate. The local uncommitted restore/delete change applies this lesson; an integration-level race test is still needed.
+If restore reads an eligible Trash row before acquiring the lock while permanent delete does the same, both can act on stale eligibility. The implemented pattern is: acquire the shared owner lock, re-read the eligible state inside that transaction, then mutate. Unit tests verify this interaction order for restore and permanent-delete request; a PostgreSQL-backed race test is still needed to prove transaction-level behavior.
 
 ## Failure handling should preserve the most useful truth
 

@@ -9,18 +9,20 @@ This roadmap separates repository evidence from future intent. Ordering can chan
 - [x] Owner-scoped folder tree with create/list/get/rename/move/soft-delete/trash/restore.
 - [x] S3-compatible upload/download through Garage, metadata listing, rename, move, trash, and restore.
 - [x] Pending-purge schema/domain state and purge-aware trash/restore queries.
-- [ ] Permanent-delete request flow: implemented only in the local unstaged working tree at the 2026-10-09 audit; validate and commit separately.
+- [x] Permanent-delete request flow: owner lock, eligibility fetch, durable pending-purge transition, and `202 Accepted` response without Garage deletion.
 
-## Phase 1 — Stabilize permanent-delete intent
+## Phase 1 — Durable permanent-delete intent (completed)
 
 Goal: atomically choose exactly one of restore or permanent-delete for an eligible trashed file.
 
-- Review the unstaged endpoint and lock-before-read refactor.
-- Add or confirm a PostgreSQL-backed concurrency test for restore versus permanent-delete, not only mocked unit tests.
-- Decide and document idempotency behavior for repeated permanent-delete requests.
-- Run targeted file tests and the full suite, then commit this feature separately from documentation.
+- [x] Add the authenticated permanent-delete request endpoint and return `202 Accepted` after recording intent.
+- [x] Acquire the owner namespace lock before fetching restore or permanent-delete eligibility.
+- [x] Restrict the transition to owned, trashed `READY` files with no existing purge request.
+- [x] Keep Garage deletion out of the HTTP request path.
+- [x] Return `404 Not Found` for inaccessible, ineligible, and repeated requests rather than treating repetition as an idempotent success.
+- [x] Cover the HTTP contract, service delegation, transition, and lock-before-read interaction order with unit and MockMvc tests.
 
-Exit criteria: the API contract, state transition, ownership boundary, race behavior, and tests agree; no Garage delete occurs in the request path.
+The database-backed restore-versus-permanent-delete race test remains part of Phase 3 concurrency hardening; the current tests do not claim to prove transaction serialization.
 
 ## Phase 2 — Build a minimal reliable purge worker
 
@@ -40,7 +42,7 @@ Exit criteria: a committed deletion request survives restart, is retried safely,
 Goal: reduce unnecessary same-user serialization.
 
 - Inventory every namespace-changing operation and its read/lock/write order.
-- Add deterministic concurrency tests for create, rename, move, restore, trash, and purge-request conflicts.
+- Add deterministic PostgreSQL-backed concurrency tests for create, rename, move, restore, trash, and purge-request conflicts, including restore versus permanent-delete.
 - Establish a reproducible contention workload and baseline; do not infer performance from unit tests.
 - Compare candidate lock scopes: parent-folder row, dedicated namespace lock row, PostgreSQL advisory lock, or optimistic write plus unique-constraint retry.
 - Define stable lock ordering for operations spanning source and destination namespaces.

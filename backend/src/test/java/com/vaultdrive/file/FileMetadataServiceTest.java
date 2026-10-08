@@ -1,8 +1,12 @@
 package com.vaultdrive.file;
 
 import com.vaultdrive.file.exception.DuplicateFileNameException;
+import com.vaultdrive.file.exception.FileNotFoundException;
 import com.vaultdrive.user.User;
 import com.vaultdrive.user.UserRepository;
+import com.vaultdrive.folder.FolderAccessValidator;
+import com.vaultdrive.folder.Folder;
+import com.vaultdrive.folder.exception.FolderNotFoundException;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +32,9 @@ class FileMetadataServiceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private FolderAccessValidator folderAccessValidator;
+
     private FileMetadataService fileMetadataService;
 
     private UUID ownerId;
@@ -36,7 +43,8 @@ class FileMetadataServiceTest {
     void setUp() {
         fileMetadataService = new FileMetadataService(
                 storedFileRepository,
-                userRepository
+                userRepository,
+                folderAccessValidator
         );
 
         ownerId = UUID.randomUUID();
@@ -630,6 +638,8 @@ class FileMetadataServiceTest {
     @Test
     void shouldRestoreFileToOriginalFolder() {
         UUID folderId = UUID.randomUUID();
+
+        mockAccessibleFolder(folderId);
     
         StoredFile file =
                 createFile(
@@ -640,6 +650,14 @@ class FileMetadataServiceTest {
         UUID ownerId = file.getOwnerId();
     
         file.softDelete();
+
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                        file.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(file));
     
         when(userRepository.findByIdForUpdate(ownerId))
                 .thenReturn(Optional.of(mock(User.class)));
@@ -661,8 +679,8 @@ class FileMetadataServiceTest {
     
         StoredFile restored =
                 fileMetadataService.restore(
-                        file,
-                        folderId
+                    file.getOwnerId(),
+                    file.getId()
                 );
     
         assertEquals(
@@ -694,6 +712,19 @@ class FileMetadataServiceTest {
         UUID ownerId = file.getOwnerId();
     
         file.softDelete();
+
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                        file.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(file));
+
+        when(folderAccessValidator.requireAccessibleFolder(
+                ownerId,
+                originalFolderId
+        )).thenThrow(new FolderNotFoundException("Folder not found"));
     
         when(userRepository.findByIdForUpdate(ownerId))
                 .thenReturn(Optional.of(mock(User.class)));
@@ -714,8 +745,8 @@ class FileMetadataServiceTest {
     
         StoredFile restored =
                 fileMetadataService.restore(
-                        file,
-                        null
+                    file.getOwnerId(),
+                    file.getId()
                 );
     
         assertEquals(
@@ -733,6 +764,8 @@ class FileMetadataServiceTest {
     @Test
     void shouldAutomaticallyRenameFileWhenRestoreNameAlreadyExists() {
         UUID folderId = UUID.randomUUID();
+
+        mockAccessibleFolder(folderId);
     
         StoredFile file =
                 createFile(
@@ -743,6 +776,14 @@ class FileMetadataServiceTest {
         UUID ownerId = file.getOwnerId();
     
         file.softDelete();
+
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                        file.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(file));
     
         when(userRepository.findByIdForUpdate(ownerId))
                 .thenReturn(Optional.of(mock(User.class)));
@@ -776,8 +817,8 @@ class FileMetadataServiceTest {
     
         StoredFile restored =
                 fileMetadataService.restore(
-                        file,
-                        folderId
+                    file.getOwnerId(),
+                    file.getId()
                 );
     
         assertEquals(
@@ -799,6 +840,8 @@ class FileMetadataServiceTest {
     @Test
     void shouldIncrementRestoredSuffixUntilAvailableNameIsFound() {
         UUID folderId = UUID.randomUUID();
+
+        mockAccessibleFolder(folderId);
     
         StoredFile file =
                 createFile(
@@ -809,6 +852,14 @@ class FileMetadataServiceTest {
         UUID ownerId = file.getOwnerId();
     
         file.softDelete();
+
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                        file.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(file));
     
         when(userRepository.findByIdForUpdate(ownerId))
                 .thenReturn(Optional.of(mock(User.class)));
@@ -836,8 +887,8 @@ class FileMetadataServiceTest {
     
         StoredFile restored =
                 fileMetadataService.restore(
-                        file,
-                        folderId
+                    file.getOwnerId(),
+                    file.getId()
                 );
     
         assertEquals(
@@ -851,6 +902,8 @@ class FileMetadataServiceTest {
     @Test
     void shouldAutomaticallyRenameExtensionlessFileOnRestoreConflict() {
         UUID folderId = UUID.randomUUID();
+
+        mockAccessibleFolder(folderId);
     
         StoredFile file =
                 createFile(
@@ -861,6 +914,14 @@ class FileMetadataServiceTest {
         UUID ownerId = file.getOwnerId();
     
         file.softDelete();
+
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                        file.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(file));
     
         when(userRepository.findByIdForUpdate(ownerId))
                 .thenReturn(Optional.of(mock(User.class)));
@@ -894,8 +955,8 @@ class FileMetadataServiceTest {
     
         StoredFile restored =
                 fileMetadataService.restore(
-                        file,
-                        folderId
+                    file.getOwnerId(),
+                    file.getId()
                 );
     
         assertEquals(
@@ -909,6 +970,8 @@ class FileMetadataServiceTest {
     @Test
     void shouldTruncateLongFileNameWhenGeneratingRestoredName() {
         UUID folderId = UUID.randomUUID();
+
+        mockAccessibleFolder(folderId);
     
         // 251 chars + ".pdf" = 255 chars
         String originalName =
@@ -923,6 +986,14 @@ class FileMetadataServiceTest {
         UUID ownerId = file.getOwnerId();
     
         file.softDelete();
+
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                        file.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(file));
     
         when(userRepository.findByIdForUpdate(ownerId))
                 .thenReturn(Optional.of(mock(User.class)));
@@ -949,8 +1020,8 @@ class FileMetadataServiceTest {
     
         StoredFile restored =
                 fileMetadataService.restore(
-                        file,
-                        folderId
+                    file.getOwnerId(),
+                    file.getId()
                 );
     
         assertEquals(
@@ -965,6 +1036,116 @@ class FileMetadataServiceTest {
         );
     
         assertNull(restored.getDeletedAt());
+    }
+
+    @Test
+    void shouldMarkTrashedFileForPermanentDeletion() {
+        StoredFile file = createFile(null, "report.pdf");
+        file.markReady();
+        file.softDelete();
+
+        UUID ownerId = file.getOwnerId();
+        UUID fileId = file.getId();
+
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                        fileId,
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(file));
+
+        when(userRepository.findByIdForUpdate(ownerId))
+                .thenReturn(Optional.of(mock(User.class)));
+
+        when(storedFileRepository.saveAndFlush(file))
+                .thenReturn(file);
+
+        StoredFile result =
+                fileMetadataService.requestPermanentDeletion(
+                        ownerId,
+                        fileId
+                );
+
+        assertNotNull(result.getDeletedAt());
+        assertNotNull(result.getPurgeRequestedAt());
+        assertEquals(FileStatus.READY, result.getStatus());
+
+        verify(storedFileRepository).saveAndFlush(file);
+    }
+
+    @Test
+    void shouldRejectRestoreWhenFileIsNotInTrashAfterLockingOwner() {
+        UUID fileId = UUID.randomUUID();
+
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                        fileId,
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.empty());
+
+        FileNotFoundException exception = assertThrows(
+                FileNotFoundException.class,
+                () -> fileMetadataService.restore(ownerId, fileId)
+        );
+
+        assertEquals("File not found", exception.getMessage());
+
+        var inOrder = inOrder(userRepository, storedFileRepository);
+        inOrder.verify(userRepository).findByIdForUpdate(ownerId);
+        inOrder.verify(storedFileRepository)
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                        fileId,
+                        ownerId,
+                        FileStatus.READY
+                );
+
+        verify(storedFileRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(folderAccessValidator);
+    }
+
+    @Test
+    void shouldRejectPermanentDeletionWhenFileIsNotInTrashAfterLockingOwner() {
+        UUID fileId = UUID.randomUUID();
+
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                        fileId,
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.empty());
+
+        FileNotFoundException exception = assertThrows(
+                FileNotFoundException.class,
+                () -> fileMetadataService.requestPermanentDeletion(
+                        ownerId,
+                        fileId
+                )
+        );
+
+        assertEquals("File not found", exception.getMessage());
+
+        var inOrder = inOrder(userRepository, storedFileRepository);
+        inOrder.verify(userRepository).findByIdForUpdate(ownerId);
+        inOrder.verify(storedFileRepository)
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                        fileId,
+                        ownerId,
+                        FileStatus.READY
+                );
+
+        verify(storedFileRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(folderAccessValidator);
+    }
+
+    private void mockAccessibleFolder(UUID folderId) {
+        when(folderAccessValidator.requireAccessibleFolder(
+                ownerId,
+                folderId
+        )).thenReturn(mock(Folder.class));
     }
 
     private StoredFile createFile(

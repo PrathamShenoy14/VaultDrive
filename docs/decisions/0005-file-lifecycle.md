@@ -9,7 +9,7 @@ File operations span relational metadata and object storage. Users need listing,
 
 ## Decision
 
-Use `UPLOADING`, `READY`, and `FAILED` for storage readiness. Create metadata as `UPLOADING`, stream to object storage, then mark `READY`; best-effort mark `FAILED` on upload error. Expose only active `READY` files. Represent Trash with `deleted_at`, leaving the Garage object and storage key unchanged. Restore the same row/object to its original accessible folder or root and resolve name collisions with extension-preserving suffixes.
+Use `UPLOADING`, `READY`, and `FAILED` for storage readiness. Create metadata as `UPLOADING`, stream to object storage, then mark `READY`; best-effort mark `FAILED` on upload error. Expose only active `READY` files. Represent Trash with `deleted_at`, leaving the Garage object and storage key unchanged. Restore the same row/object to its original accessible folder or root and resolve name collisions with extension-preserving suffixes. Restore acquires the owner's namespace lock before re-reading the eligible trashed row so it cannot act on eligibility fetched before a competing permanent-delete request.
 
 ## Consequences
 

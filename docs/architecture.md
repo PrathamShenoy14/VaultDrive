@@ -61,9 +61,9 @@ Not implemented: refresh tokens, logout/revocation, account-state checks, rate l
 - Trash is metadata-only: `deleted_at` is set, the object remains in Garage, and the active name is released.
 - Restore retains the same row, storage key, and object. It returns to the original accessible folder or root and resolves name collisions while preserving the extension.
 
-### Pending purge — Partially committed
+### Pending purge request — Implemented
 
-The committed baseline contains `purge_requested_at`, the entity transition, and purge-aware trash/restore queries. These states are represented independently from upload status:
+The request flow contains `purge_requested_at`, the entity transition, purge-aware trash/restore queries, and `DELETE /api/v1/files/{fileId}/permanent`. These states are represented independently from upload status:
 
 | Lifecycle | `deleted_at` | `purge_requested_at` | User-visible behavior |
 |---|---:|---:|---|
@@ -71,9 +71,9 @@ The committed baseline contains `purge_requested_at`, the entity transition, and
 | Trash | set | null | listed in trash and restorable |
 | Pending purge | set | set | hidden from active views and trash; not restorable |
 
-The local unstaged working tree also contains `DELETE /api/v1/files/{fileId}/permanent`, returning `202 Accepted`, and moves restore/permanent-delete eligibility reads behind the per-user lock. These changes must be independently reviewed, tested, and committed.
+The endpoint accepts only an owned, trashed `READY` file whose purge has not already been requested. It acquires the owner's namespace lock before fetching that eligible row, records `purge_requested_at` in PostgreSQL, and returns `202 Accepted`. Ineligible, inaccessible, and repeated requests return the same `404 Not Found`. The request path does not call Garage.
 
-No purge worker exists. Garage deletion, database-row finalization, retry/backoff, job claiming, crash recovery, observability, and dead-letter handling remain planned.
+This completes only the durable request transition. No purge worker exists. Garage deletion, database-row finalization, retry/backoff, job claiming, crash recovery, observability, and dead-letter handling remain planned.
 
 ## Current consistency and concurrency model
 
@@ -85,14 +85,14 @@ This is deliberately simple and correctness-oriented, but it is coarse:
 
 - unrelated folders for one user block each other;
 - file and folder mutations for one user can block each other;
-- some committed file flows read the target before entering the lock-owning transaction, which can leave a race window or stale decision;
+- restore and permanent-delete request acquire the owner lock before reading the eligible file, while other file flows still require audit before any lock refactor;
 - no throughput or contention benchmark currently exists.
 
-The local restore/permanent-delete changes demonstrate the required lock-before-read pattern for mutually exclusive state transitions. A granular replacement is planned, but the lock key and mechanism are not yet decided. See ADR-0007.
+Restore and permanent-delete request demonstrate the required lock-before-read pattern for mutually exclusive state transitions. A granular replacement is planned, but the lock key and mechanism are not yet decided. See ADR-0007.
 
 ## Test evidence
 
-The repository contains unit tests, MockMvc controller tests, Spring Security integration tests, PostgreSQL repository tests, folder concurrency integration tests, and a live S3-compatible storage integration test. The presence of a test is evidence of intended coverage, not proof that it passed on every machine; current verification results belong in the task/commit report.
+The repository contains unit tests, MockMvc controller tests, Spring Security integration tests, PostgreSQL repository tests, folder concurrency integration tests, and a live S3-compatible storage integration test. The permanent-delete request has controller tests for accepted, not-found, and unauthenticated outcomes; service tests for delegation, errors, and no object-storage access; and metadata-service tests for the durable transition and lock-before-read call order. A PostgreSQL-backed restore-versus-permanent-delete race test is not yet implemented. The presence of a test is evidence of intended coverage, not proof that it passed on every machine; current verification results belong in the task/commit report.
 
 ## Known gaps and pending decisions
 

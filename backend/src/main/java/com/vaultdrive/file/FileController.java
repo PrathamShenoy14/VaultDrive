@@ -220,6 +220,22 @@ public class FileController {
     
         return ResponseEntity.ok(response);
     }
+
+    @DeleteMapping("/{fileId}/permanent")
+    public ResponseEntity<Void> permanentlyDeleteFile(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID fileId
+    ) {
+        UUID ownerId =
+                UUID.fromString(jwt.getSubject());
+
+        fileService.requestPermanentDeletion(
+                ownerId,
+                fileId
+        );
+
+        return ResponseEntity.accepted().build();
+    }
     
     private MediaType resolveContentType(
             String contentType

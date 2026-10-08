@@ -1062,7 +1062,7 @@ class FileControllerTest {
     void shouldTrashFile() throws Exception {
         UUID ownerId = UUID.randomUUID();
         UUID fileId = UUID.randomUUID();
-    
+
         mockMvc.perform(
                         delete("/api/v1/files/{fileId}", fileId)
                                 .with(jwt().jwt(jwt ->
@@ -1388,6 +1388,59 @@ class FileControllerTest {
                 )
                 .andExpect(status().isUnauthorized());
     
+        verifyNoInteractions(fileService);
+    }
+
+    @Test
+    void shouldAcceptPermanentDeletionRequest() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+
+        mockMvc.perform(
+                delete("/api/v1/files/{fileId}/permanent", fileId)
+                        .with(jwt().jwt(jwt ->
+                                jwt.subject(ownerId.toString())
+                        ))
+        )
+                .andExpect(status().isAccepted());
+
+        verify(fileService)
+                .requestPermanentDeletion(ownerId, fileId);
+    }
+
+    @Test
+    void shouldReturnNotFoundWhenPermanentDeletionIsNotAllowed()
+            throws Exception {
+
+        UUID ownerId = UUID.randomUUID();
+        UUID fileId = UUID.randomUUID();
+
+        doThrow(new FileNotFoundException("File not found"))
+                .when(fileService)
+                .requestPermanentDeletion(ownerId, fileId);
+
+        mockMvc.perform(
+                delete("/api/v1/files/{fileId}/permanent", fileId)
+                        .with(jwt().jwt(jwt ->
+                                jwt.subject(ownerId.toString())
+                        ))
+        )
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message")
+                        .value("File not found"));
+    }
+
+    @Test
+    void shouldRejectUnauthenticatedPermanentDeletionRequest()
+            throws Exception {
+
+        UUID fileId = UUID.randomUUID();
+
+        mockMvc.perform(
+                delete("/api/v1/files/{fileId}/permanent", fileId)
+        )
+                .andExpect(status().isUnauthorized());
+
         verifyNoInteractions(fileService);
     }
 }

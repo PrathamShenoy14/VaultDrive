@@ -17,7 +17,7 @@ Plan a measured refactor to a more granular namespace lock. Do not select the fi
 
 - The current strategy is easy to explain and aligns application decisions with database uniqueness constraints.
 - A single user's unrelated file and folder mutations block each other, limiting same-user concurrency.
-- Several committed file operations fetch a target before entering the lock-owning metadata transaction; these flows require audit during the refactor.
+- Restore and permanent-delete request lock the owner row before fetching their shared eligible Trash state. Other file operations still require a read/lock/write audit during the refactor.
 - Granular locks can improve concurrency but introduce multiple-key ordering and deadlock risks, especially for moves.
 - Database constraints remain mandatory after any lock refactor.
 
@@ -25,7 +25,7 @@ Plan a measured refactor to a more granular namespace lock. Do not select the fi
 
 - Deterministic tests for same-name creates and renames.
 - Conflicting source/destination moves with stable lock ordering.
-- Restore versus permanent-delete mutual exclusion.
+- PostgreSQL-backed restore versus permanent-delete mutual exclusion; unit interaction-order tests exist but do not prove transaction serialization.
 - Unrelated folder operations demonstrating safe parallelism.
 - A reproducible baseline and post-change contention measurement.
 
