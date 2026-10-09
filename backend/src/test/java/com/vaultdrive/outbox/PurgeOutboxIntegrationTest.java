@@ -17,6 +17,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.Arguments;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -34,6 +36,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -214,6 +218,55 @@ class PurgeOutboxIntegrationTest {
         assertThatThrownBy(() -> request(resource, ownerId))
                 .isInstanceOf(notFound(resource));
         assertThat(onlyEvent(resource).getId()).isEqualTo(eventId);
+    }
+
+    @ParameterizedTest
+    @MethodSource("simultaneousPurgeRequests")
+    void simultaneousRequestsEmitOneEventAfterWinnerCommitOrRollback(Resource resource, boolean rollback)
+            throws Exception {
+        CountDownLatch flushed = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var first = executor.submit(() -> transaction.executeWithoutResult(status -> {
+                request(resource, ownerId);
+                flushed.countDown();
+                try {
+                    if (!release.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Timed out waiting for test release");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Interrupted test", exception);
+                }
+                if (rollback) {
+                    status.setRollbackOnly();
+                }
+            }));
+            assertThat(flushed.await(5, TimeUnit.SECONDS)).isTrue();
+            var second = executor.submit(() -> request(resource, ownerId));
+            assertThatThrownBy(() -> second.get(500, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(java.util.concurrent.TimeoutException.class);
+            release.countDown();
+            first.get(5, TimeUnit.SECONDS);
+            if (rollback) {
+                second.get(5, TimeUnit.SECONDS);
+            } else {
+                assertThatThrownBy(() -> second.get(5, TimeUnit.SECONDS))
+                        .hasRootCauseInstanceOf(notFound(resource));
+            }
+            assertThat(events(resource)).hasSize(1);
+            assertThat(purgeRequestedAt(resource)).isNotNull();
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+            executor.awaitTermination(5, TimeUnit.SECONDS);
+        }
+    }
+
+    private static Stream<Arguments> simultaneousPurgeRequests() {
+        return Stream.of(Arguments.of(Resource.FILE, false), Arguments.of(Resource.FILE, true),
+                Arguments.of(Resource.FOLDER, false), Arguments.of(Resource.FOLDER, true));
     }
 
     @Test

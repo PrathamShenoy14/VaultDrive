@@ -8,6 +8,8 @@ VaultDrive is being developed incrementally, starting with a Spring Boot backend
 
 For the current implementation boundary and design rationale, see [Architecture](docs/architecture.md), [Development roadmap](docs/development-roadmap.md), and [Architecture decisions](docs/decisions/).
 
+For opt-in leased RabbitMQ publication, local connectivity, and recovery, see [Outbox publishing](docs/outbox-publishing.md).
+
 ## Tech Stack
 
 ### Backend
@@ -25,6 +27,7 @@ For the current implementation boundary and design rationale, see [Architecture]
 ### Infrastructure
 - Docker
 - Ubuntu Server (VirtualBox development environment)
+- RabbitMQ with PostgreSQL transactional outbox publication; consumers and purge workers remain planned
 
 ### Authentication
 - BCrypt password hashing
@@ -309,7 +312,7 @@ backend/
 ### Performance and Background Processing
 
 - Redis caching
-- Message queues
+- Idempotent RabbitMQ consumers and durable purge jobs
 - Asynchronous background processing
 - Notifications
 - Activity logging

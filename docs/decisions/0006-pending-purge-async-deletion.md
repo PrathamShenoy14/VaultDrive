@@ -21,7 +21,8 @@ Folder requests take the exclusive owner hierarchy lock, pessimistically lock th
 - Tested at unit/MockMvc level: accepted, not-found, and unauthenticated HTTP outcomes; service delegation and absence of object-storage calls; metadata transition and lock-before-read interaction order.
 - Tested: PostgreSQL-backed races for both restore/permanent-delete winner orders.
 - Implemented in Phase 1B: file/folder purge-intent outbox events persisted atomically with new requests; schema and payload contract are recorded in ADR-0008.
-- Not implemented: file/folder workers, subtree traversal/deletion execution, claim protocol, retries/backoff, final row deletion, broker integration/publishing, metrics, or repair tooling.
+- Implemented in Phase 1C: leased outbox publication, broker confirms, bounded publisher retries and expired publisher-claim recovery. This does not execute purge intent.
+- Not implemented: file/folder workers, subtree traversal/deletion execution, worker claim/fencing/retry, final row deletion, job recovery, metrics, or purge repair tooling.
 
 ## Consequences
 

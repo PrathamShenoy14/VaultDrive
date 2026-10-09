@@ -10,6 +10,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
+import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -56,6 +57,15 @@ public class OutboxEvent {
 
     @Column(name = "published_at")
     private Instant publishedAt;
+
+    @Column(name = "claim_token")
+    private UUID claimToken;
+
+    @Column(name = "claim_expires_at")
+    private Instant claimExpiresAt;
+
+    @Column(name = "last_failure_code", length = 48)
+    private String lastFailureCode;
 
     protected OutboxEvent() {
     }
@@ -149,5 +159,40 @@ public class OutboxEvent {
 
     public Instant getPublishedAt() {
         return publishedAt;
+    }
+
+    public UUID getClaimToken() {
+        return claimToken;
+    }
+
+    public Instant getClaimExpiresAt() {
+        return claimExpiresAt;
+    }
+
+    public String getLastFailureCode() {
+        return lastFailureCode;
+    }
+
+    void claim(Instant databaseNow, Duration lease, Duration recoveryBackoff) {
+        if (deliveryStatus == OutboxDeliveryStatus.PUBLISHING) {
+            lastFailureCode = "LEASE_EXPIRED";
+        }
+        deliveryStatus = OutboxDeliveryStatus.PUBLISHING;
+        claimToken = UUID.randomUUID();
+        claimExpiresAt = databaseNow.plus(lease);
+        attemptCount++;
+        lastAttemptAt = databaseNow;
+        nextAttemptAt = claimExpiresAt.plus(recoveryBackoff);
+    }
+
+    void exhaustExpiredClaim() {
+        if (deliveryStatus == OutboxDeliveryStatus.PUBLISHING) {
+            lastFailureCode = "LEASE_EXPIRED";
+        } else if (lastFailureCode == null) {
+            lastFailureCode = "ATTEMPT_LIMIT";
+        }
+        deliveryStatus = OutboxDeliveryStatus.FAILED;
+        claimToken = null;
+        claimExpiresAt = null;
     }
 }

@@ -41,14 +41,23 @@ See [development setup and verification instructions](rabbitmq-development.md). 
 - [x] Insert file/folder purge-intent events with Spring Data JPA inside the existing business transaction; reject standalone writer calls.
 - [x] Add real PostgreSQL tests for atomic commit/rollback, uncommitted visibility, insertion failures, ownership/eligibility rejection, and repeated requests on both paths.
 
-See [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md). Test execution results belong in the task report. Publishing, consumers, workers, durable jobs, retry/recovery scheduling, and backfill of historical intents remain unimplemented.
+See [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md). Phase 1B covers persistence; Phase 1C below adds publication and publisher recovery. Consumers, workers, durable jobs, job recovery, and backfill of historical intents remain unimplemented. Test execution results belong in the task report.
+
+## Phase 1C — Reliable outbox publication
+
+- [x] Add V13 token/lease state and use PostgreSQL `FOR UPDATE SKIP LOCKED` for short concurrent claims.
+- [x] Publish outside database transactions with stable event IDs, persistent messages, durable direct/quorum topology, correlated confirms, and mandatory-return checks.
+- [x] Fence completion by unexpired token; bound retries/backoff and recover abandoned claims, retaining exhausted events as `FAILED`.
+- [x] Add concurrent publisher, failure/expiry/replay, and simultaneous file/folder purge tests; isolate live broker tests from production topology.
+
+See [publisher development/recovery instructions](outbox-publishing.md) and ADR-0008. Execution results belong in the task report. Polling is opt-in; worker execution, historical-intent backfill and job recovery remain separate phases.
 
 ## Phase 2 — Build a minimal reliable purge worker
 
 Goal: remove Garage objects asynchronously and finalize metadata without pretending PostgreSQL and S3 share a transaction.
 
-- Partially implemented ADR-0008 architecture: development RabbitMQ and purge-request outbox persistence are present; RabbitMQ integration, PostgreSQL-backed durable jobs, and scheduler-driven recovery remain planned.
-- Publish committed purge-request outbox events asynchronously, with duplicate publication and delivery expected; extend atomic outbox persistence to future business transitions where required.
+- Partially implemented ADR-0008 architecture: development RabbitMQ, atomic purge-request outbox persistence and leased publication are present; consumers, PostgreSQL-backed durable jobs, physical purge and job recovery remain planned.
+- Consume at-least-once notifications idempotently; extend atomic outbox persistence to future business transitions where required.
 - Have idempotent workers claim durable jobs in PostgreSQL; use scheduled database scans to recover missed notifications, retries, and interrupted work. Database polling is a recovery and publishing mechanism, not an alternative execution topology.
 - Define safe job claiming for multiple worker instances, retry/backoff, attempt metadata, and terminal-failure handling.
 - Treat object deletion as idempotent or explicitly handle an already-missing object.
@@ -102,7 +111,7 @@ Exit criteria: correctness tests remain green and measured contention improves f
 
 ## Explicitly undecided
 
-- Publisher claiming, durable jobs, retry, RabbitMQ topology, recovery/backfill, and retention details within the ADR-0008 direction.
+- Durable jobs, worker claiming/fencing/retry, job recovery/backfill, and retention within the ADR-0008 direction. Publisher-specific claims, notification topology and bounded retries are decided in Phase 1C.
 - Granular lock mechanism and namespace key.
 - Hard-delete retention delay and user-visible cancellation policy.
 - Refresh-token/logout design and JWT key evolution.

@@ -2,7 +2,7 @@
 
 ## Implementation and verification boundary
 
-The repository supplies an additive RabbitMQ Compose file. VM deployment and live RabbitMQ verification completed on 2026-10-09 after explicit approval of the four deployment commands. Phase 1B separately adds PostgreSQL outbox persistence for file/folder purge requests. Spring Boot broker integration, application exchanges and queues, publishing, consumers, durable jobs, retries, and recovery are not implemented. PostgreSQL remains authoritative for durable state under [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md).
+The repository supplies an additive RabbitMQ Compose file. VM deployment and live RabbitMQ verification completed on 2026-10-09 after explicit approval of the four deployment commands. Phase 1B adds atomic purge-request outbox persistence; Phase 1C adds opt-in [leased RabbitMQ publication](outbox-publishing.md), confirms, retries, and expired publisher-claim recovery. Consumers, durable purge jobs, workers, Garage deletion, and historical-intent backfill remain unimplemented. PostgreSQL remains authoritative under [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md).
 
 ## Existing VM setup
 
@@ -42,7 +42,7 @@ ssh -o BatchMode=yes -o ExitOnForwardFailure=yes -N -L 127.0.0.1:5672:127.0.0.1:
 
 Windows AMQP endpoint: `127.0.0.1:5672`. Management UI: `http://127.0.0.1:15672/`. Use the private credential file to sign in. Stop the SSH process with Ctrl+C when finished; this closes forwarding without stopping any container. These are development endpoints protected by SSH transport, with no public RabbitMQ binding.
 
-Future Spring Boot RabbitMQ integration and RabbitMQ integration tests running on Windows must use host `127.0.0.1`, port `5672`, and credentials from ignored local environment configuration while this tunnel is running. The container hostname `rabbitmq` and the VM's loopback address are not directly reachable from Windows. Start the tunnel before starting the application or running broker-dependent tests; keep it running for their duration. Phase 1A does not add Spring AMQP dependencies, application properties, or RabbitMQ tests. The current application and test suite do not connect to RabbitMQ.
+Spring Boot publication and RabbitMQ integration tests running on Windows use host `127.0.0.1`, port `5672`, and credentials from ignored local environment configuration while this tunnel is running. The container hostname `rabbitmq` and VM loopback are not directly reachable from Windows. Start the tunnel before broker-dependent work and keep it running for the duration. Phase 1C supplies Spring AMQP configuration and an opt-in publisher; ordinary tests disable polling. Live tests require the approved isolated test vhost as described in the publisher instructions.
 
 ## Verification after approval
 
@@ -69,4 +69,4 @@ Live deployment verification on 2026-10-09 passed:
 - Windows management UI through localhost `15672` returned HTTP 200 and the RabbitMQ Management page. Authenticated `/api/overview` on the VM returned HTTP 200 and version `4.3.6`; credentials were never printed.
 - PostgreSQL/Garage container IDs, start times, restart counts, images, Compose configuration hashes, mounts, network endpoints, port mappings, and restart policies matched the immediately captured pre-deployment baseline. Fingerprints of existing `compose.yaml`, `.env`, and `garage.toml` were unchanged.
 
-Only the approved RabbitMQ files, image pull, container, and new volume were created. No additional infrastructure mutation was performed. The temporary Windows verification tunnel was closed; RabbitMQ remains running. Open the documented tunnel for subsequent Windows access. Persistence is configured through the volume; no restart/recreation or message-persistence experiment was performed. Application integration and broker-dependent application tests remain deferred.
+Phase 1A created only the approved RabbitMQ files, image, container, and new volume. Its verification tunnel was closed; RabbitMQ remains running. Open the documented tunnel for subsequent Windows access. No broker restart/recreation experiment was performed. Phase 1C separately received explicit approval to create `vaultdrive_outbox_test`, grant the existing development user access there, and create/delete only UUID-named test exchanges/queues while testing fixture publications. The test vhost is retained; existing default-vhost topology and all existing containers, services, networks and port mappings are preserved.
