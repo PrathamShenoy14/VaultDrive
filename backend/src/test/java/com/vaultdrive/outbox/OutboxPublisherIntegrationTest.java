@@ -24,6 +24,8 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=outbox_publisher_test",
@@ -108,6 +110,91 @@ class OutboxPublisherIntegrationTest {
             release.countDown();
             executor.shutdownNow();
             executor.awaitTermination(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(15)
+    void saturatedNioSendLeavesEventRetryableAndPollerPublishesNextEvent() throws Exception {
+        UUID stalledId = event();
+        UUID nextId = event();
+        try (var socket = new StalledNioSocket()) {
+            var template = mock(org.springframework.amqp.rabbit.core.RabbitTemplate.class);
+            var factory = new org.springframework.amqp.rabbit.connection.CachingConnectionFactory();
+            factory.setPublisherConfirmType(
+                    org.springframework.amqp.rabbit.connection.CachingConnectionFactory.ConfirmType.CORRELATED);
+            factory.setPublisherReturns(true);
+            when(template.getConnectionFactory()).thenReturn(factory);
+            doAnswer(call -> {
+                var message = (org.springframework.amqp.core.Message) call.getArgument(2);
+                assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+                if (message.getMessageProperties().getMessageId().equals(stalledId.toString())) {
+                    try {
+                        socket.write(); // Actual client frame enqueue timeout, not a mocked delay.
+                    } catch (java.io.IOException exception) {
+                        socket.drain();
+                        throw new org.springframework.amqp.AmqpIOException(exception);
+                    }
+                }
+                var correlation = (org.springframework.amqp.rabbit.connection.CorrelationData) call.getArgument(3);
+                correlation.getFuture().complete(
+                        new org.springframework.amqp.rabbit.connection.CorrelationData.Confirm(true, null));
+                return null;
+            }).when(template).send(anyString(), anyString(), any(org.springframework.amqp.core.Message.class),
+                    any(org.springframework.amqp.rabbit.connection.CorrelationData.class));
+            var properties = new OutboxPublisherProperties(false, 3, 20, Duration.ofSeconds(30),
+                    Duration.ofSeconds(10), Duration.ofSeconds(1), Duration.ofSeconds(2), "test", "test", "test");
+            var transport = new RabbitOutboxTransport(template,
+                    mock(org.springframework.amqp.rabbit.core.RabbitAdmin.class),
+                    new tools.jackson.databind.ObjectMapper(), properties);
+            new OutboxPublisherConfiguration.Poller(new OutboxPublisher(claims, transport), properties).poll();
+            assertThat(load(stalledId).getDeliveryStatus()).isEqualTo(OutboxDeliveryStatus.PENDING);
+            assertThat(load(stalledId).getLastFailureCode()).isEqualTo("BROKER_ERROR");
+            assertThat(load(stalledId).getPublishedAt()).isNull();
+            assertThat(load(nextId).getDeliveryStatus()).isEqualTo(OutboxDeliveryStatus.PUBLISHED);
+            dueNow(stalledId);
+            new OutboxPublisher(claims, claim -> PublishResult.CONFIRMED).publishNext();
+            assertThat(load(stalledId).getDeliveryStatus()).isEqualTo(OutboxDeliveryStatus.PUBLISHED);
+            assertThat(load(stalledId).getAttemptCount()).isEqualTo(2);
+            factory.destroy();
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(15)
+    void leaseReclaimedDuringStalledEnqueueRejectsLateFailure() throws Exception {
+        UUID id = event();
+        ClaimedOutboxEvent old = claims.claimNext().orElseThrow();
+        try (var socket = new StalledNioSocket()) {
+            var executor = Executors.newFixedThreadPool(1);
+            CountDownLatch entered = new CountDownLatch(1);
+            CountDownLatch releaseFailure = new CountDownLatch(1);
+            try {
+                var stale = executor.submit(() -> {
+                    entered.countDown();
+                    try {
+                        socket.write();
+                        throw new AssertionError("Expected saturated frame queue");
+                    } catch (java.io.IOException exception) {
+                        assertThat(releaseFailure.await(5, TimeUnit.SECONDS)).isTrue();
+                        return claims.failed(old, PublishResult.BROKER_ERROR);
+                    }
+                });
+                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+                expire(id);
+                ClaimedOutboxEvent replacement = claims.claimNext().orElseThrow();
+                assertThat(replacement.id()).isEqualTo(id);
+                assertThat(replacement.claimToken()).isNotEqualTo(old.claimToken());
+                releaseFailure.countDown();
+                assertThat(stale.get(3, TimeUnit.SECONDS)).isFalse();
+                assertThat(claims.owns(replacement)).isTrue();
+                assertThat(load(id).getDeliveryStatus()).isEqualTo(OutboxDeliveryStatus.PUBLISHING);
+                assertThat(claims.confirmed(replacement)).isTrue();
+            } finally {
+                releaseFailure.countDown();
+                executor.shutdownNow();
+                executor.awaitTermination(2, TimeUnit.SECONDS);
+            }
         }
     }
 

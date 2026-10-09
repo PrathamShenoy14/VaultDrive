@@ -48,6 +48,7 @@ class RabbitOutboxIntegrationTest {
     private RabbitTemplate template;
     private RabbitAdmin admin;
     private OutboxPublisherProperties properties;
+    private OutboxRabbitIo io;
     private final List<UUID> eventIds = new ArrayList<>();
 
     @BeforeEach
@@ -57,7 +58,13 @@ class RabbitOutboxIntegrationTest {
         if (username == null || username.isBlank() || password == null || password.isBlank()) {
             throw new IllegalStateException("RabbitMQ integration-test credentials are required");
         }
-        factory = new CachingConnectionFactory("127.0.0.1", 5672);
+        var client = new com.rabbitmq.client.ConnectionFactory();
+        io = new OutboxRabbitIo();
+        io.configure(client);
+        factory = new CachingConnectionFactory(client);
+        factory.setHost("127.0.0.1");
+        factory.setPort(5672);
+        factory.setCloseTimeout(OutboxRabbitIo.CLOSE_TIMEOUT_MS);
         factory.setUsername(username);
         factory.setPassword(password);
         factory.setVirtualHost("vaultdrive_outbox_test");
@@ -86,6 +93,9 @@ class RabbitOutboxIntegrationTest {
                 }
             } finally {
                 factory.destroy();
+                if (io != null) {
+                    io.close();
+                }
             }
         }
     }
