@@ -10,6 +10,7 @@ This roadmap separates repository evidence from future intent. Ordering can chan
 - [x] S3-compatible upload/download through Garage, metadata listing, rename, move, trash, and restore.
 - [x] Pending-purge schema/domain state and purge-aware trash/restore queries.
 - [x] Permanent-delete request flow: shared hierarchy lock, eligible-row lock, durable pending-purge transition, and `202 Accepted` response without Garage deletion.
+- [x] Folder permanent-delete request: exclusive hierarchy lock, non-overlapping subtree intent, pending-purge ancestry barriers, and `202 Accepted` without deletion.
 
 ## Phase 1 — Durable permanent-delete intent (completed)
 
@@ -23,6 +24,8 @@ Goal: atomically choose exactly one of restore or permanent-delete for an eligib
 - [x] Cover the HTTP contract, service delegation, transition, and lock-before-read interaction order with unit and MockMvc tests.
 
 PostgreSQL-backed races cover both restore/permanent-delete winner orders. Restore also coordinates with folder structural changes and serializes collision naming within its chosen destination.
+
+Folder purge-request races cover child-folder restore, file restore root fallback, folder move, upload reservation, and both parent/child request winner orders. Physical subtree deletion remains a worker concern.
 
 ## Phase 2 — Build a minimal reliable purge worker
 

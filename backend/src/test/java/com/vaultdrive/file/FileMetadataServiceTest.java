@@ -652,8 +652,6 @@ class FileMetadataServiceTest {
                 folderId,
                 "report.pdf"
         );
-
-        UUID ownerId = file.getOwnerId();
     
         StoredFile result =
                 fileMetadataService.move(
@@ -689,8 +687,6 @@ class FileMetadataServiceTest {
     
         StoredFile file =
                 createFile(folderId, "report.pdf");
-    
-        UUID ownerId = file.getOwnerId();
     
         assertNull(file.getDeletedAt());
     
@@ -842,6 +838,38 @@ class FileMetadataServiceTest {
     
         verify(storedFileRepository)
                 .saveAndFlush(file);
+    }
+
+    @Test
+    void shouldNotRestoreFileToRootFromPendingPurgeSubtree() {
+        UUID originalFolderId = UUID.randomUUID();
+        StoredFile file = createFile(originalFolderId, "report.pdf");
+        file.softDelete();
+
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                        file.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(file));
+        doThrow(new FolderNotFoundException("Folder not found"))
+                .when(folderAccessValidator)
+                .requireNoPendingPurgeInAncestry(
+                        ownerId,
+                        originalFolderId
+                );
+
+        assertThrows(
+                FolderNotFoundException.class,
+                () -> fileMetadataService.restore(ownerId, file.getId())
+        );
+
+        assertNotNull(file.getDeletedAt());
+        assertEquals(originalFolderId, file.getFolderId());
+        verify(storedFileRepository, never()).saveAndFlush(any());
+        verify(folderAccessValidator, never())
+                .requireAccessibleFolder(any(), any());
     }
 
     @Test
@@ -1140,6 +1168,35 @@ class FileMetadataServiceTest {
         assertEquals(FileStatus.READY, result.getStatus());
 
         verify(storedFileRepository).saveAndFlush(file);
+    }
+
+    @Test
+    void shouldRejectFilePurgeRequestBelowPendingFolderPurge() {
+        UUID folderId = UUID.randomUUID();
+        StoredFile file = createFile(folderId, "report.pdf");
+        file.softDelete();
+
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                        file.getId(),
+                        ownerId,
+                        FileStatus.READY
+                ))
+                .thenReturn(Optional.of(file));
+        doThrow(new FolderNotFoundException("Folder not found"))
+                .when(folderAccessValidator)
+                .requireNoPendingPurgeInAncestry(ownerId, folderId);
+
+        assertThrows(
+                FolderNotFoundException.class,
+                () -> fileMetadataService.requestPermanentDeletion(
+                        ownerId,
+                        file.getId()
+                )
+        );
+
+        assertNull(file.getPurgeRequestedAt());
+        verify(storedFileRepository, never()).saveAndFlush(any());
     }
 
     @Test

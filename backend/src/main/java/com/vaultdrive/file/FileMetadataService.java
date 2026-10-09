@@ -153,6 +153,11 @@ public class FileMetadataService {
                                 new FileNotFoundException("File not found")
                         );
 
+        folderAccessValidator.requireNoPendingPurgeInAncestry(
+                ownerId,
+                file.getFolderId()
+        );
+
         UUID destinationFolderId =
                 resolveRestoreDestination(
                         ownerId,
@@ -193,6 +198,11 @@ public class FileMetadataService {
                         .orElseThrow(() ->
                                 new FileNotFoundException("File not found")
                         );
+
+        folderAccessValidator.requireNoPendingPurgeInAncestry(
+                ownerId,
+                file.getFolderId()
+        );
 
         file.requestPermanentDeletion();
     

@@ -34,6 +34,9 @@ public class Folder {
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
+    @Column(name = "purge_requested_at")
+    private Instant purgeRequestedAt;
+
     protected Folder() {
         // Required by JPA.
     }
@@ -74,6 +77,11 @@ public class Folder {
         this.updatedAt = Instant.now();
     }
 
+    public void requestPermanentDeletion() {
+        this.purgeRequestedAt = Instant.now();
+        this.updatedAt = this.purgeRequestedAt;
+    }
+
     public UUID getId() {
         return id;
     }
@@ -100,5 +108,9 @@ public class Folder {
 
     public Instant getDeletedAt() {
         return deletedAt;
+    }
+
+    public Instant getPurgeRequestedAt() {
+        return purgeRequestedAt;
     }
 }

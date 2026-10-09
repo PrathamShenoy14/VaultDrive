@@ -15,7 +15,7 @@ The signed `bigint` key has a stable derivation: fixed namespace `0x5641554C5444
 
 Destination namespace locks use PostgreSQL's separate two-`integer` advisory-lock key space: fixed class `0x56444E53` plus a stable 32-bit mix of owner and destination UUIDs, with `null` representing root. Hash collisions only add conservative serialization.
 
-Folder create, rename, move, trash, and restore acquire the exclusive hierarchy lock before any protected read. They remain PostgreSQL-only operations, so the advisory lock is never held across Garage I/O.
+Folder create, rename, move, trash, restore, and permanent-delete request acquire the exclusive hierarchy lock before any protected read. A folder purge request additionally rejects pending-purge ancestors and descendants, so overlapping parent/child intents serialize to one winner. These paths remain PostgreSQL-only operations, so the advisory lock is never held across Garage I/O.
 
 File rename, move, trash, upload reservation, and upload finalization acquire the shared hierarchy lock before loading current file or ancestor state. Each performs fresh validation and writes inside a short transaction. Garage transfer and cleanup remain outside database transactions and hierarchy locks. Because shared locks allow file mutations for the same owner to overlap, the file row has an optimistic version; upload finalization additionally uses an expected-status/version conditional transition so only one `UPLOADING -> READY|FAILED` change can win.
 
@@ -34,7 +34,7 @@ File restore and permanent-delete request acquire the shared hierarchy lock befo
 
 - PostgreSQL integration tests cover hierarchy and destination namespace compatibility/blocking, rollback release, and the transaction requirement.
 - The existing concurrent folder-restore integration test exercises the migrated folder path.
-- PostgreSQL-backed races cover file move versus folder trash, rename versus folder trash, same-file optimistic conflicts, upload reservation versus folder trash, trash during the transfer gap, competing finalization transitions, both restore/permanent-delete winner orders, restore versus folder trash/move, and same-name restores.
+- PostgreSQL-backed races cover file move versus folder trash, rename versus folder trash, same-file optimistic conflicts, upload reservation versus folder trash, trash during the transfer gap, competing finalization transitions, both file restore/permanent-delete winner orders, restore versus folder trash/move, same-name restores, folder purge versus child/file restore, folder move, upload reservation, and both parent/child purge winner orders.
 - Add future purge/reconciliation race coverage when those workers are implemented.
 - A reproducible baseline and post-change contention measurement.
 

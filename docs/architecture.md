@@ -28,7 +28,7 @@ PostgreSQL and Garage do not share a transaction. Code must make cross-system fa
 ### Platform and persistence — Committed
 
 - Java 21, Spring Boot 4.1.1, Maven wrapper, Spring MVC, Spring Data JPA, validation, and Spring Security.
-- PostgreSQL schema managed by Flyway migrations V1-V10. Hibernate validates the schema (`ddl-auto=validate`) rather than creating it.
+- PostgreSQL schema managed by Flyway migrations V1-V11. Hibernate validates the schema (`ddl-auto=validate`) rather than creating it.
 - Configuration comes from properties and environment variables. Secrets are not intended for source control.
 
 ### Authentication and security — Committed
@@ -48,6 +48,7 @@ Not implemented: refresh tokens, logout/revocation, account-state checks, rate l
 - Names are trimmed and validated but remain case-sensitive.
 - Folder deletion is soft deletion. A descendant under a deleted ancestor becomes inaccessible through ancestor-chain validation even if the descendant row is not itself marked deleted.
 - Restore uses the original parent when accessible, otherwise root, and generates ` (restored)` suffixes on collision.
+- Folder permanent-delete requests record `purge_requested_at` only for owned, explicitly trashed folders. Pending purge makes the whole subtree immutable, including separately trashed descendants; restore cannot use root fallback to escape that ancestry.
 - Application traversal prevents cycles during moves. The database does not independently prevent multi-row cycles.
 
 ### File storage and lifecycle — Committed
@@ -63,7 +64,7 @@ Not implemented: refresh tokens, logout/revocation, account-state checks, rate l
 
 ### Pending purge request — Implemented
 
-The request flow contains `purge_requested_at`, the entity transition, purge-aware trash/restore queries, and `DELETE /api/v1/files/{fileId}/permanent`. These states are represented independently from upload status:
+The request flow contains `purge_requested_at`, entity transitions, purge-aware trash/restore queries, `DELETE /api/v1/files/{fileId}/permanent`, and `DELETE /api/v1/trash/folders/{folderId}/permanent`. These states are represented independently from upload status:
 
 | Lifecycle | `deleted_at` | `purge_requested_at` | User-visible behavior |
 |---|---:|---:|---|
@@ -71,7 +72,9 @@ The request flow contains `purge_requested_at`, the entity transition, purge-awa
 | Trash | set | null | listed in trash and restorable |
 | Pending purge | set | set | hidden from active views and trash; not restorable |
 
-The endpoint accepts only an owned, trashed `READY` file whose purge has not already been requested. It acquires the shared owner hierarchy lock and locks the freshly queried eligible file row before recording `purge_requested_at` in PostgreSQL, then returns `202 Accepted`. Ineligible, inaccessible, and repeated requests return the same `404 Not Found`. The request path does not call Garage.
+The file endpoint accepts only an owned, trashed `READY` file whose purge has not already been requested. The folder endpoint accepts only an owned, explicitly trashed folder with no pending-purge ancestor or descendant. It takes the exclusive hierarchy lock before the fresh eligible-row lock and subtree checks. Overlapping parent/child requests are serialized: the first committed request wins and the second returns `404 Not Found`, so conflicting folder deletion intents are not recorded. Both endpoints return `202 Accepted`; ineligible, inaccessible, and repeated requests return `404 Not Found`. Neither request path calls Garage.
+
+A pending-purge folder makes every descendant ineligible for restore, move, upload reservation/finalization, file purge request, or other metadata mutation. Folder and file restore explicitly check pending-purge ancestry before ordinary inaccessible-parent root fallback.
 
 This completes only the durable request transition. No purge worker exists. Garage deletion, database-row finalization, retry/backoff, job claiming, crash recovery, observability, and dead-letter handling remain planned.
 
@@ -79,7 +82,7 @@ This completes only the durable request transition. No purge worker exists. Gara
 
 PostgreSQL partial unique indexes are the final defense against duplicate active names. Services also perform pre-checks for clearer errors.
 
-Folder create, rename, move, trash, and restore acquire an exclusive owner-scoped PostgreSQL transaction advisory lock before protected reads. File rename, move, trash, restore, permanent-delete request, upload reservation, and upload finalization acquire the matching shared lock before loading current file or ancestor state, then validate and write inside the same short transaction. Restore additionally takes a destination-scoped exclusive advisory lock before collision naming. The coordinator requires an active transaction and uses the transaction's JPA connection, so PostgreSQL releases locks on commit or rollback. Garage upload and cleanup calls occur outside these transactions and locks.
+Folder create, rename, move, trash, restore, and permanent-delete request acquire an exclusive owner-scoped PostgreSQL transaction advisory lock before protected reads. File rename, move, trash, restore, permanent-delete request, upload reservation, and upload finalization acquire the matching shared lock before loading current file or ancestor state, then validate and write inside the same short transaction. Restore additionally takes a destination-scoped exclusive advisory lock before collision naming. The coordinator requires an active transaction and uses the transaction's JPA connection, so PostgreSQL releases locks on commit or rollback. Garage upload and cleanup calls occur outside these transactions and locks.
 
 `files.version` supplies optimistic concurrency control between compatible shared-lock file mutations. Rename/move/trash use JPA optimistic updates; upload `UPLOADING -> READY|FAILED` changes use an explicit expected-status and expected-version conditional update. A stale same-file write fails with HTTP `409 Conflict` rather than overwriting another committed mutation. Restore and permanent-delete request use the same eligible-row pessimistic lock, so exactly one can consume a file's restorable Trash state. Restore name allocation is serialized per destination while different destination namespaces remain independent.
 
@@ -87,14 +90,14 @@ The advisory key derivation and staged migration constraints are recorded in ADR
 
 ## Test evidence
 
-The repository contains unit tests, MockMvc controller tests, Spring Security integration tests, PostgreSQL repository tests, folder concurrency integration tests, and a live S3-compatible storage integration test. PostgreSQL coordinator tests cover hierarchy lock compatibility/blocking, destination namespace lock compatibility/blocking, transaction release, and rejection outside a transaction. PostgreSQL races cover file move versus folder trash, file rename versus folder trash, optimistic same-file mutation conflicts, upload reservation versus folder trash, folder trash in the transfer gap before READY, competing upload finalization transitions, both restore/permanent-delete winner orders, restore versus folder trash/move, and same-name restores. Upload unit tests also cover known destination rejection cleanup, cleanup failure, and uncertain finalization behavior. The permanent-delete request retains controller tests for accepted, not-found, and unauthenticated outcomes plus service and metadata transition coverage. The presence of a test is evidence of intended coverage, not proof that it passed on every machine; current verification results belong in the task/commit report.
+The repository contains unit tests, MockMvc controller tests, Spring Security integration tests, PostgreSQL repository tests, folder concurrency integration tests, and a live S3-compatible storage integration test. PostgreSQL coordinator tests cover hierarchy lock compatibility/blocking, destination namespace lock compatibility/blocking, transaction release, and rejection outside a transaction. PostgreSQL races cover file move versus folder trash, file rename versus folder trash, optimistic same-file mutation conflicts, upload reservation versus folder trash, folder trash in the transfer gap before READY, competing finalization transitions, both file restore/permanent-delete winner orders, restore versus folder trash/move, same-name restores, folder purge request versus child/file restore, folder move, upload reservation, and both parent/child purge winner orders. Upload unit tests also cover known destination rejection cleanup, cleanup failure, and uncertain finalization behavior. Permanent-delete requests retain controller tests for accepted, not-found, and unauthenticated outcomes plus service, repository, constraint, and metadata transition coverage. The presence of a test is evidence of intended coverage, not proof that it passed on every machine; current verification results belong in the task/commit report.
 
 ## Known gaps and pending decisions
 
 - Async purge worker topology: database polling first versus a queue/outbox, plus retry and ownership semantics.
 - Remaining file-side coordination: future purge/reconciliation workers.
 - Reconciliation for stale `UPLOADING`, `FAILED`, orphaned objects, and uncertain finalization.
-- Folder permanent deletion and subtree semantics.
+- Folder/file purge workers and final subtree deletion semantics.
 - Sharing/permissions, versioning, presigned or resumable transfers, quotas, malware scanning, audit logs, observability, and client applications.
 - Production deployment, backup/restore, retention, encryption/key-management, and service-level objectives.
 

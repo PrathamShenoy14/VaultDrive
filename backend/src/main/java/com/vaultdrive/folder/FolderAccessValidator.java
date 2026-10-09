@@ -68,6 +68,19 @@ public class FolderAccessValidator {
         return parent;
     }
 
+    public void requireNoPendingPurgeInAncestry(
+            UUID ownerId,
+            UUID folderId
+    ) {
+        if (folderId != null
+                && folderRepository.hasPendingPurgeInAncestry(
+                        ownerId,
+                        folderId
+                )) {
+            throw new FolderNotFoundException("Folder not found");
+        }
+    }
+
     private void validateAncestorChain(
             UUID ownerId,
             UUID parentFolderId

@@ -1095,7 +1095,10 @@ class FolderServiceTest {
                 Instant.parse("2026-09-21T10:00:00Z")
         );
 
-        when(folderRepository.findByOwnerIdAndDeletedAtIsNotNull(ownerId))
+        when(folderRepository
+                .findByOwnerIdAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                        ownerId
+                ))
                 .thenReturn(List.of(documents, pictures));
 
         List<TrashFolderResponse> result =
@@ -1116,7 +1119,10 @@ class FolderServiceTest {
     void shouldReturnEmptyTrashList() {
         UUID ownerId = UUID.randomUUID();
 
-        when(folderRepository.findByOwnerIdAndDeletedAtIsNotNull(ownerId))
+        when(folderRepository
+                .findByOwnerIdAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                        ownerId
+                ))
                 .thenReturn(List.of());
 
         List<TrashFolderResponse> result =
@@ -1134,7 +1140,10 @@ class FolderServiceTest {
 
         child.softDelete();
 
-        when(folderRepository.findByOwnerIdAndDeletedAtIsNotNull(ownerId))
+        when(folderRepository
+                .findByOwnerIdAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                        ownerId
+                ))
                 .thenReturn(List.of(child));
 
         List<TrashFolderResponse> result =
@@ -1226,6 +1235,153 @@ class FolderServiceTest {
         assertThat(child.getDeletedAt()).isNull();
 
         verify(folderRepository).flush();
+    }
+
+    @Test
+    void shouldRejectChildRestoreBelowPendingPurgeAncestor() {
+        UUID ownerId = UUID.randomUUID();
+        Folder parent = new Folder(ownerId, null, "Documents");
+        Folder child = new Folder(ownerId, parent.getId(), "Projects");
+        parent.softDelete();
+        parent.requestPermanentDeletion();
+        child.softDelete();
+
+        when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNotNull(
+                child.getId(), ownerId
+        )).thenReturn(Optional.of(child));
+        when(folderRepository.hasPendingPurgeInAncestry(
+                ownerId, parent.getId()
+        )).thenReturn(true);
+
+        assertThatThrownBy(() ->
+                folderService.restoreFolder(ownerId, child.getId())
+        ).isInstanceOf(FolderNotFoundException.class);
+
+        assertThat(child.getDeletedAt()).isNotNull();
+        assertThat(child.getParentFolderId()).isEqualTo(parent.getId());
+        verify(folderRepository, never()).flush();
+    }
+
+    @Test
+    void shouldRequestPermanentDeletionForEligibleTrashedFolder() {
+        UUID ownerId = UUID.randomUUID();
+        Folder folder = new Folder(ownerId, null, "Documents");
+        folder.softDelete();
+
+        when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNotNull(
+                folder.getId(), ownerId
+        )).thenReturn(Optional.of(folder));
+        when(folderRepository.hasPendingPurgeInSubtree(
+                ownerId, folder.getId()
+        )).thenReturn(false);
+
+        folderService.requestPermanentDeletion(ownerId, folder.getId());
+
+        assertThat(folder.getPurgeRequestedAt()).isNotNull();
+        assertThat(folder.getUpdatedAt())
+                .isEqualTo(folder.getPurgeRequestedAt());
+        verify(hierarchyCoordinator).acquireExclusive(ownerId);
+        verify(folderRepository).flush();
+    }
+
+    @Test
+    void shouldRejectPermanentDeletionBelowPendingPurgeAncestor() {
+        UUID ownerId = UUID.randomUUID();
+        Folder parent = new Folder(ownerId, null, "Documents");
+        Folder child = new Folder(ownerId, parent.getId(), "Projects");
+        child.softDelete();
+
+        when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNotNull(
+                child.getId(), ownerId
+        )).thenReturn(Optional.of(child));
+        when(folderRepository.hasPendingPurgeInAncestry(
+                ownerId, parent.getId()
+        )).thenReturn(true);
+
+        assertThatThrownBy(() ->
+                folderService.requestPermanentDeletion(
+                        ownerId,
+                        child.getId()
+                )
+        ).isInstanceOf(FolderNotFoundException.class);
+
+        assertThat(child.getPurgeRequestedAt()).isNull();
+        verify(folderRepository, never()).flush();
+    }
+
+    @Test
+    void shouldRejectPermanentDeletionAbovePendingPurgeDescendant() {
+        UUID ownerId = UUID.randomUUID();
+        Folder parent = new Folder(ownerId, null, "Documents");
+        parent.softDelete();
+
+        when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNotNull(
+                parent.getId(), ownerId
+        )).thenReturn(Optional.of(parent));
+        when(folderRepository.hasPendingPurgeInSubtree(
+                ownerId, parent.getId()
+        )).thenReturn(true);
+
+        assertThatThrownBy(() ->
+                folderService.requestPermanentDeletion(
+                        ownerId,
+                        parent.getId()
+                )
+        ).isInstanceOf(FolderNotFoundException.class);
+
+        assertThat(parent.getPurgeRequestedAt()).isNull();
+        verify(folderRepository, never()).flush();
+    }
+
+    @Test
+    void shouldRejectRepeatedPermanentFolderDeletionRequest() {
+        UUID ownerId = UUID.randomUUID();
+        Folder folder = new Folder(ownerId, null, "Documents");
+        folder.softDelete();
+        folder.requestPermanentDeletion();
+
+        when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNotNull(
+                folder.getId(), ownerId
+        )).thenReturn(Optional.of(folder));
+
+        assertThatThrownBy(() ->
+                folderService.requestPermanentDeletion(
+                        ownerId,
+                        folder.getId()
+                )
+        ).isInstanceOf(FolderNotFoundException.class);
+
+        verify(folderRepository, never()).flush();
+    }
+
+    @Test
+    void shouldRejectInaccessiblePermanentFolderDeletionAfterLock() {
+        UUID ownerId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+
+        when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNotNull(
+                folderId, ownerId
+        )).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() ->
+                folderService.requestPermanentDeletion(ownerId, folderId)
+        )
+                .isInstanceOf(FolderNotFoundException.class)
+                .hasMessage("Deleted folder not found");
+
+        InOrder order = inOrder(
+                hierarchyCoordinator,
+                userRepository,
+                folderRepository
+        );
+        order.verify(hierarchyCoordinator).acquireExclusive(ownerId);
+        order.verify(userRepository).existsById(ownerId);
+        order.verify(folderRepository)
+                .findByIdAndOwnerIdAndDeletedAtIsNotNull(
+                        folderId,
+                        ownerId
+                );
+        verify(folderRepository, never()).flush();
     }
 
     @Test

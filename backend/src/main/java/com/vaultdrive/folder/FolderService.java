@@ -333,7 +333,9 @@ public class FolderService {
     public List<TrashFolderResponse> listTrashedFolders(UUID ownerId) {
     
         return folderRepository
-                .findByOwnerIdAndDeletedAtIsNotNull(ownerId)
+                .findByOwnerIdAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                        ownerId
+                )
                 .stream()
                 .map(folder -> new TrashFolderResponse(
                         folder.getId(),
@@ -371,6 +373,11 @@ public class FolderService {
                 );
     
         UUID destinationParentId = folder.getParentFolderId();
+
+        folderAccessValidator.requireNoPendingPurgeInAncestry(
+                ownerId,
+                destinationParentId
+        );
     
         // Determine whether the original parent is still accessible.
         if (destinationParentId != null) {
@@ -403,6 +410,45 @@ public class FolderService {
                 folder.getName(),
                 folder.getParentFolderId()
         );
+    }
+
+    @Transactional
+    public void requestPermanentDeletion(
+            UUID ownerId,
+            UUID folderId
+    ) {
+        lockFolderNamespace(ownerId);
+
+        Folder folder = folderRepository
+                .findByIdAndOwnerIdAndDeletedAtIsNotNull(
+                        folderId,
+                        ownerId
+                )
+                .filter(candidate ->
+                        candidate.getPurgeRequestedAt() == null
+                )
+                .orElseThrow(() ->
+                        new FolderNotFoundException(
+                                "Deleted folder not found"
+                        )
+                );
+
+        folderAccessValidator.requireNoPendingPurgeInAncestry(
+                ownerId,
+                folder.getParentFolderId()
+        );
+
+        if (folderRepository.hasPendingPurgeInSubtree(
+                ownerId,
+                folderId
+        )) {
+            throw new FolderNotFoundException(
+                    "Deleted folder not found"
+            );
+        }
+
+        folder.requestPermanentDeletion();
+        folderRepository.flush();
     }
 
     private void lockFolderNamespace(UUID ownerId) {

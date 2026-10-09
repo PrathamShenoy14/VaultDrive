@@ -15,6 +15,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.hamcrest.Matchers.nullValue;
 
 import java.time.Instant;
@@ -193,5 +194,56 @@ class TrashControllerTest {
                 .andExpect(status().isNotFound());
     
         verify(folderService).restoreFolder(ownerId, folderId);
+    }
+
+    @Test
+    void shouldAcceptPermanentFolderDeletionRequest() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+        String token = jwtService.generateAccessToken(ownerId);
+
+        mockMvc.perform(delete(
+                        "/api/v1/trash/folders/{folderId}/permanent",
+                        folderId
+                ).header("Authorization", "Bearer " + token))
+                .andExpect(status().isAccepted())
+                .andExpect(content().string(""));
+
+        verify(folderService)
+                .requestPermanentDeletion(ownerId, folderId);
+    }
+
+    @Test
+    void shouldReturnNotFoundForIneligiblePermanentFolderDeletion()
+            throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID folderId = UUID.randomUUID();
+        String token = jwtService.generateAccessToken(ownerId);
+
+        doThrow(new FolderNotFoundException("Deleted folder not found"))
+                .when(folderService)
+                .requestPermanentDeletion(ownerId, folderId);
+
+        mockMvc.perform(delete(
+                        "/api/v1/trash/folders/{folderId}/permanent",
+                        folderId
+                ).header("Authorization", "Bearer " + token))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message")
+                        .value("Deleted folder not found"));
+    }
+
+    @Test
+    void shouldRejectUnauthenticatedPermanentFolderDeletion()
+            throws Exception {
+        UUID folderId = UUID.randomUUID();
+
+        mockMvc.perform(delete(
+                        "/api/v1/trash/folders/{folderId}/permanent",
+                        folderId
+                ))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(folderService);
     }
 }

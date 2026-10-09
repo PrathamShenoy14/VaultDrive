@@ -299,7 +299,7 @@ class FolderRepositoryTest {
         );
     
         List<Folder> result =
-                folderRepository.findByOwnerIdAndDeletedAtIsNotNull(
+                folderRepository.findByOwnerIdAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
                         alice.getId()
                 );
     
@@ -325,7 +325,7 @@ class FolderRepositoryTest {
         folderRepository.saveAndFlush(activeFolder);
     
         List<Folder> result =
-                folderRepository.findByOwnerIdAndDeletedAtIsNotNull(
+                folderRepository.findByOwnerIdAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
                         alice.getId()
                 );
     
@@ -359,7 +359,7 @@ class FolderRepositoryTest {
         folderRepository.saveAndFlush(child);
     
         List<Folder> result =
-                folderRepository.findByOwnerIdAndDeletedAtIsNotNull(
+                folderRepository.findByOwnerIdAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
                         alice.getId()
                 );
     
@@ -421,12 +421,56 @@ class FolderRepositoryTest {
     
         // Execute the actual repository query.
         List<Folder> result =
-                folderRepository.findByOwnerIdAndDeletedAtIsNotNull(
+                folderRepository.findByOwnerIdAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
                         alice.getId()
                 );
     
         assertThat(result)
                 .extracting(Folder::getId)
                 .containsExactly(parent.getId());
+    }
+
+    @Test
+    void shouldFindPendingPurgeAcrossFolderHierarchyAndHideItFromTrash() {
+        User owner = createUser();
+        Folder parent = new Folder(owner.getId(), null, "Documents");
+        Folder child = new Folder(
+                owner.getId(),
+                parent.getId(),
+                "Projects"
+        );
+        parent.softDelete();
+        parent.requestPermanentDeletion();
+        child.softDelete();
+        folderRepository.saveAllAndFlush(List.of(parent, child));
+        entityManager.clear();
+
+        assertThat(folderRepository.hasPendingPurgeInAncestry(
+                owner.getId(),
+                child.getId()
+        )).isTrue();
+        assertThat(folderRepository.hasPendingPurgeInSubtree(
+                owner.getId(),
+                parent.getId()
+        )).isTrue();
+        assertThat(folderRepository
+                .findByOwnerIdAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                        owner.getId()
+                ))
+                .extracting(Folder::getId)
+                .containsExactly(child.getId());
+    }
+
+    @Test
+    void shouldRejectPurgeRequestWithoutSoftDeletion() {
+        User owner = createUser();
+        Folder folder = folderRepository.saveAndFlush(
+                new Folder(owner.getId(), null, "Documents")
+        );
+
+        folder.requestPermanentDeletion();
+
+        assertThatThrownBy(folderRepository::flush)
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 }

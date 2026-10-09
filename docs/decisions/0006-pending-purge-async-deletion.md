@@ -9,16 +9,18 @@ Permanent deletion must remove both PostgreSQL metadata and a Garage object. A l
 
 ## Decision
 
-Accept permanent deletion by recording durable intent in PostgreSQL before physical deletion. A file moves from Trash (`deleted_at` set, `purge_requested_at` null) to pending purge (both set). Pending-purge files are neither listed in Trash nor restorable. The request path must not call Garage and should return `202 Accepted`. A background worker will delete the object with retry semantics and finalize metadata only after a known storage outcome.
+Accept permanent deletion by recording durable intent in PostgreSQL before physical deletion. A file or explicitly trashed folder moves from Trash (`deleted_at` set, `purge_requested_at` null) to pending purge (both set). Pending-purge files are neither listed in Trash nor restorable. A pending-purge folder owns the intent for its entire subtree, which becomes immutable and cannot escape through restore root fallback. The request path must not call Garage and should return `202 Accepted`. A background worker will delete objects with retry semantics and finalize metadata only after known storage outcomes.
 
 For the first API version, only already-trashed, `READY`, owned files with no existing purge request are eligible. The service acquires the shared owner hierarchy lock before fetching and pessimistically locking the eligible file row, then commits `purge_requested_at` in the same PostgreSQL transaction. Restore uses the same row lock, so only one transition can consume that Trash state. Ineligible, inaccessible, and repeated requests return `404 Not Found`; repeated requests are not treated as idempotent success. Direct active-to-purge behavior is deferred.
 
+Folder requests take the exclusive owner hierarchy lock, pessimistically lock the freshly read owned and explicitly trashed row, and reject any pending-purge ancestor or descendant before recording intent. Concurrent overlapping parent/child requests therefore produce one committed intent; whichever request commits first wins and the other receives `404 Not Found`.
+
 ## Current implementation boundary
 
-- Implemented: V9 column, entity field/transition, purge-aware trash/restore repository queries, `DELETE /api/v1/files/{fileId}/permanent`, and hierarchy-lock-before-read plus eligible-row locking for restore and permanent-delete request.
+- Implemented: file and folder purge-request columns, entity transitions, purge-aware queries, file and folder permanent-delete endpoints, hierarchy-lock-before-read, eligible-row locking, subtree immutability, and non-overlapping folder intents.
 - Tested at unit/MockMvc level: accepted, not-found, and unauthenticated HTTP outcomes; service delegation and absence of object-storage calls; metadata transition and lock-before-read interaction order.
 - Tested: PostgreSQL-backed races for both restore/permanent-delete winner orders.
-- Not implemented: worker, claim protocol, retries/backoff, final row deletion, broker/outbox, metrics, or repair tooling.
+- Not implemented: file/folder workers, subtree traversal/deletion execution, claim protocol, retries/backoff, final row deletion, broker/outbox, metrics, or repair tooling.
 
 ## Consequences
 
