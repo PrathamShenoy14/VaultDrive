@@ -4,6 +4,8 @@ import com.vaultdrive.file.exception.DuplicateFileNameException;
 import com.vaultdrive.file.exception.FileNotFoundException;
 import com.vaultdrive.file.exception.UploadFinalizationRejectedException;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
+import com.vaultdrive.outbox.OutboxEvent;
+import com.vaultdrive.outbox.OutboxWriter;
 import com.vaultdrive.user.UserRepository;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
@@ -31,17 +33,20 @@ public class FileMetadataService {
     private final UserRepository userRepository;
     private final FolderAccessValidator folderAccessValidator;
     private final HierarchyCoordinator hierarchyCoordinator;
+    private final OutboxWriter outboxWriter;
 
     public FileMetadataService(
             StoredFileRepository storedFileRepository,
             UserRepository userRepository,
             FolderAccessValidator folderAccessValidator,
-            HierarchyCoordinator hierarchyCoordinator
+            HierarchyCoordinator hierarchyCoordinator,
+            OutboxWriter outboxWriter
     ) {
         this.storedFileRepository = storedFileRepository;
         this.userRepository = userRepository;
         this.folderAccessValidator = folderAccessValidator;
         this.hierarchyCoordinator = hierarchyCoordinator;
+        this.outboxWriter = outboxWriter;
     }
 
     @Transactional
@@ -205,8 +210,12 @@ public class FileMetadataService {
         );
 
         file.requestPermanentDeletion();
-    
-        return storedFileRepository.saveAndFlush(file);
+
+        StoredFile saved = storedFileRepository.saveAndFlush(file);
+        outboxWriter.append(OutboxEvent.filePurgeRequested(
+                ownerId, fileId, saved.getPurgeRequestedAt()
+        ));
+        return saved;
     }
 
     @Transactional(

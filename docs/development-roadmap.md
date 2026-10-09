@@ -35,12 +35,20 @@ Folder purge-request races cover child-folder restore, file restore root fallbac
 
 See [development setup and verification instructions](rabbitmq-development.md). This slice does not implement application integration or the ADR-0008 processing components.
 
+## Phase 1B — PostgreSQL transactional outbox persistence
+
+- [x] Add V12 outbox schema, JSONB payload versioning, delivery metadata, constraints, and indexes for future publisher scans.
+- [x] Insert file/folder purge-intent events with Spring Data JPA inside the existing business transaction; reject standalone writer calls.
+- [x] Add real PostgreSQL tests for atomic commit/rollback, uncommitted visibility, insertion failures, ownership/eligibility rejection, and repeated requests on both paths.
+
+See [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md). Test execution results belong in the task report. Publishing, consumers, workers, durable jobs, retry/recovery scheduling, and backfill of historical intents remain unimplemented.
+
 ## Phase 2 — Build a minimal reliable purge worker
 
 Goal: remove Garage objects asynchronously and finalize metadata without pretending PostgreSQL and S3 share a transaction.
 
-- Planned architecture (not implemented): PostgreSQL transactional outbox, RabbitMQ work notifications, PostgreSQL-backed durable job state, and scheduler-driven recovery as recorded in ADR-0008.
-- Persist each business-state change and its outbox event atomically, then publish to RabbitMQ asynchronously with duplicate publication and delivery expected.
+- Partially implemented ADR-0008 architecture: development RabbitMQ and purge-request outbox persistence are present; RabbitMQ integration, PostgreSQL-backed durable jobs, and scheduler-driven recovery remain planned.
+- Publish committed purge-request outbox events asynchronously, with duplicate publication and delivery expected; extend atomic outbox persistence to future business transitions where required.
 - Have idempotent workers claim durable jobs in PostgreSQL; use scheduled database scans to recover missed notifications, retries, and interrupted work. Database polling is a recovery and publishing mechanism, not an alternative execution topology.
 - Define safe job claiming for multiple worker instances, retry/backoff, attempt metadata, and terminal-failure handling.
 - Treat object deletion as idempotent or explicitly handle an already-missing object.
@@ -94,7 +102,7 @@ Exit criteria: correctness tests remain green and measured contention improves f
 
 ## Explicitly undecided
 
-- Outbox, durable-job, claim, retry, RabbitMQ topology, and recovery details within the ADR-0008 direction.
+- Publisher claiming, durable jobs, retry, RabbitMQ topology, recovery/backfill, and retention details within the ADR-0008 direction.
 - Granular lock mechanism and namespace key.
 - Hard-delete retention delay and user-visible cancellation policy.
 - Refresh-token/logout design and JWT key evolution.

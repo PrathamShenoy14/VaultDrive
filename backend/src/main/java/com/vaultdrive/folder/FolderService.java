@@ -8,6 +8,8 @@ import com.vaultdrive.folder.exception.DuplicateFolderNameException;
 import com.vaultdrive.folder.exception.FolderNotFoundException;
 import com.vaultdrive.folder.exception.InvalidFolderMoveException;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
+import com.vaultdrive.outbox.OutboxEvent;
+import com.vaultdrive.outbox.OutboxWriter;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,19 +30,22 @@ public class FolderService {
     private final FolderNameValidator folderNameValidator;
     private final UserRepository userRepository;
     private final HierarchyCoordinator hierarchyCoordinator;
+    private final OutboxWriter outboxWriter;
 
     public FolderService(
             FolderRepository folderRepository,
             FolderAccessValidator folderAccessValidator,
             FolderNameValidator folderNameValidator,
             UserRepository userRepository,
-            HierarchyCoordinator hierarchyCoordinator
+            HierarchyCoordinator hierarchyCoordinator,
+            OutboxWriter outboxWriter
     ) {
         this.folderRepository = folderRepository;
         this.folderAccessValidator = folderAccessValidator;
         this.folderNameValidator = folderNameValidator;
         this.userRepository = userRepository;
         this.hierarchyCoordinator = hierarchyCoordinator;
+        this.outboxWriter = outboxWriter;
     }
 
     @Transactional
@@ -449,6 +454,9 @@ public class FolderService {
 
         folder.requestPermanentDeletion();
         folderRepository.flush();
+        outboxWriter.append(OutboxEvent.folderPurgeRequested(
+                ownerId, folderId, folder.getPurgeRequestedAt()
+        ));
     }
 
     private void lockFolderNamespace(UUID ownerId) {

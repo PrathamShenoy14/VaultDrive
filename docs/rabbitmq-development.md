@@ -2,7 +2,7 @@
 
 ## Implementation and verification boundary
 
-The repository supplies an additive RabbitMQ Compose file. VM deployment and live RabbitMQ verification completed on 2026-10-09 after explicit approval of the four deployment commands. Spring Boot integration, application exchanges and queues, publishing, consumers, outbox tables, durable jobs, retries, and recovery are not implemented. PostgreSQL remains the intended authority for durable work under [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md).
+The repository supplies an additive RabbitMQ Compose file. VM deployment and live RabbitMQ verification completed on 2026-10-09 after explicit approval of the four deployment commands. Phase 1B separately adds PostgreSQL outbox persistence for file/folder purge requests. Spring Boot broker integration, application exchanges and queues, publishing, consumers, durable jobs, retries, and recovery are not implemented. PostgreSQL remains authoritative for durable state under [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md).
 
 ## Existing VM setup
 

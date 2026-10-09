@@ -8,6 +8,7 @@ import com.vaultdrive.folder.Folder;
 import com.vaultdrive.folder.exception.FolderNotFoundException;
 import com.vaultdrive.file.exception.UploadFinalizationRejectedException;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
+import com.vaultdrive.outbox.OutboxWriter;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,6 +41,9 @@ class FileMetadataServiceTest {
     @Mock
     private HierarchyCoordinator hierarchyCoordinator;
 
+    @Mock
+    private OutboxWriter outboxWriter;
+
     private FileMetadataService fileMetadataService;
 
     private UUID ownerId;
@@ -50,7 +54,8 @@ class FileMetadataServiceTest {
                 storedFileRepository,
                 userRepository,
                 folderAccessValidator,
-                hierarchyCoordinator
+                hierarchyCoordinator,
+                outboxWriter
         );
 
         ownerId = UUID.randomUUID();
@@ -1168,6 +1173,13 @@ class FileMetadataServiceTest {
         assertEquals(FileStatus.READY, result.getStatus());
 
         verify(storedFileRepository).saveAndFlush(file);
+        verify(outboxWriter).append(argThat(event ->
+                event.getEventType().equals("FILE_PURGE_REQUESTED")
+                        && event.getAggregateId().equals(fileId)
+                        && event.getPayloadVersion() == 1
+                        && event.getPayload().get("ownerId").equals(ownerId.toString())
+                        && event.getCreatedAt().equals(result.getPurgeRequestedAt())
+        ));
     }
 
     @Test
@@ -1197,6 +1209,7 @@ class FileMetadataServiceTest {
 
         assertNull(file.getPurgeRequestedAt());
         verify(storedFileRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(outboxWriter);
     }
 
     @Test

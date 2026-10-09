@@ -4,6 +4,7 @@ import com.vaultdrive.file.FileMetadataService;
 import com.vaultdrive.file.StoredFile;
 import com.vaultdrive.file.StoredFileRepository;
 import com.vaultdrive.folder.exception.FolderNotFoundException;
+import com.vaultdrive.outbox.OutboxEventRepository;
 import com.vaultdrive.user.User;
 import com.vaultdrive.user.UserRepository;
 
@@ -46,6 +47,9 @@ class FolderPurgeConcurrencyIntegrationTest {
 
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @Autowired
+    private OutboxEventRepository outboxEventRepository;
 
     @Test
     void folderPurgeRequestBlocksThenRejectsChildRestore()
@@ -192,6 +196,12 @@ class FolderPurgeConcurrencyIntegrationTest {
                     .getPurgeRequestedAt()).isNull();
             assertThat(requireFolder(fixture.childFolderId())
                     .getPurgeRequestedAt()).isNotNull();
+            assertThat(outboxEventRepository.findByAggregateTypeAndAggregateId(
+                    "FOLDER", fixture.childFolderId()
+            )).hasSize(1);
+            assertThat(outboxEventRepository.findByAggregateTypeAndAggregateId(
+                    "FOLDER", fixture.parentFolderId()
+            )).isEmpty();
         } finally {
             releaseChild.countDown();
             executor.shutdownNow();
@@ -238,6 +248,12 @@ class FolderPurgeConcurrencyIntegrationTest {
                             .isInstanceOf(FolderNotFoundException.class)
             );
 
+            assertThat(outboxEventRepository.findByAggregateTypeAndAggregateId(
+                    "FOLDER", fixture.parentFolderId()
+            )).hasSize(1);
+            assertThat(outboxEventRepository.findByAggregateTypeAndAggregateId(
+                    "FOLDER", fixture.childFolderId()
+            )).isEmpty();
             postAssertion.run();
         } finally {
             releasePurge.countDown();
@@ -300,6 +316,12 @@ class FolderPurgeConcurrencyIntegrationTest {
     }
 
     private void deleteFixture(Fixture fixture) {
+        for (UUID folderId : List.of(fixture.parentFolderId(), fixture.childFolderId())) {
+            outboxEventRepository.deleteAll(
+                    outboxEventRepository.findByAggregateTypeAndAggregateId("FOLDER", folderId)
+            );
+        }
+        outboxEventRepository.flush();
         if (fixture.fileId() != null
                 && storedFileRepository.existsById(fixture.fileId())) {
             storedFileRepository.deleteById(fixture.fileId());

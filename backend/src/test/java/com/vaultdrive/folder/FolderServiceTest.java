@@ -5,6 +5,7 @@ import com.vaultdrive.folder.exception.FolderNotFoundException;
 import com.vaultdrive.folder.exception.InvalidFolderNameException;
 import com.vaultdrive.folder.exception.InvalidFolderMoveException;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
+import com.vaultdrive.outbox.OutboxWriter;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,6 +49,9 @@ class FolderServiceTest {
    @Mock
    private HierarchyCoordinator hierarchyCoordinator;
 
+   @Mock
+   private OutboxWriter outboxWriter;
+
    private FolderService folderService;
    private FolderNameValidator folderNameValidator;
    private FolderAccessValidator folderAccessValidator;
@@ -63,7 +67,8 @@ class FolderServiceTest {
             folderAccessValidator,
             folderNameValidator,
             userRepository,
-            hierarchyCoordinator
+            hierarchyCoordinator,
+            outboxWriter
         );
 
         lenient()
@@ -1282,6 +1287,13 @@ class FolderServiceTest {
                 .isEqualTo(folder.getPurgeRequestedAt());
         verify(hierarchyCoordinator).acquireExclusive(ownerId);
         verify(folderRepository).flush();
+        verify(outboxWriter).append(argThat(event ->
+                event.getEventType().equals("FOLDER_PURGE_REQUESTED")
+                        && event.getAggregateId().equals(folder.getId())
+                        && event.getPayloadVersion() == 1
+                        && event.getPayload().get("ownerId").equals(ownerId.toString())
+                        && event.getCreatedAt().equals(folder.getPurgeRequestedAt())
+        ));
     }
 
     @Test

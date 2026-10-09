@@ -5,6 +5,7 @@ import com.vaultdrive.folder.FolderRepository;
 import com.vaultdrive.folder.FolderService;
 import com.vaultdrive.folder.exception.FolderNotFoundException;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
+import com.vaultdrive.outbox.OutboxEventRepository;
 import com.vaultdrive.user.User;
 import com.vaultdrive.user.UserRepository;
 
@@ -57,6 +58,9 @@ class FileHierarchyConcurrencyIntegrationTest {
     @Autowired
     private PlatformTransactionManager transactionManager;
 
+    @Autowired
+    private OutboxEventRepository outboxEventRepository;
+
     @Test
     void restoreCompletesBeforeConcurrentPermanentDeletionRequest()
             throws Exception {
@@ -107,6 +111,9 @@ class FileHierarchyConcurrencyIntegrationTest {
             );
             assertThat(persisted.getDeletedAt()).isNull();
             assertThat(persisted.getPurgeRequestedAt()).isNull();
+            assertThat(outboxEventRepository.findByAggregateTypeAndAggregateId(
+                    "FILE", persisted.getId()
+            )).isEmpty();
         } finally {
             releaseRestore.countDown();
             executor.shutdownNow();
@@ -164,6 +171,9 @@ class FileHierarchyConcurrencyIntegrationTest {
             );
             assertThat(persisted.getDeletedAt()).isNotNull();
             assertThat(persisted.getPurgeRequestedAt()).isNotNull();
+            assertThat(outboxEventRepository.findByAggregateTypeAndAggregateId(
+                    "FILE", persisted.getId()
+            )).hasSize(1);
         } finally {
             releasePurge.countDown();
             executor.shutdownNow();
@@ -759,6 +769,12 @@ class FileHierarchyConcurrencyIntegrationTest {
     }
 
     private void deleteRestoreFixture(RestoreFixture fixture) {
+        for (UUID fileId : fixture.fileIds()) {
+            outboxEventRepository.deleteAll(
+                    outboxEventRepository.findByAggregateTypeAndAggregateId("FILE", fileId)
+            );
+        }
+        outboxEventRepository.flush();
         storedFileRepository.deleteAllById(fixture.fileIds());
         storedFileRepository.flush();
         folderRepository.deleteById(fixture.originalFolderId());

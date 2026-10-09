@@ -1,6 +1,6 @@
 # VaultDrive architecture
 
-Last reconciled with the repository on 2026-10-09.
+Last reconciled with the repository on 2026-10-10.
 
 ## Status legend
 
@@ -28,7 +28,7 @@ PostgreSQL and Garage do not share a transaction. Code must make cross-system fa
 ### Platform and persistence — Committed
 
 - Java 21, Spring Boot 4.1.1, Maven wrapper, Spring MVC, Spring Data JPA, validation, and Spring Security.
-- PostgreSQL schema managed by Flyway migrations V1-V11. Hibernate validates the schema (`ddl-auto=validate`) rather than creating it.
+- PostgreSQL schema managed by Flyway migrations V1-V12. Hibernate validates the schema (`ddl-auto=validate`) rather than creating it.
 - Configuration comes from properties and environment variables. Secrets are not intended for source control.
 
 ### Authentication and security — Committed
@@ -76,13 +76,13 @@ The file endpoint accepts only an owned, trashed `READY` file whose purge has no
 
 A pending-purge folder makes every descendant ineligible for restore, move, upload reservation/finalization, file purge request, or other metadata mutation. Folder and file restore explicitly check pending-purge ancestry before ordinary inaccessible-parent root fallback.
 
-This completes only the durable request transition. No purge worker exists. Garage deletion, database-row finalization, retry/backoff, job claiming, crash recovery, observability, and dead-letter handling remain planned.
+Accepted file and folder requests now also append a version-1 purge-intent event to `outbox_events` in the same JPA transaction through a mandatory-transaction writer. Business state and event commit or roll back together, including after flush. Ownership/eligibility rejection and repeated requests append no event. A folder request emits one root intent, not a subtree event list. This completes durable intent plus notification persistence only. No purge worker exists. Garage deletion, database-row finalization, retry/backoff, job claiming, crash recovery, observability, and dead-letter handling remain planned.
 
-### Asynchronous processing direction — Planned
+### Asynchronous processing — Partially implemented
 
-ADR-0008 selects a PostgreSQL transactional outbox, RabbitMQ work notifications, PostgreSQL-backed durable job state, idempotent workers, and scheduler-driven recovery. API transactions will atomically persist business changes and outbox events; an asynchronous publisher will deliver notifications; workers will claim durable jobs in PostgreSQL; and scheduled database scans will recover missed publication, missed notifications, retries, and interrupted work. Database polling is a recovery and publishing mechanism within this design, not an alternative to RabbitMQ.
+ADR-0008 selects a PostgreSQL transactional outbox, RabbitMQ work notifications, PostgreSQL-backed durable job state, idempotent workers, and scheduler-driven recovery. Purge-request API transactions atomically persist business changes and outbox events; a future asynchronous publisher will deliver notifications; workers will claim durable jobs in PostgreSQL; and scheduled database scans will recover missed publication, missed notifications, retries, and interrupted work. Database polling is a recovery and publishing mechanism within this design, not an alternative to RabbitMQ.
 
-RabbitMQ development infrastructure is deployed and verified on the Ubuntu VM as recorded in [Phase 1A setup instructions](rabbitmq-development.md). AMQP and management bind to VM loopback and Windows accesses them through SSH forwarding. Application integration is not implemented. None of the outbox, durable-job, worker, scheduler, retry, or recovery components is implemented. Their schemas, messaging topology, claim protocol, timing, and limits remain undecided.
+RabbitMQ development infrastructure is deployed and verified on the Ubuntu VM as recorded in [Phase 1A setup instructions](rabbitmq-development.md). AMQP and management bind to VM loopback and Windows accesses them through SSH forwarding. Broker integration is not implemented. Phase 1B adds outbox schema/JPA persistence and purge-request insertion; no publisher, durable-job, worker, scheduler, retry, or recovery component is implemented. Their messaging topology, job schema, claim protocol, timing, and limits remain undecided. [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md) records payload versioning, delivery metadata, indexes, and the planned at-least-once/idempotent contract. Existing purge intents are not backfilled.
 
 ## Current consistency and concurrency model
 
@@ -98,9 +98,11 @@ The advisory key derivation and staged migration constraints are recorded in ADR
 
 The repository contains unit tests, MockMvc controller tests, Spring Security integration tests, PostgreSQL repository tests, folder concurrency integration tests, and a live S3-compatible storage integration test. PostgreSQL coordinator tests cover hierarchy lock compatibility/blocking, destination namespace lock compatibility/blocking, transaction release, and rejection outside a transaction. PostgreSQL races cover file move versus folder trash, file rename versus folder trash, optimistic same-file mutation conflicts, upload reservation versus folder trash, folder trash in the transfer gap before READY, competing finalization transitions, both file restore/permanent-delete winner orders, restore versus folder trash/move, same-name restores, folder purge request versus child/file restore, folder move, upload reservation, and both parent/child purge winner orders. Upload unit tests also cover known destination rejection cleanup, cleanup failure, and uncertain finalization behavior. Permanent-delete requests retain controller tests for accepted, not-found, and unauthenticated outcomes plus service, repository, constraint, and metadata transition coverage. The presence of a test is evidence of intended coverage, not proof that it passed on every machine; current verification results belong in the task/commit report.
 
+Phase 1B PostgreSQL tests cover file/folder outbox commit, rollback after both flushes, real insertion-constraint failure, independent-transaction visibility, unauthorized/active/repeated request rejection, JSONB payload round-tripping, and invalid delivery/payload metadata. Existing file restore-versus-purge and parent/child folder-purge races also assert that only accepted intent emits an event. No publisher or consumer delivery behavior is tested or implemented.
+
 ## Known gaps and pending decisions
 
-- Implementation details for the planned ADR-0008 async architecture: outbox and durable-job schemas, RabbitMQ topology, claim protocol, retry/recovery policy, and ownership semantics.
+- Remaining ADR-0008 async implementation: publisher/claim protocol, durable-job schema, RabbitMQ topology, retry/recovery policy, historical intent backfill, retention, and worker ownership semantics.
 - Remaining file-side coordination: future purge/reconciliation workers.
 - Reconciliation for stale `UPLOADING`, `FAILED`, orphaned objects, and uncertain finalization.
 - Folder/file purge workers and final subtree deletion semantics.
