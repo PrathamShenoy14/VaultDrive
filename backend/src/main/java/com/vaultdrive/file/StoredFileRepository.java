@@ -3,13 +3,39 @@ package com.vaultdrive.file;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface StoredFileRepository
         extends JpaRepository<StoredFile, UUID> {
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update StoredFile file
+               set file.status = :newStatus,
+                   file.updatedAt = :updatedAt,
+                   file.version = file.version + 1
+             where file.id = :fileId
+               and file.ownerId = :ownerId
+               and file.status = :expectedStatus
+               and file.version = :expectedVersion
+               and file.deletedAt is null
+               and file.purgeRequestedAt is null
+            """)
+    int transitionUploadStatus(
+            @Param("fileId") UUID fileId,
+            @Param("ownerId") UUID ownerId,
+            @Param("expectedStatus") FileStatus expectedStatus,
+            @Param("expectedVersion") long expectedVersion,
+            @Param("newStatus") FileStatus newStatus,
+            @Param("updatedAt") Instant updatedAt
+    );
 
     boolean existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusIn(
             UUID ownerId,

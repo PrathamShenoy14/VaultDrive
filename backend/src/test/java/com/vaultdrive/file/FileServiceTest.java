@@ -6,6 +6,7 @@ import com.vaultdrive.file.exception.FileUploadException;
 import com.vaultdrive.file.exception.InvalidFileNameException;
 import com.vaultdrive.file.exception.FileNotFoundException;
 import com.vaultdrive.file.exception.FileExtensionChangeException;
+import com.vaultdrive.file.exception.UploadFinalizationRejectedException;
 import com.vaultdrive.folder.Folder;
 import com.vaultdrive.folder.FolderAccessValidator;
 import com.vaultdrive.folder.exception.FolderNotFoundException;
@@ -103,13 +104,6 @@ class FileServiceTest {
 
         when(fileNameValidator.validateAndNormalize(" resume.pdf "))
                 .thenReturn("resume.pdf");
-
-        Folder folder = mock(Folder.class);
-
-        when(folderAccessValidator.requireAccessibleFolder(
-                ownerId,
-                folderId
-        )).thenReturn(folder);
 
         when(storageKeyGenerator.generateFileKey(
                 eq(ownerId),
@@ -221,14 +215,13 @@ class FileServiceTest {
         when(fileNameValidator.validateAndNormalize("resume.pdf"))
                 .thenReturn("resume.pdf");
 
-                when(folderAccessValidator.requireAccessibleFolder(
-                        ownerId,
-                        folderId
-                )).thenThrow(
-                        new FolderNotFoundException(
-                                "Folder not found"
-                        )
-                );
+        when(storageKeyGenerator.generateFileKey(
+                eq(ownerId),
+                any(UUID.class)
+        )).thenReturn("users/" + ownerId + "/files/generated-id");
+
+        when(fileMetadataService.createUploading(any(StoredFile.class)))
+                .thenThrow(new FolderNotFoundException("Folder not found"));
 
         assertThrows(
                 FolderNotFoundException.class,
@@ -239,8 +232,11 @@ class FileServiceTest {
                 )
         );
 
-        verifyNoInteractions(storageKeyGenerator);
-        verifyNoInteractions(fileMetadataService);
+        verify(storageKeyGenerator).generateFileKey(
+                eq(ownerId),
+                any(UUID.class)
+        );
+        verify(fileMetadataService).createUploading(any(StoredFile.class));
         verifyNoInteractions(objectStorageService);
     }
 
@@ -453,6 +449,102 @@ class FileServiceTest {
          */
         verify(objectStorageService, never()).delete(anyString());
 
+        verify(fileMetadataService, never()).markFailed(any());
+    }
+
+    @Test
+    void shouldDeleteObjectWhenDestinationWasRejectedDuringFinalization() {
+        UUID ownerId = UUID.randomUUID();
+
+        MockMultipartFile multipartFile = new MockMultipartFile(
+                "file",
+                "report.pdf",
+                "application/pdf",
+                new byte[]{1, 2, 3}
+        );
+
+        when(fileNameValidator.validateAndNormalize("report.pdf"))
+                .thenReturn("report.pdf");
+        when(storageKeyGenerator.generateFileKey(
+                eq(ownerId),
+                any(UUID.class)
+        )).thenReturn("users/" + ownerId + "/files/generated-id");
+        when(fileMetadataService.createUploading(any(StoredFile.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        UploadFinalizationRejectedException rejection =
+                new UploadFinalizationRejectedException(
+                        "Upload destination is no longer accessible",
+                        new FolderNotFoundException("Folder not found")
+                );
+        doThrow(rejection)
+                .when(fileMetadataService)
+                .markReady(any(StoredFile.class));
+
+        FileUploadException exception = assertThrows(
+                FileUploadException.class,
+                () -> fileService.uploadFile(
+                        ownerId,
+                        null,
+                        multipartFile
+                )
+        );
+
+        assertSame(rejection, exception.getCause());
+        verify(objectStorageService)
+                .delete("users/" + ownerId + "/files/generated-id");
+        verify(fileMetadataService, never()).markFailed(any());
+    }
+
+    @Test
+    void shouldKeepFailedMetadataTrackingWhenRejectedObjectCleanupFails() {
+        UUID ownerId = UUID.randomUUID();
+
+        MockMultipartFile multipartFile = new MockMultipartFile(
+                "file",
+                "report.pdf",
+                "application/pdf",
+                new byte[]{1, 2, 3}
+        );
+
+        when(fileNameValidator.validateAndNormalize("report.pdf"))
+                .thenReturn("report.pdf");
+        when(storageKeyGenerator.generateFileKey(
+                eq(ownerId),
+                any(UUID.class)
+        )).thenReturn("users/" + ownerId + "/files/generated-id");
+        when(fileMetadataService.createUploading(any(StoredFile.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        UploadFinalizationRejectedException rejection =
+                new UploadFinalizationRejectedException(
+                        "Upload destination is no longer accessible",
+                        new FolderNotFoundException("Folder not found")
+                );
+        RuntimeException cleanupFailure =
+                new RuntimeException("Garage delete failed");
+
+        doThrow(rejection)
+                .when(fileMetadataService)
+                .markReady(any(StoredFile.class));
+        doThrow(cleanupFailure)
+                .when(objectStorageService)
+                .delete(anyString());
+
+        assertThrows(
+                FileUploadException.class,
+                () -> fileService.uploadFile(
+                        ownerId,
+                        null,
+                        multipartFile
+                )
+        );
+
+        assertArrayEquals(
+                new Throwable[]{cleanupFailure},
+                rejection.getSuppressed()
+        );
+        verify(objectStorageService).delete(anyString());
         verify(fileMetadataService, never()).markFailed(any());
     }
 

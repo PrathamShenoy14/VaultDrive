@@ -5,6 +5,7 @@ import com.vaultdrive.file.dto.FileResponse;
 import com.vaultdrive.file.dto.UploadFileResponse;
 import com.vaultdrive.file.dto.FileDownload;
 import com.vaultdrive.file.exception.FileUploadException;
+import com.vaultdrive.file.exception.UploadFinalizationRejectedException;
 import com.vaultdrive.file.exception.InvalidFilePaginationException;
 import com.vaultdrive.file.exception.FileNotFoundException;
 import com.vaultdrive.folder.FolderAccessValidator;
@@ -69,8 +70,6 @@ public class FileService {
                 multipartFile.getOriginalFilename()
         );
 
-        validateFolderAccess(ownerId, folderId);
-
         UUID fileId = UUID.randomUUID();
 
         String storageKey =
@@ -114,6 +113,15 @@ public class FileService {
 
         try {
             fileMetadataService.markReady(savedFile);
+
+        } catch (UploadFinalizationRejectedException exception) {
+
+            deleteRejectedUploadObjectSafely(savedFile, exception);
+
+            throw new FileUploadException(
+                    "File was uploaded but its destination is no longer accessible",
+                    exception
+            );
 
         } catch (RuntimeException exception) {
 
@@ -464,6 +472,17 @@ public class FileService {
              * If updating FAILED also fails, the row may remain UPLOADING.
              * A future reconciliation process can detect that state.
              */
+        }
+    }
+
+    private void deleteRejectedUploadObjectSafely(
+            StoredFile storedFile,
+            RuntimeException finalizationFailure
+    ) {
+        try {
+            objectStorageService.delete(storedFile.getStorageKey());
+        } catch (RuntimeException cleanupFailure) {
+            finalizationFailure.addSuppressed(cleanupFailure);
         }
     }
 }

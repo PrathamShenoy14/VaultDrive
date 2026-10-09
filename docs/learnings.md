@@ -32,7 +32,7 @@ Storage keys use immutable owner/file UUIDs rather than display names or folder 
 
 ## Lock migrations must preserve one coordination domain
 
-Folder structural operations use an owner-scoped exclusive PostgreSQL transaction advisory lock. File rename, move, and trash use its shared counterpart before reading current hierarchy state, so these paths coordinate while unrelated file mutations may overlap. Optimistic file versions then prevent compatible shared-lock requests from losing same-row updates. Upload, restore, permanent-delete request, and lifecycle finalization remain outside this advisory-lock domain, so the staged change is still not complete concurrency safety.
+Folder structural operations use an owner-scoped exclusive PostgreSQL transaction advisory lock. File rename, move, trash, upload reservation, and upload finalization use its shared counterpart before reading current hierarchy state, so these paths coordinate while unrelated file mutations may overlap. Optimistic file versions then prevent compatible shared-lock requests from losing same-row updates; upload lifecycle changes additionally require the expected `UPLOADING` state. Restore, permanent-delete request, and future workers remain outside this advisory-lock domain, so the staged change is still not complete concurrency safety.
 
 ## Lock-before-read matters for competing transitions
 
@@ -40,7 +40,7 @@ Reading a file or its ancestor chain before acquiring the hierarchy lock permits
 
 ## Failure handling should preserve the most useful truth
 
-If an S3 upload fails, best-effort marking as `FAILED` keeps diagnostic state. If upload succeeds but the metadata outcome is uncertain, blindly deleting the object may create a worse inconsistency. Reconciliation is intentionally planned, though not yet implemented.
+If an S3 upload fails, best-effort marking as `FAILED` keeps diagnostic state. If upload succeeds but finalization deterministically rejects an inaccessible destination, committing `FAILED` first creates a durable object record before best-effort cleanup; a failed cleanup therefore leaves tracked, not orphaned, bytes. If the database outcome is uncertain, blindly deleting the object may create a READY row with missing bytes, so the object remains and reconciliation is still required.
 
 ## Tests should live at the layer that owns the guarantee
 

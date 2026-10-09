@@ -7,12 +7,15 @@ import com.vaultdrive.user.UserRepository;
 import com.vaultdrive.folder.FolderAccessValidator;
 import com.vaultdrive.folder.Folder;
 import com.vaultdrive.folder.exception.FolderNotFoundException;
+import com.vaultdrive.file.exception.UploadFinalizationRejectedException;
+import com.vaultdrive.hierarchy.HierarchyCoordinator;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 import org.mockito.Mock;
+import org.mockito.InOrder;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Optional;
@@ -35,6 +38,9 @@ class FileMetadataServiceTest {
     @Mock
     private FolderAccessValidator folderAccessValidator;
 
+    @Mock
+    private HierarchyCoordinator hierarchyCoordinator;
+
     private FileMetadataService fileMetadataService;
 
     private UUID ownerId;
@@ -44,7 +50,8 @@ class FileMetadataServiceTest {
         fileMetadataService = new FileMetadataService(
                 storedFileRepository,
                 userRepository,
-                folderAccessValidator
+                folderAccessValidator,
+                hierarchyCoordinator
         );
 
         ownerId = UUID.randomUUID();
@@ -54,6 +61,10 @@ class FileMetadataServiceTest {
         lenient()
                 .when(userRepository.findByIdForUpdate(ownerId))
                 .thenReturn(Optional.of(user));
+
+        lenient()
+                .when(userRepository.existsById(ownerId))
+                .thenReturn(true);
     }
 
     @Test
@@ -80,8 +91,20 @@ class FileMetadataServiceTest {
         assertSame(file, result);
         assertEquals(FileStatus.UPLOADING, result.getStatus());
 
-        verify(userRepository)
-                .findByIdForUpdate(ownerId);
+        InOrder order = inOrder(
+                hierarchyCoordinator,
+                userRepository,
+                storedFileRepository
+        );
+
+        order.verify(hierarchyCoordinator).acquireShared(ownerId);
+        order.verify(userRepository).existsById(ownerId);
+        order.verify(storedFileRepository)
+                .existsByOwnerIdAndFolderIdIsNullAndNameAndDeletedAtIsNullAndStatusIn(
+                        eq(ownerId),
+                        eq("report.pdf"),
+                        anyCollection()
+                );
 
         verify(storedFileRepository)
                 .saveAndFlush(file);
@@ -141,7 +164,15 @@ class FileMetadataServiceTest {
 
         fileMetadataService.createUploading(file);
 
-        verify(storedFileRepository)
+        InOrder order = inOrder(
+                hierarchyCoordinator,
+                folderAccessValidator,
+                storedFileRepository
+        );
+        order.verify(hierarchyCoordinator).acquireShared(ownerId);
+        order.verify(folderAccessValidator)
+                .requireAccessibleFolder(ownerId, folderId);
+        order.verify(storedFileRepository)
                 .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusIn(
                         eq(ownerId),
                         eq(folderId),
@@ -199,18 +230,34 @@ class FileMetadataServiceTest {
                 file.getStatus()
         );
 
-        when(storedFileRepository.saveAndFlush(file))
-                .thenReturn(file);
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        file.getId(),
+                        ownerId,
+                        FileStatus.UPLOADING
+                ))
+                .thenReturn(Optional.of(file));
+
+        when(storedFileRepository.transitionUploadStatus(
+                eq(file.getId()),
+                eq(ownerId),
+                eq(FileStatus.UPLOADING),
+                eq(file.getVersion()),
+                eq(FileStatus.READY),
+                any()
+        )).thenReturn(1);
 
         fileMetadataService.markReady(file);
 
-        assertEquals(
-                FileStatus.READY,
-                file.getStatus()
+        verify(hierarchyCoordinator).acquireShared(ownerId);
+        verify(storedFileRepository).transitionUploadStatus(
+                eq(file.getId()),
+                eq(ownerId),
+                eq(FileStatus.UPLOADING),
+                eq(0L),
+                eq(FileStatus.READY),
+                any()
         );
-
-        verify(storedFileRepository)
-                .saveAndFlush(file);
     }
 
     @Test
@@ -225,18 +272,95 @@ class FileMetadataServiceTest {
                 file.getStatus()
         );
 
-        when(storedFileRepository.saveAndFlush(file))
-                .thenReturn(file);
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        file.getId(),
+                        ownerId,
+                        FileStatus.UPLOADING
+                ))
+                .thenReturn(Optional.of(file));
+
+        when(storedFileRepository.transitionUploadStatus(
+                eq(file.getId()),
+                eq(ownerId),
+                eq(FileStatus.UPLOADING),
+                eq(file.getVersion()),
+                eq(FileStatus.FAILED),
+                any()
+        )).thenReturn(1);
 
         fileMetadataService.markFailed(file);
 
-        assertEquals(
-                FileStatus.FAILED,
-                file.getStatus()
+        verify(hierarchyCoordinator).acquireShared(ownerId);
+        verify(storedFileRepository).transitionUploadStatus(
+                eq(file.getId()),
+                eq(ownerId),
+                eq(FileStatus.UPLOADING),
+                eq(0L),
+                eq(FileStatus.FAILED),
+                any()
+        );
+    }
+
+    @Test
+    void shouldFailFinalizationWhenDestinationIsNoLongerAccessible() {
+        UUID folderId = UUID.randomUUID();
+        StoredFile file = createFile(folderId, "report.pdf");
+
+        when(storedFileRepository
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        file.getId(),
+                        ownerId,
+                        FileStatus.UPLOADING
+                ))
+                .thenReturn(Optional.of(file));
+
+        FolderNotFoundException inaccessible =
+                new FolderNotFoundException("Folder not found");
+
+        when(folderAccessValidator.requireAccessibleFolder(
+                ownerId,
+                folderId
+        )).thenThrow(inaccessible);
+
+        when(storedFileRepository.transitionUploadStatus(
+                eq(file.getId()),
+                eq(ownerId),
+                eq(FileStatus.UPLOADING),
+                eq(0L),
+                eq(FileStatus.FAILED),
+                any()
+        )).thenReturn(1);
+
+        UploadFinalizationRejectedException exception = assertThrows(
+                UploadFinalizationRejectedException.class,
+                () -> fileMetadataService.markReady(file)
         );
 
-        verify(storedFileRepository)
-                .saveAndFlush(file);
+        assertSame(inaccessible, exception.getCause());
+
+        InOrder order = inOrder(
+                hierarchyCoordinator,
+                storedFileRepository,
+                folderAccessValidator
+        );
+        order.verify(hierarchyCoordinator).acquireShared(ownerId);
+        order.verify(storedFileRepository)
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
+                        file.getId(),
+                        ownerId,
+                        FileStatus.UPLOADING
+                );
+        order.verify(folderAccessValidator)
+                .requireAccessibleFolder(ownerId, folderId);
+        order.verify(storedFileRepository).transitionUploadStatus(
+                eq(file.getId()),
+                eq(ownerId),
+                eq(FileStatus.UPLOADING),
+                eq(0L),
+                eq(FileStatus.FAILED),
+                any()
+        );
     }
 
     @Test
