@@ -78,6 +78,12 @@ A pending-purge folder makes every descendant ineligible for restore, move, uplo
 
 This completes only the durable request transition. No purge worker exists. Garage deletion, database-row finalization, retry/backoff, job claiming, crash recovery, observability, and dead-letter handling remain planned.
 
+### Asynchronous processing direction — Planned
+
+ADR-0008 selects a PostgreSQL transactional outbox, RabbitMQ work notifications, PostgreSQL-backed durable job state, idempotent workers, and scheduler-driven recovery. API transactions will atomically persist business changes and outbox events; an asynchronous publisher will deliver notifications; workers will claim durable jobs in PostgreSQL; and scheduled database scans will recover missed publication, missed notifications, retries, and interrupted work. Database polling is a recovery and publishing mechanism within this design, not an alternative to RabbitMQ.
+
+None of the outbox, RabbitMQ, durable-job, worker, scheduler, retry, or recovery components is implemented. Their schemas, topology, claim protocol, timing, and limits remain undecided.
+
 ## Current consistency and concurrency model
 
 PostgreSQL partial unique indexes are the final defense against duplicate active names. Services also perform pre-checks for clearer errors.
@@ -94,7 +100,7 @@ The repository contains unit tests, MockMvc controller tests, Spring Security in
 
 ## Known gaps and pending decisions
 
-- Async purge worker topology: database polling first versus a queue/outbox, plus retry and ownership semantics.
+- Implementation details for the planned ADR-0008 async architecture: outbox and durable-job schemas, RabbitMQ topology, claim protocol, retry/recovery policy, and ownership semantics.
 - Remaining file-side coordination: future purge/reconciliation workers.
 - Reconciliation for stale `UPLOADING`, `FAILED`, orphaned objects, and uncertain finalization.
 - Folder/file purge workers and final subtree deletion semantics.
@@ -112,3 +118,4 @@ No benchmark, scale limit, or production-readiness claim has been established.
 - [ADR-0005: File upload and trash lifecycle](decisions/0005-file-lifecycle.md)
 - [ADR-0006: Durable pending-purge deletion](decisions/0006-pending-purge-async-deletion.md)
 - [ADR-0007: Current namespace lock and granular successor](decisions/0007-concurrency-locking.md)
+- [ADR-0008: Transactional outbox and durable asynchronous jobs](decisions/0008-transactional-outbox-rabbitmq.md)

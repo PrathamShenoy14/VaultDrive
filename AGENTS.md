@@ -31,13 +31,21 @@ VaultDrive is a learning and portfolio project for production-minded backend eng
 
 Use the workflow in `docs/development-workflow.md`. In short: discuss the what/why/how and trade-offs, define acceptance criteria, implement a bounded task with tests, run targeted then full verification, inspect the diff, update learning/architecture notes, and commit only the validated task.
 
-## Codex execution policy
+## Codex CLI execution policy
 
-- Use a Sol model only: GPT-5.6 Sol, GPT-6 Sol, or GPT-6.1 Sol.
-- Use reasoning effort no higher than `high`; prefer `medium` for bounded implementation and `high` for architecture, concurrency, or difficult debugging.
-- Do not use Astra for this repository.
-- Give Codex a bounded file/behavior scope, explicit non-goals, acceptance criteria, and exact verification commands.
-- Codex may edit the checked-out repository directly; copy/paste handoff is unnecessary.
+- Use only GPT-5.6 Sol, GPT-6 Sol, or GPT-6.1 Sol. Never use Astra.
+- Prefer `low` reasoning for mechanical changes, `medium` for normal implementation, and `high` only for genuinely difficult concurrency or distributed-systems problems.
+- Work directly in the checked-out repository from the Zed terminal.
+- Treat the supplied task scope, acceptance criteria, and non-goals as the implementation boundary.
+- Do not independently redesign an already-agreed architecture unless a concrete correctness or security issue requires reconsideration.
+- Before implementation, inspect only the relevant files, tests, and architecture decisions. Do not repeat repository-wide audits when the necessary context is documented.
+- Prefer existing services, repositories, abstractions, and test patterns over introducing unnecessary new layers.
+- Read `docs/architecture.md` and relevant ADR sections selectively; do not load all documentation for every task.
+- If a significant design ambiguity or unsafe assumption is discovered, explain it before making a major architectural change.
+- Run focused tests during implementation and the full relevant verification suite before committing.
+- Never push, force-push, reset, rebase, or amend commits unless explicitly requested.
+- After completing a task, report the changed files, key decisions, test results, commit hash, and remaining limitations.
+- Keep responses concise and avoid repeating repository background already captured in documentation.
 
 ## Baseline verification
 
@@ -58,3 +66,13 @@ git diff --cached --name-only
 ```
 
 The staged file list must contain only the intended task.
+
+## Ubuntu VM infrastructure access
+
+- Docker, PostgreSQL 17, and Garage 2.3.0 run inside an Ubuntu VirtualBox VM.
+- Windows connects through the SSH alias `vaultdrive-vm`; SSH key authentication is configured.
+- Automatically use SSH when infrastructure inspection is relevant. For non-interactive VM operations, use `ssh -o BatchMode=yes vaultdrive-vm "<command>"`.
+- Inspect Docker containers, logs, and the PostgreSQL schema when necessary.
+- Never read or expose SSH private keys, passwords, or service credentials.
+- Never perform destructive Docker, database, storage, or VM operations without explicit user approval.
+- Do not modify unrelated infrastructure.

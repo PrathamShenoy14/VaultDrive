@@ -31,7 +31,9 @@ Folder purge-request races cover child-folder restore, file restore root fallbac
 
 Goal: remove Garage objects asynchronously and finalize metadata without pretending PostgreSQL and S3 share a transaction.
 
-- Decide job source: begin with database polling unless measured requirements justify a broker; a queue/outbox remains an option, not a current dependency.
+- Planned architecture (not implemented): PostgreSQL transactional outbox, RabbitMQ work notifications, PostgreSQL-backed durable job state, and scheduler-driven recovery as recorded in ADR-0008.
+- Persist each business-state change and its outbox event atomically, then publish to RabbitMQ asynchronously with duplicate publication and delivery expected.
+- Have idempotent workers claim durable jobs in PostgreSQL; use scheduled database scans to recover missed notifications, retries, and interrupted work. Database polling is a recovery and publishing mechanism, not an alternative execution topology.
 - Define safe job claiming for multiple worker instances, retry/backoff, attempt metadata, and terminal-failure handling.
 - Treat object deletion as idempotent or explicitly handle an already-missing object.
 - Delete/finalize the database row only after the storage outcome is known.
@@ -84,7 +86,7 @@ Exit criteria: correctness tests remain green and measured contention improves f
 
 ## Explicitly undecided
 
-- RabbitMQ or another broker versus database polling/outbox.
+- Outbox, durable-job, claim, retry, RabbitMQ topology, and recovery details within the ADR-0008 direction.
 - Granular lock mechanism and namespace key.
 - Hard-delete retention delay and user-visible cancellation policy.
 - Refresh-token/logout design and JWT key evolution.
