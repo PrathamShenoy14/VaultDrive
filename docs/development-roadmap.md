@@ -27,6 +27,14 @@ PostgreSQL-backed races cover both restore/permanent-delete winner orders. Resto
 
 Folder purge-request races cover child-folder restore, file restore root fallback, folder move, upload reservation, and both parent/child request winner orders. Physical subtree deletion remains a worker concern.
 
+## Phase 1A — RabbitMQ development infrastructure
+
+- [x] Add a pinned management image, persistent data volume, stable hostname, restart policy, health check, and required credentials from ignored environment configuration.
+- [x] Inspect the existing VM Compose project and verify Windows-to-VM SSH forwarding before selecting loopback-only ports.
+- [x] Deploy only RabbitMQ after explicit remote infrastructure approval and verify health, Windows AMQP reachability, and management access while preserving PostgreSQL/Garage (2026-10-09).
+
+See [development setup and verification instructions](rabbitmq-development.md). This slice does not implement application integration or the ADR-0008 processing components.
+
 ## Phase 2 — Build a minimal reliable purge worker
 
 Goal: remove Garage objects asynchronously and finalize metadata without pretending PostgreSQL and S3 share a transaction.

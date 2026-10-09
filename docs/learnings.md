@@ -53,3 +53,9 @@ If an S3 upload fails, best-effort marking as `FAILED` keeps diagnostic state. I
 - S3 integration tests prove the adapter against a compatible service.
 
 A mocked repository cannot prove a unique index or SQL predicate; a controller test cannot prove two transactions serialize.
+
+## Broker infrastructure is a separate implementation boundary
+
+A management-enabled RabbitMQ container and persistent volume prepare development infrastructure; they do not implement reliable background work. ADR-0008 still requires atomic outbox persistence and PostgreSQL-backed job recovery. Keep the broker's hostname stable with its data volume, and distinguish an application/listener health check from authenticated AMQP behavior and message processing.
+
+With VirtualBox NAT, a VM loopback publication is reached from Windows through an SSH local forward, not directly through Windows localhost. A PostgreSQL protocol probe through that path verified connectivity before choosing RabbitMQ ports. After approved deployment, Windows received an AMQP connection-start frame and the management UI through the tunnel; authenticated management access was verified on the VM. The additive Compose file and service-scoped `up --no-deps --no-recreate` left PostgreSQL/Garage container identities, start times, mounts, networks, port mappings, and existing configuration fingerprints unchanged. The persistent volume is configured, but no restart or message-persistence experiment was performed in this slice.

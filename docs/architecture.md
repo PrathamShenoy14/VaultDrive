@@ -82,7 +82,7 @@ This completes only the durable request transition. No purge worker exists. Gara
 
 ADR-0008 selects a PostgreSQL transactional outbox, RabbitMQ work notifications, PostgreSQL-backed durable job state, idempotent workers, and scheduler-driven recovery. API transactions will atomically persist business changes and outbox events; an asynchronous publisher will deliver notifications; workers will claim durable jobs in PostgreSQL; and scheduled database scans will recover missed publication, missed notifications, retries, and interrupted work. Database polling is a recovery and publishing mechanism within this design, not an alternative to RabbitMQ.
 
-None of the outbox, RabbitMQ, durable-job, worker, scheduler, retry, or recovery components is implemented. Their schemas, topology, claim protocol, timing, and limits remain undecided.
+RabbitMQ development infrastructure is deployed and verified on the Ubuntu VM as recorded in [Phase 1A setup instructions](rabbitmq-development.md). AMQP and management bind to VM loopback and Windows accesses them through SSH forwarding. Application integration is not implemented. None of the outbox, durable-job, worker, scheduler, retry, or recovery components is implemented. Their schemas, messaging topology, claim protocol, timing, and limits remain undecided.
 
 ## Current consistency and concurrency model
 
