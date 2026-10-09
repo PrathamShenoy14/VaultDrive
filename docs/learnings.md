@@ -32,11 +32,11 @@ Storage keys use immutable owner/file UUIDs rather than display names or folder 
 
 ## Lock migrations must preserve one coordination domain
 
-Folder structural operations use an owner-scoped exclusive PostgreSQL transaction advisory lock. File rename, move, trash, upload reservation, and upload finalization use its shared counterpart before reading current hierarchy state, so these paths coordinate while unrelated file mutations may overlap. Optimistic file versions then prevent compatible shared-lock requests from losing same-row updates; upload lifecycle changes additionally require the expected `UPLOADING` state. Restore, permanent-delete request, and future workers remain outside this advisory-lock domain, so the staged change is still not complete concurrency safety.
+Folder structural operations use an owner-scoped exclusive PostgreSQL transaction advisory lock. File rename, move, trash, restore, permanent-delete request, upload reservation, and upload finalization use its shared counterpart before reading current hierarchy state, so these paths coordinate while unrelated file mutations may overlap. Optimistic file versions prevent compatible shared-lock requests from losing ordinary same-row updates; upload lifecycle changes additionally require the expected `UPLOADING` state. Restore and permanent-delete lock the eligible Trash row so only one transition wins, while restore uses a destination-scoped advisory lock to serialize collision naming without serializing other destinations. Future purge and reconciliation workers remain outside this domain, so the staged change is still not complete concurrency safety.
 
 ## Lock-before-read matters for competing transitions
 
-Reading a file or its ancestor chain before acquiring the hierarchy lock permits a folder mutation to invalidate that state. The implemented rename/move/trash pattern is: acquire the shared owner lock, read and validate current state inside the same transaction, then mutate. Restore and permanent-delete request correctly take their existing user-row lock before reading eligible Trash state, but still need migration to the common hierarchy coordination domain.
+Reading a file or its ancestor chain before acquiring the hierarchy lock permits a folder mutation to invalidate that state. The implemented file-mutation pattern is: acquire the shared owner lock, read and validate current state inside the same transaction, then mutate. When compatible shared-lock operations consume one eligibility state or allocate a name, a narrower row or destination lock is still required; the owner hierarchy lock alone does not prevent those races.
 
 ## Failure handling should preserve the most useful truth
 

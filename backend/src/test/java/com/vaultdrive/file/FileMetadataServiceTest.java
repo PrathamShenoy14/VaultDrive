@@ -2,7 +2,6 @@ package com.vaultdrive.file;
 
 import com.vaultdrive.file.exception.DuplicateFileNameException;
 import com.vaultdrive.file.exception.FileNotFoundException;
-import com.vaultdrive.user.User;
 import com.vaultdrive.user.UserRepository;
 import com.vaultdrive.folder.FolderAccessValidator;
 import com.vaultdrive.folder.Folder;
@@ -55,12 +54,6 @@ class FileMetadataServiceTest {
         );
 
         ownerId = UUID.randomUUID();
-
-        User user = mock(User.class);
-
-        lenient()
-                .when(userRepository.findByIdForUpdate(ownerId))
-                .thenReturn(Optional.of(user));
 
         lenient()
                 .when(userRepository.existsById(ownerId))
@@ -738,9 +731,6 @@ class FileMetadataServiceTest {
                 ))
                 .thenReturn(Optional.of(file));
     
-        when(userRepository.findByIdForUpdate(ownerId))
-                .thenReturn(Optional.of(mock(User.class)));
-    
         when(storedFileRepository
                 .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusIn(
                         ownerId,
@@ -773,6 +763,23 @@ class FileMetadataServiceTest {
         );
     
         assertNull(restored.getDeletedAt());
+
+        InOrder lockOrder = inOrder(
+                hierarchyCoordinator,
+                storedFileRepository,
+                folderAccessValidator
+        );
+        lockOrder.verify(hierarchyCoordinator).acquireShared(ownerId);
+        lockOrder.verify(storedFileRepository)
+                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
+                        file.getId(),
+                        ownerId,
+                        FileStatus.READY
+                );
+        lockOrder.verify(folderAccessValidator)
+                .requireAccessibleFolder(ownerId, folderId);
+        lockOrder.verify(hierarchyCoordinator)
+                .acquireNamespaceExclusive(ownerId, folderId);
     
         verify(storedFileRepository)
                 .saveAndFlush(file);
@@ -804,9 +811,6 @@ class FileMetadataServiceTest {
                 ownerId,
                 originalFolderId
         )).thenThrow(new FolderNotFoundException("Folder not found"));
-    
-        when(userRepository.findByIdForUpdate(ownerId))
-                .thenReturn(Optional.of(mock(User.class)));
     
         when(storedFileRepository
                 .existsByOwnerIdAndFolderIdIsNullAndNameAndDeletedAtIsNullAndStatusIn(
@@ -863,9 +867,6 @@ class FileMetadataServiceTest {
                         FileStatus.READY
                 ))
                 .thenReturn(Optional.of(file));
-    
-        when(userRepository.findByIdForUpdate(ownerId))
-                .thenReturn(Optional.of(mock(User.class)));
     
         when(storedFileRepository
                 .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusIn(
@@ -940,9 +941,6 @@ class FileMetadataServiceTest {
                 ))
                 .thenReturn(Optional.of(file));
     
-        when(userRepository.findByIdForUpdate(ownerId))
-                .thenReturn(Optional.of(mock(User.class)));
-    
         when(storedFileRepository
                 .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusIn(
                         eq(ownerId),
@@ -1001,9 +999,6 @@ class FileMetadataServiceTest {
                         FileStatus.READY
                 ))
                 .thenReturn(Optional.of(file));
-    
-        when(userRepository.findByIdForUpdate(ownerId))
-                .thenReturn(Optional.of(mock(User.class)));
     
         when(storedFileRepository
                 .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusIn(
@@ -1074,9 +1069,6 @@ class FileMetadataServiceTest {
                 ))
                 .thenReturn(Optional.of(file));
     
-        when(userRepository.findByIdForUpdate(ownerId))
-                .thenReturn(Optional.of(mock(User.class)));
-    
         when(storedFileRepository
                 .existsByOwnerIdAndFolderIdAndNameAndDeletedAtIsNullAndStatusIn(
                         eq(ownerId),
@@ -1134,9 +1126,6 @@ class FileMetadataServiceTest {
                 ))
                 .thenReturn(Optional.of(file));
 
-        when(userRepository.findByIdForUpdate(ownerId))
-                .thenReturn(Optional.of(mock(User.class)));
-
         when(storedFileRepository.saveAndFlush(file))
                 .thenReturn(file);
 
@@ -1154,7 +1143,7 @@ class FileMetadataServiceTest {
     }
 
     @Test
-    void shouldRejectRestoreWhenFileIsNotInTrashAfterLockingOwner() {
+    void shouldRejectRestoreWhenFileIsNotInTrashAfterHierarchyLock() {
         UUID fileId = UUID.randomUUID();
 
         when(storedFileRepository
@@ -1172,8 +1161,13 @@ class FileMetadataServiceTest {
 
         assertEquals("File not found", exception.getMessage());
 
-        var inOrder = inOrder(userRepository, storedFileRepository);
-        inOrder.verify(userRepository).findByIdForUpdate(ownerId);
+        var inOrder = inOrder(
+                hierarchyCoordinator,
+                userRepository,
+                storedFileRepository
+        );
+        inOrder.verify(hierarchyCoordinator).acquireShared(ownerId);
+        inOrder.verify(userRepository).existsById(ownerId);
         inOrder.verify(storedFileRepository)
                 .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
                         fileId,
@@ -1186,7 +1180,7 @@ class FileMetadataServiceTest {
     }
 
     @Test
-    void shouldRejectPermanentDeletionWhenFileIsNotInTrashAfterLockingOwner() {
+    void shouldRejectPermanentDeletionWhenFileIsNotInTrashAfterHierarchyLock() {
         UUID fileId = UUID.randomUUID();
 
         when(storedFileRepository
@@ -1207,8 +1201,13 @@ class FileMetadataServiceTest {
 
         assertEquals("File not found", exception.getMessage());
 
-        var inOrder = inOrder(userRepository, storedFileRepository);
-        inOrder.verify(userRepository).findByIdForUpdate(ownerId);
+        var inOrder = inOrder(
+                hierarchyCoordinator,
+                userRepository,
+                storedFileRepository
+        );
+        inOrder.verify(hierarchyCoordinator).acquireShared(ownerId);
+        inOrder.verify(userRepository).existsById(ownerId);
         inOrder.verify(storedFileRepository)
                 .findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
                         fileId,

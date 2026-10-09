@@ -56,6 +56,37 @@ class HierarchyCoordinatorIntegrationTest {
     }
 
     @Test
+    void namespaceLockWaitsForSameOwnerAndNamespace()
+            throws Exception {
+        UUID namespaceId = UUID.randomUUID();
+
+        assertBlockedUntilFirstTransactionCompletes(
+                ownerId -> hierarchyCoordinator
+                        .acquireNamespaceExclusive(ownerId, namespaceId),
+                ownerId -> hierarchyCoordinator
+                        .acquireNamespaceExclusive(ownerId, namespaceId)
+        );
+    }
+
+    @Test
+    void namespaceLocksForDifferentFoldersAreCompatible()
+            throws Exception {
+        UUID firstNamespaceId = UUID.randomUUID();
+        UUID secondNamespaceId = UUID.randomUUID();
+
+        assertCompatible(
+                ownerId -> hierarchyCoordinator.acquireNamespaceExclusive(
+                        ownerId,
+                        firstNamespaceId
+                ),
+                ownerId -> hierarchyCoordinator.acquireNamespaceExclusive(
+                        ownerId,
+                        secondNamespaceId
+                )
+        );
+    }
+
+    @Test
     void transactionRollbackReleasesExclusiveLock() throws Exception {
         UUID ownerId = UUID.randomUUID();
         TransactionTemplate transactionTemplate = transactionTemplate();
@@ -84,6 +115,16 @@ class HierarchyCoordinatorIntegrationTest {
     void rejectsLockAcquisitionOutsideTransaction() {
         assertThatThrownBy(() ->
                 hierarchyCoordinator.acquireShared(UUID.randomUUID())
+        ).isInstanceOf(IllegalStateException.class)
+         .hasMessage(
+                 "Hierarchy coordination requires an active transaction"
+         );
+
+        assertThatThrownBy(() ->
+                hierarchyCoordinator.acquireNamespaceExclusive(
+                        UUID.randomUUID(),
+                        null
+                )
         ).isInstanceOf(IllegalStateException.class)
          .hasMessage(
                  "Hierarchy coordination requires an active transaction"

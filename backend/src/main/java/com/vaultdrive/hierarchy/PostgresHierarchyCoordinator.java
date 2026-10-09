@@ -30,6 +30,15 @@ public class PostgresHierarchyCoordinator implements HierarchyCoordinator {
     private static final String EXCLUSIVE_LOCK_SQL =
             "SELECT pg_advisory_xact_lock(?)";
 
+    /**
+     * The two-int advisory-lock key space does not overlap PostgreSQL's
+     * bigint advisory-lock key space used by the owner hierarchy lock.
+     */
+    private static final int NAMESPACE_LOCK_CLASS = 0x56444E53;
+
+    private static final String NAMESPACE_EXCLUSIVE_LOCK_SQL =
+            "SELECT pg_advisory_xact_lock(?, ?)";
+
     private final EntityManager entityManager;
 
     public PostgresHierarchyCoordinator(EntityManager entityManager) {
@@ -44,6 +53,27 @@ public class PostgresHierarchyCoordinator implements HierarchyCoordinator {
     @Override
     public void acquireExclusive(UUID ownerId) {
         acquire(ownerId, EXCLUSIVE_LOCK_SQL);
+    }
+
+    @Override
+    public void acquireNamespaceExclusive(
+            UUID ownerId,
+            UUID namespaceId
+    ) {
+        requireActiveTransaction();
+
+        int lockKey = namespaceLockKey(ownerId, namespaceId);
+
+        entityManager.unwrap(Session.class).doWork(connection -> {
+            try (PreparedStatement statement =
+                         connection.prepareStatement(
+                                 NAMESPACE_EXCLUSIVE_LOCK_SQL
+                         )) {
+                statement.setInt(1, NAMESPACE_LOCK_CLASS);
+                statement.setInt(2, lockKey);
+                statement.execute();
+            }
+        });
     }
 
     private void acquire(UUID ownerId, String sql) {
@@ -80,5 +110,26 @@ public class PostgresHierarchyCoordinator implements HierarchyCoordinator {
                         ownerId.getLeastSignificantBits(),
                         1
                 );
+    }
+
+    static int namespaceLockKey(UUID ownerId, UUID namespaceId) {
+        long mixed = ownerId.getMostSignificantBits()
+                ^ Long.rotateLeft(
+                        ownerId.getLeastSignificantBits(),
+                        1
+                );
+
+        if (namespaceId != null) {
+            mixed ^= Long.rotateLeft(
+                    namespaceId.getMostSignificantBits(),
+                    17
+            );
+            mixed ^= Long.rotateLeft(
+                    namespaceId.getLeastSignificantBits(),
+                    33
+            );
+        }
+
+        return (int) (mixed ^ (mixed >>> 32));
     }
 }

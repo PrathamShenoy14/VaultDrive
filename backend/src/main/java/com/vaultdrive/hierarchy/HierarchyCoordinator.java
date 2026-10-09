@@ -13,4 +13,11 @@ public interface HierarchyCoordinator {
     void acquireShared(UUID ownerId);
 
     void acquireExclusive(UUID ownerId);
+
+    /**
+     * Serializes name allocation inside one folder (or the root when
+     * {@code namespaceId} is {@code null}). Callers must acquire the owner's
+     * shared or exclusive hierarchy lock first.
+     */
+    void acquireNamespaceExclusive(UUID ownerId, UUID namespaceId);
 }

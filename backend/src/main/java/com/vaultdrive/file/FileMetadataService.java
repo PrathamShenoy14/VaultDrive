@@ -158,6 +158,11 @@ public class FileMetadataService {
                         ownerId,
                         file.getFolderId()
                 );
+
+        hierarchyCoordinator.acquireNamespaceExclusive(
+                ownerId,
+                destinationFolderId
+        );
     
         String restoredName =
                 generateRestoredName(
@@ -280,12 +285,8 @@ public class FileMetadataService {
     }
 
     private void lockFileNamespace(UUID ownerId) {
-        userRepository.findByIdForUpdate(ownerId)
-                .orElseThrow(
-                        () -> new AccessDeniedException(
-                                "User not found"
-                        )
-                );
+        hierarchyCoordinator.acquireShared(ownerId);
+        requireOwner(ownerId);
     }
 
     private void requireOwner(UUID ownerId) {

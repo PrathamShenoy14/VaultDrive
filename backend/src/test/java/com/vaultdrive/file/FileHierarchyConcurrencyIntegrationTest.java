@@ -58,6 +58,277 @@ class FileHierarchyConcurrencyIntegrationTest {
     private PlatformTransactionManager transactionManager;
 
     @Test
+    void restoreCompletesBeforeConcurrentPermanentDeletionRequest()
+            throws Exception {
+        RestoreFixture fixture = createRestoreFixture(
+                "restore-before-purge",
+                false
+        );
+        CountDownLatch restoreFlushed = new CountDownLatch(1);
+        CountDownLatch releaseRestore = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<?> restore = executor.submit(() ->
+                    inTransaction(() -> {
+                        fileMetadataService.restore(
+                                fixture.ownerId(),
+                                fixture.fileIds().getFirst()
+                        );
+                        restoreFlushed.countDown();
+                        await(releaseRestore);
+                    })
+            );
+
+            assertThat(restoreFlushed.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<?> permanentDeletion = executor.submit(() ->
+                    fileMetadataService.requestPermanentDeletion(
+                            fixture.ownerId(),
+                            fixture.fileIds().getFirst()
+                    )
+            );
+
+            assertThatThrownBy(() ->
+                    permanentDeletion.get(500, TimeUnit.MILLISECONDS)
+            ).isInstanceOf(java.util.concurrent.TimeoutException.class);
+
+            releaseRestore.countDown();
+            restore.get(5, TimeUnit.SECONDS);
+
+            assertThatThrownBy(() ->
+                    permanentDeletion.get(5, TimeUnit.SECONDS)
+            ).hasRootCauseInstanceOf(
+                    com.vaultdrive.file.exception.FileNotFoundException.class
+            );
+
+            StoredFile persisted = requireFile(
+                    fixture.fileIds().getFirst()
+            );
+            assertThat(persisted.getDeletedAt()).isNull();
+            assertThat(persisted.getPurgeRequestedAt()).isNull();
+        } finally {
+            releaseRestore.countDown();
+            executor.shutdownNow();
+            deleteRestoreFixture(fixture);
+        }
+    }
+
+    @Test
+    void permanentDeletionRequestCompletesBeforeConcurrentRestore()
+            throws Exception {
+        RestoreFixture fixture = createRestoreFixture(
+                "purge-before-restore",
+                false
+        );
+        CountDownLatch purgeFlushed = new CountDownLatch(1);
+        CountDownLatch releasePurge = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<?> permanentDeletion = executor.submit(() ->
+                    inTransaction(() -> {
+                        fileMetadataService.requestPermanentDeletion(
+                                fixture.ownerId(),
+                                fixture.fileIds().getFirst()
+                        );
+                        purgeFlushed.countDown();
+                        await(releasePurge);
+                    })
+            );
+
+            assertThat(purgeFlushed.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<?> restore = executor.submit(() ->
+                    fileMetadataService.restore(
+                            fixture.ownerId(),
+                            fixture.fileIds().getFirst()
+                    )
+            );
+
+            assertThatThrownBy(() ->
+                    restore.get(500, TimeUnit.MILLISECONDS)
+            ).isInstanceOf(java.util.concurrent.TimeoutException.class);
+
+            releasePurge.countDown();
+            permanentDeletion.get(5, TimeUnit.SECONDS);
+
+            assertThatThrownBy(() -> restore.get(5, TimeUnit.SECONDS))
+                    .hasRootCauseInstanceOf(
+                            com.vaultdrive.file.exception
+                                    .FileNotFoundException.class
+                    );
+
+            StoredFile persisted = requireFile(
+                    fixture.fileIds().getFirst()
+            );
+            assertThat(persisted.getDeletedAt()).isNotNull();
+            assertThat(persisted.getPurgeRequestedAt()).isNotNull();
+        } finally {
+            releasePurge.countDown();
+            executor.shutdownNow();
+            deleteRestoreFixture(fixture);
+        }
+    }
+
+    @Test
+    void restoreRevalidatesAfterConcurrentOriginalFolderTrash()
+            throws Exception {
+        RestoreFixture fixture = createRestoreFixture(
+                "trash-before-restore",
+                false
+        );
+        CountDownLatch trashFlushed = new CountDownLatch(1);
+        CountDownLatch releaseTrash = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<?> trash = executor.submit(() ->
+                    inTransaction(() -> {
+                        folderService.deleteFolder(
+                                fixture.ownerId(),
+                                fixture.originalFolderId()
+                        );
+                        trashFlushed.countDown();
+                        await(releaseTrash);
+                    })
+            );
+
+            assertThat(trashFlushed.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<StoredFile> restore = executor.submit(() ->
+                    fileMetadataService.restore(
+                            fixture.ownerId(),
+                            fixture.fileIds().getFirst()
+                    )
+            );
+
+            assertThatThrownBy(() ->
+                    restore.get(500, TimeUnit.MILLISECONDS)
+            ).isInstanceOf(java.util.concurrent.TimeoutException.class);
+
+            releaseTrash.countDown();
+            trash.get(5, TimeUnit.SECONDS);
+
+            StoredFile restored = restore.get(5, TimeUnit.SECONDS);
+            assertThat(restored.getFolderId()).isNull();
+            assertThat(restored.getDeletedAt()).isNull();
+        } finally {
+            releaseTrash.countDown();
+            executor.shutdownNow();
+            deleteRestoreFixture(fixture);
+        }
+    }
+
+    @Test
+    void restoreWaitsForConcurrentOriginalFolderMove()
+            throws Exception {
+        RestoreFixture fixture = createRestoreFixture(
+                "move-before-restore",
+                true
+        );
+        CountDownLatch moveFlushed = new CountDownLatch(1);
+        CountDownLatch releaseMove = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<?> move = executor.submit(() ->
+                    inTransaction(() -> {
+                        folderService.moveFolder(
+                                fixture.ownerId(),
+                                fixture.originalFolderId(),
+                                fixture.destinationFolderId()
+                        );
+                        moveFlushed.countDown();
+                        await(releaseMove);
+                    })
+            );
+
+            assertThat(moveFlushed.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<StoredFile> restore = executor.submit(() ->
+                    fileMetadataService.restore(
+                            fixture.ownerId(),
+                            fixture.fileIds().getFirst()
+                    )
+            );
+
+            assertThatThrownBy(() ->
+                    restore.get(500, TimeUnit.MILLISECONDS)
+            ).isInstanceOf(java.util.concurrent.TimeoutException.class);
+
+            releaseMove.countDown();
+            move.get(5, TimeUnit.SECONDS);
+
+            StoredFile restored = restore.get(5, TimeUnit.SECONDS);
+            assertThat(restored.getFolderId())
+                    .isEqualTo(fixture.originalFolderId());
+            assertThat(folderRepository
+                    .findById(fixture.originalFolderId())
+                    .orElseThrow()
+                    .getParentFolderId())
+                    .isEqualTo(fixture.destinationFolderId());
+        } finally {
+            releaseMove.countDown();
+            executor.shutdownNow();
+            deleteRestoreFixture(fixture);
+        }
+    }
+
+    @Test
+    void concurrentSameNameRestoresAllocateDistinctNames()
+            throws Exception {
+        RestoreFixture fixture = createRestoreFixture(
+                "same-name-restores",
+                true
+        );
+        UUID secondFileId = addTrashedFile(
+                fixture.ownerId(),
+                fixture.originalFolderId(),
+                "report.pdf"
+        );
+        RestoreFixture completeFixture = new RestoreFixture(
+                fixture.ownerId(),
+                fixture.originalFolderId(),
+                fixture.destinationFolderId(),
+                List.of(fixture.fileIds().getFirst(), secondFileId)
+        );
+        CountDownLatch startSignal = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<StoredFile> first = executor.submit(() -> {
+                await(startSignal);
+                return fileMetadataService.restore(
+                        completeFixture.ownerId(),
+                        completeFixture.fileIds().get(0)
+                );
+            });
+            Future<StoredFile> second = executor.submit(() -> {
+                await(startSignal);
+                return fileMetadataService.restore(
+                        completeFixture.ownerId(),
+                        completeFixture.fileIds().get(1)
+                );
+            });
+
+            startSignal.countDown();
+
+            assertThat(List.of(
+                    first.get(10, TimeUnit.SECONDS).getName(),
+                    second.get(10, TimeUnit.SECONDS).getName()
+            )).containsExactlyInAnyOrder(
+                    "report.pdf",
+                    "report (restored).pdf"
+            );
+        } finally {
+            startSignal.countDown();
+            executor.shutdownNow();
+            deleteRestoreFixture(completeFixture);
+        }
+    }
+
+    @Test
     void uploadReservationCompletesBeforeConcurrentDestinationTrash()
             throws Exception {
         UploadFixture fixture = createUploadFixture("reserve-before-trash");
@@ -412,6 +683,60 @@ class FileHierarchyConcurrencyIntegrationTest {
         return new UploadFixture(owner.getId(), folder.getId(), file);
     }
 
+    private RestoreFixture createRestoreFixture(
+            String label,
+            boolean includeDestination
+    ) {
+        User owner = userRepository.saveAndFlush(
+                new User(
+                        UUID.randomUUID() + "@example.com",
+                        "temporary-test-hash",
+                        label
+                )
+        );
+        Folder originalFolder = folderRepository.saveAndFlush(
+                new Folder(owner.getId(), null, "Original")
+        );
+        Folder destination = includeDestination
+                ? folderRepository.saveAndFlush(
+                        new Folder(owner.getId(), null, "Destination")
+                )
+                : null;
+        UUID fileId = addTrashedFile(
+                owner.getId(),
+                originalFolder.getId(),
+                "report.pdf"
+        );
+
+        return new RestoreFixture(
+                owner.getId(),
+                originalFolder.getId(),
+                destination == null ? null : destination.getId(),
+                List.of(fileId)
+        );
+    }
+
+    private UUID addTrashedFile(
+            UUID ownerId,
+            UUID folderId,
+            String name
+    ) {
+        UUID fileId = UUID.randomUUID();
+        StoredFile file = new StoredFile(
+                fileId,
+                ownerId,
+                folderId,
+                name,
+                "users/" + ownerId + "/files/" + fileId,
+                "application/pdf",
+                100L
+        );
+        file.markReady();
+        file.softDelete();
+        storedFileRepository.saveAndFlush(file);
+        return fileId;
+    }
+
     private void deleteFixture(Fixture fixture) {
         storedFileRepository.deleteById(fixture.fileId());
         storedFileRepository.flush();
@@ -430,6 +755,18 @@ class FileHierarchyConcurrencyIntegrationTest {
         }
         folderRepository.deleteById(fixture.folderId());
         folderRepository.flush();
+        userRepository.deleteById(fixture.ownerId());
+    }
+
+    private void deleteRestoreFixture(RestoreFixture fixture) {
+        storedFileRepository.deleteAllById(fixture.fileIds());
+        storedFileRepository.flush();
+        folderRepository.deleteById(fixture.originalFolderId());
+        folderRepository.flush();
+        if (fixture.destinationFolderId() != null) {
+            folderRepository.deleteById(fixture.destinationFolderId());
+            folderRepository.flush();
+        }
         userRepository.deleteById(fixture.ownerId());
     }
 
@@ -493,6 +830,14 @@ class FileHierarchyConcurrencyIntegrationTest {
             UUID ownerId,
             UUID folderId,
             StoredFile file
+    ) {
+    }
+
+    private record RestoreFixture(
+            UUID ownerId,
+            UUID originalFolderId,
+            UUID destinationFolderId,
+            List<UUID> fileIds
     ) {
     }
 }
