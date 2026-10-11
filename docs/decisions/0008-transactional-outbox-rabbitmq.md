@@ -1,6 +1,6 @@
 # ADR-0008: Transactional outbox and durable asynchronous jobs
 
-- Status: Accepted; broker infrastructure, outbox persistence, leased publishing, durable jobs and notification consumer implemented; execution workers planned
+- Status: Accepted; broker infrastructure, outbox persistence, leased publishing, durable jobs, notification consumer and worker scheduling foundation implemented; physical purge handlers planned
 - Date: 2026-10-09
 
 ## Context
@@ -26,7 +26,7 @@ Garage/S3 calls will remain outside metadata database transactions. Workers will
 - Publishers and consumers must assume at-least-once effects and be idempotent; exactly-once delivery is not required.
 - Purge and reconciliation workers must preserve the lifecycle, hierarchy, ownership, and lock-order invariants in ADRs 0005–0007.
 - The earlier polling-first possibility in ADR-0006 is superseded by this decision.
-- Phase 1A provides development RabbitMQ infrastructure; Phase 1B provides atomic purge-request outbox persistence; Phase 1C provides leased publication, confirms, bounded retries, and expired-claim recovery; Phase 2A provides job persistence and fenced lifecycle/recovery primitives; Phase 2B provides validated notification ingestion with commit-before-ACK and sanitized quarantine. Execution workers, recovery scheduling, and physical deletion remain unimplemented.
+- Phase 1A provides development RabbitMQ infrastructure; Phase 1B provides atomic purge-request outbox persistence; Phase 1C provides leased publication, confirms, bounded retries, and expired-claim recovery; Phase 2A provides job persistence and fenced lifecycle/recovery primitives; Phase 2B provides validated notification ingestion with commit-before-ACK and sanitized quarantine; Phase 2C provides bounded worker dispatch, lease renewal and scheduled recovery for registered handler types. Physical purge handlers, missed-job backfill and deletion remain unimplemented.
 
 ## Phase 1B schema and transaction decision
 
@@ -55,7 +55,7 @@ Existing pending-purge requests predating V12 are not backfilled by this migrati
 
 ## Deferred decisions
 
-Physical worker execution, recovery scheduling, outbox/job/quarantine retention, historical-intent backfill, ordering guarantees, and operational thresholds remain open. The Phase 1B event contract remains unchanged. Publisher, job and consumer choices are recorded separately below.
+Physical purge execution, missed-notification/job backfill, outbox/job/quarantine retention, ordering guarantees and operational tuning remain open. The Phase 1B event contract remains unchanged. Publisher, job, consumer and worker foundation choices are recorded separately below.
 
 ## Phase 1C publisher protocol
 
@@ -112,3 +112,17 @@ Database access/transaction failures retry at most three times per broker delive
 This PostgreSQL quarantine/stop policy preserves existing RabbitMQ topology and keeps durable disposition in PostgreSQL. Its trade-offs are head-of-line pausing during a sustained database outage, reset retry budgets on explicit restart, and no raw invalid-message recovery. Outbox records must be retained for inbound validation/replay; deleting a source early quarantines even a duplicate as `UNKNOWN_EVENT`. Retention, replay tooling and recovery of notifications/jobs that never arrived remain future work.
 
 PostgreSQL tests establish commit-before-ACK, commit failure rollback, duplicate/terminal replay, quarantine and its constraints. Live isolated-vhost tests exercise publisher-to-consumer delivery, malformed/unsupported messages, bounded failure/stop, restart/redelivery and commit-before-ACK loss. They use UUID-suffixed test topology only. See [consumer configuration and operational recovery](../purge-consumer.md). No execution worker, reconciliation, storage deletion, or running development API deployment is added.
+
+## Phase 2C worker scheduling, renewal and shutdown
+
+The worker foundation is opt-in and disabled by default (`vaultdrive.jobs.worker.enabled=false`). Two daemon fixed-delay control loops schedule claims and inspect active work without control task queues. Handler and renewal pools each have a fixed maximum `N` threads, a bounded `N`-entry queue and rejection policy. A semaphore reserves a slot before claiming; local executing/handoff claims never exceed `N`. Automatic renewals are coalesced per claim and isolated from monitoring so slow database calls cannot block all local deadline checks. Defaults are two worker slots, five-second polling and ten-second renewal scans, with concurrency bounded to 1–32.
+
+Only registered `JobHandler` types are claimed, in round-robin order. No production purge handler is registered in this slice. Missing handlers leave jobs/attempts untouched rather than pretending work succeeded. Claim/recovery uses the existing short PostgreSQL transaction and commits before handler dispatch. The worker rejects enclosing transactions, renews/checks ownership before invoking a handler, and requires explicit `SUCCEEDED` or `RETRY` outcomes. Null and ordinary exception outcomes retry; cancellation, interruption, timeout and uncertain outcome recording leave the lease recoverable. No hierarchy/resource mutation or storage I/O is introduced.
+
+Renewal locks the job row before reading protected state, checks the token and unexpired lease using PostgreSQL's clock, and conditionally writes with the same predicate. The expiration is never shortened and becomes at least database time plus 30 seconds. The abandoned-attempt retry deadline moves to renewed expiration plus persisted attempt backoff; attempts and token remain unchanged. Expired/replaced tokens cannot renew. No migration is needed and applied V14/V15 migrations are unchanged.
+
+The five-minute default max runtime limits perpetual renewal. A conservative monotonic local lease window counts from before the successfully confirmed renewal call, including database call/commit delays, rather than granting a fresh window when it returns. Renewal failure/uncertainty or elapsed local lease/runtime cancels work and requests interruption; no cancellation frees capacity until the actual task returns. Handler/thread attachment and detachment synchronize cancellation so a late renewal cannot interrupt a subsequent task on a reused pool thread. Database fencing still cannot cancel external effects, and future handlers need idempotence, lifecycle validation and upload writer fencing.
+
+Context closure immediately stops new claim admission. The worker allows active completion/renewal within one default five-second grace budget (configurable up to 60 seconds), then stops monitoring and interrupts unfinished handlers, renewals and control loops. All waiting shares that deadline. Unresponsive daemon threads can outlive this wait; no replacement pool bypasses stuck capacity. In-flight claims or renewals may commit after shutdown begins, so later recovery uses final persisted deadlines. Legitimately finished outcome transactions already begun may commit. Other unfinished work is not forcibly completed or immediately rearmed.
+
+Supported-type polling recovers missed execution wakeups and expired attempts through the existing claim scan/backoff/exhaustion protocol. It does not materialize jobs missing from lost notifications or historical intent. Tests use real PostgreSQL for concurrent schedulers, renewal/lock-wait fencing, capacity, crash/timeout recovery, slow renewal isolation and shutdown; Spring context closure is also exercised. No physical purge handler or process-kill/load experiment is added. See [worker configuration and failure scenarios](../job-workers.md).

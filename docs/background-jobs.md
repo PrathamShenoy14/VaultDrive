@@ -4,8 +4,10 @@
 notification delivery: `PUBLISHED` means broker acceptance, never completed work.
 V14 and `com.vaultdrive.job` provide the Phase 2A persistence foundation. Phase 2B
 adds an opt-in [notification consumer](purge-consumer.md) that creates jobs after
-matching committed outbox intent. No API directly creates jobs, and no execution
-worker, recovery scheduler, Garage deletion or reconciliation is implemented.
+matching committed outbox intent. Phase 2C adds an opt-in [worker foundation](job-workers.md)
+with scheduling, renewal and expired-claim recovery for registered handler types.
+No API directly creates jobs, and no physical purge handler, Garage deletion or
+reconciliation is implemented.
 Existing purge APIs and outbox publisher behavior are unchanged.
 
 ## Identity and creation
@@ -35,6 +37,7 @@ reload ownership, ancestry, aggregate state, and lifecycle eligibility.
 | absent | create with stable event ID | `PENDING`, zero attempts |
 | `PENDING`, due | claim | `RUNNING`, increment attempt, fresh token/lease |
 | `RUNNING`, live matching token | complete | `SUCCEEDED`, terminal timestamp, clear claim |
+| `RUNNING`, live matching token | renew | same token/attempt, extend lease and crash-retry deadline |
 | `RUNNING`, live matching token | retry below budget | `PENDING`, delayed retry, clear claim |
 | `RUNNING`, live matching token | retry at budget | `FAILED`, terminal timestamp, clear claim |
 | `RUNNING`, expired lease and due retry | claim below budget | `RUNNING`, new token, increment attempt |
@@ -68,14 +71,18 @@ lease, and `min(2^(attempt-1), 60)` seconds of backoff. Known failures schedule 
 database time at failure recording. Each claim persists its recovery deadline as
 lease expiration plus backoff; abandoned attempts count toward the limit. Both
 lease and retry deadline must pass before reclaiming. PostgreSQL's clock governs
-deadlines, avoiding worker-host skew. No renewal API exists; future workers must
-use bounded units fitting the lease or explicitly design renewal.
+deadlines, avoiding worker-host skew. Phase 2C adds fenced renewal using the same
+job row lock and unexpired-token checks. It extends expiration to at least database
+time plus 30 seconds and moves the crash retry deadline to expiration plus the
+persisted attempt's backoff, without changing attempts or token. The worker
+foundation also enforces conservative monotonic local lease/runtime limits.
 
 Recovery is part of `claimNext`: each call examines at most 20 eligible rows,
 marks exhausted claims failed, and returns at most one executable claim. It can
 return empty after clearing 20 exhausted rows even when work remains; future
-pollers must scan again. No scheduler is installed. Due pending jobs can be found
-without notifications; abandoned jobs can be reclaimed after restart. A missed
+pollers must scan again. The opt-in Phase 2C scheduler drives these scans only for
+registered handler types; no production file/folder handler exists yet. Due pending
+jobs can be found without notifications; abandoned jobs can be reclaimed after restart. A missed
 notification that never created a job needs future outbox-to-job recovery/backfill.
 
 A crash before claim commit leaves no attempt. A crash after commit leaves a
@@ -92,7 +99,8 @@ attempt becomes `FAILED` on a later due scan, retaining identity and references.
 mapping. It covers concurrent duplicate creation, competing claims, skip-locked
 behavior, released claim locks, rollback/uncommitted visibility, stale outcomes,
 expiry while waiting for a lock, backoff/recovery, known and abandoned exhaustion,
-terminal duplicate replay, type filtering, and constraints. Cleanup removes only
+terminal duplicate replay, type filtering, constraints and fenced renewal/deadline
+extension, including expiry during a renewal row-lock wait. Cleanup removes only
 test-created rows. Load the ignored environment in the Maven shell:
 
 ```powershell

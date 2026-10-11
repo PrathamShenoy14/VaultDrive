@@ -41,7 +41,7 @@ See [development setup and verification instructions](rabbitmq-development.md). 
 - [x] Insert file/folder purge-intent events with Spring Data JPA inside the existing business transaction; reject standalone writer calls.
 - [x] Add real PostgreSQL tests for atomic commit/rollback, uncommitted visibility, insertion failures, ownership/eligibility rejection, and repeated requests on both paths.
 
-See [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md). Phase 1B covers persistence; Phase 1C adds publication and publisher recovery; Phase 2A adds job persistence and lifecycle recovery primitives; Phase 2B adds opt-in consumer ingestion. Execution workers, recovery scheduling, and backfill of historical intents remain unimplemented. Test execution results belong in the task report.
+See [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md). Phase 1B covers persistence; Phase 1C adds publication and publisher recovery; Phase 2A adds job persistence; Phase 2B adds consumer ingestion; Phase 2C adds opt-in worker scheduling/renewal and supported-type recovery. Physical purge handlers and backfill of historical intents remain unimplemented. Test execution results belong in the task report.
 
 ## Phase 1C — Reliable outbox publication
 
@@ -56,7 +56,7 @@ See [publisher development/recovery instructions](outbox-publishing.md) and ADR-
 
 Goal: remove Garage objects asynchronously and finalize metadata without pretending PostgreSQL and S3 share a transaction.
 
-- Partially implemented ADR-0008 architecture: development RabbitMQ, atomic purge-request outbox persistence, leased publication, durable job lifecycle primitives and consumer ingestion are present; physical purge and recovery scheduling remain planned.
+- Partially implemented ADR-0008 architecture: development RabbitMQ, atomic purge-request outbox persistence, leased publication, durable job lifecycle primitives, consumer ingestion and opt-in worker scheduling/renewal are present; physical purge handlers and missed-job backfill remain planned.
 - Consume at-least-once notifications idempotently; extend atomic outbox persistence to future business transitions where required.
 - Have idempotent workers claim durable jobs in PostgreSQL; use scheduled database scans to recover missed notifications, retries, and interrupted work. Database polling is a recovery and publishing mechanism, not an alternative execution topology.
 - Define safe job claiming for multiple worker instances, retry/backoff, attempt metadata, and terminal-failure handling.
@@ -75,9 +75,9 @@ Exit criteria: a committed deletion request survives restart, is retried safely,
 - [x] Cover competing claims, duplicate creation, stale completion, lease recovery, rollback, backoff and exhaustion against PostgreSQL.
 - [x] Document the [state machine and crash behavior](background-jobs.md) in ADR-0008 and architecture notes.
 
-Phase 2A supplies persistence primitives only; Phase 2B below connects notification
-delivery to job creation. Garage/folder execution, stale-upload reconciliation,
-notification backfill and recovery scheduling remain planned. The overall Phase 2
+Phase 2A supplies persistence primitives; Phase 2B connects notification delivery to
+job creation and Phase 2C adds scheduling/renewal. Garage/folder purge handlers,
+stale-upload reconciliation and notification backfill remain planned. The overall Phase 2
 exit criteria remain pending. Execution results belong in task reports.
 
 ### Phase 2B — RabbitMQ consumer integration (completed)
@@ -92,8 +92,23 @@ exit criteria remain pending. Execution results belong in task reports.
 
 No purge worker, Garage deletion, upload reconciliation or backfill is implemented.
 Runtime startup remains disabled until explicitly enabled; verification does not
-deploy the development API. Raw invalid-message recovery, outbox/job/quarantine
-retention and recovery scheduling remain open.
+deploy the development API. Raw invalid-message recovery and outbox/job/quarantine
+retention remain open; Phase 2C below adds supported-type scheduling and renewal.
+
+### Phase 2C — Durable job recovery and worker foundation (completed)
+
+- [x] Add opt-in fixed-delay claiming/dispatch for registered handler types, using existing PostgreSQL token/lease claims.
+- [x] Reserve capacity before claiming; bound handler and renewal pools/queues and retain slots for interrupt-ignoring tasks.
+- [x] Add live-token lease renewal that extends the persisted crash retry deadline without consuming attempts; preserve V14/V15 unchanged.
+- [x] Enforce monotonic local lease/runtime limits and isolate renewal database calls from cancellation monitoring.
+- [x] Stop admission on context closure, bound graceful waiting, interrupt unfinished work and leave leases recoverable.
+- [x] Add a minimal explicit-result handler API, with no fake-success production handlers.
+- [x] Cover concurrent schedulers, renewal/stale tokens, lock-wait expiry, crash/timeout recovery, capacity, slow renewal and shutdown against PostgreSQL.
+- [x] Document [worker configuration and recovery](job-workers.md).
+
+All scheduling stays disabled by default. No file/folder purge handler, Garage
+deletion, stale-upload reconciliation or missed-notification/job backfill exists.
+Actual storage execution, retention/reset tooling and operational tuning remain open.
 
 ## Phase 3 — Refine concurrency without weakening correctness
 
@@ -139,7 +154,7 @@ Exit criteria: correctness tests remain green and measured contention improves f
 
 ## Explicitly undecided
 
-- Worker execution/ownership, recovery scheduling/backfill, lease renewal, operational tuning and event/job retention within ADR-0008. Publisher-specific policy is decided in Phase 1C; job identity, states, fencing and bounded retries are decided in Phase 2A.
+- Physical purge execution/ownership, missed-job backfill, operational tuning and event/job/quarantine retention within ADR-0008. Publisher policy is decided in Phase 1C; job identity/states/fencing/retries in Phase 2A; consumer disposition in Phase 2B; bounded scheduling/renewal/shutdown in Phase 2C.
 - Granular lock mechanism and namespace key.
 - Hard-delete retention delay and user-visible cancellation policy.
 - Refresh-token/logout design and JWT key evolution.

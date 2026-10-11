@@ -76,6 +76,30 @@ public class BackgroundJobService {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean renew(ClaimedJob claim) {
+        Optional<BackgroundJob> owned = ownedRow(claim);
+        if (owned.isEmpty()) {
+            return false;
+        }
+        BackgroundJob job = owned.orElseThrow();
+        Instant nextExpiration = databaseNow().plus(LEASE);
+        if (nextExpiration.isBefore(job.getClaimExpiresAt())) {
+            nextExpiration = job.getClaimExpiresAt();
+        }
+        // Check again at the write; neither an expired lease nor a replaced
+        // token may be revived. Preserve the abandoned-attempt backoff too.
+        return entityManager.createNativeQuery("""
+                UPDATE background_jobs SET claim_expires_at = :expires,
+                    next_attempt_at = :next, updated_at = clock_timestamp()
+                WHERE id = :id AND status = 'RUNNING' AND claim_token = :token
+                    AND claim_expires_at > clock_timestamp()
+                """).setParameter("id", claim.id()).setParameter("token", claim.claimToken())
+                .setParameter("expires", nextExpiration)
+                .setParameter("next", nextExpiration.plus(backoff(job.getAttemptCount())))
+                .executeUpdate() == 1;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean complete(ClaimedJob claim) {
         if (ownedRow(claim).isEmpty()) {
             return false;

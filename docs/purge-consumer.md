@@ -22,7 +22,8 @@ credentials described in [the publisher runbook](outbox-publishing.md).
 
 Each instance uses one consumer with prefetch one and manual acknowledgements.
 Additional instances are safe through PostgreSQL job identity uniqueness. Automatic
-job execution and recovery scheduling remain absent.
+dispatch and recovery scheduling are supplied separately by the opt-in
+[Phase 2C worker foundation](job-workers.md). No production purge handler exists yet.
 
 ## Validation and acknowledgement order
 
@@ -53,7 +54,7 @@ Future workers must still revalidate ownership, ancestry, lifecycle and claims.
 A rollback or commit failure produces no ACK. A crash after commit but before ACK
 leaves a durable job; RabbitMQ redelivery finds that same job. An uncertain ACK
 stops the consumer rather than repeating database work on the same delivery.
-Notification delivery is at least once, not exactly once; execution remains unimplemented.
+Notification delivery is at least once, not exactly once; physical purge execution remains unimplemented.
 
 ## Retries and quarantine
 

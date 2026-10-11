@@ -40,6 +40,75 @@ class BackgroundJobIntegrationTest {
     }
 
     @Test
+    void renewalExtendsLiveLeaseAndRecoveryDeadlineWithoutConsumingAttempt() {
+        UUID id = job();
+        var claim = claimFor(id);
+        update(id, "claim_expires_at = clock_timestamp() + interval '2 seconds'");
+        var before = load(id);
+        assertThat(jobs.renew(claim)).isTrue();
+        var after = load(id);
+        assertThat(after.getClaimExpiresAt()).isAfter(before.getClaimExpiresAt());
+        assertThat(after.getNextAttemptAt()).isEqualTo(after.getClaimExpiresAt().plusSeconds(1));
+        assertThat(after.getClaimToken()).isEqualTo(claim.claimToken());
+        assertThat(after.getAttemptCount()).isEqualTo(1);
+        assertThat(jobs.complete(claim)).isTrue();
+        assertThat(jobs.renew(claim)).isFalse();
+    }
+
+    @Test
+    void renewalNeverRevivesExpiredOrReplacedTokens() {
+        UUID id = job();
+        var old = claimFor(id);
+        update(id, "claim_expires_at = clock_timestamp() - interval '1 second'");
+        assertThat(jobs.renew(old)).isFalse();
+        due(id);
+        var replacement = jobs.claimNext(JobType.FILE_PURGE).orElseThrow();
+        assertThat(jobs.renew(old)).isFalse();
+        assertThat(jobs.renew(replacement)).isTrue();
+        assertThat(load(id).getClaimToken()).isEqualTo(replacement.claimToken());
+        assertThat(load(id).getAttemptCount()).isEqualTo(2);
+    }
+
+    @Test
+    void renewalRechecksExpiryAfterWaitingForUnchangedRowLock() throws Exception {
+        UUID id = job();
+        var claim = claimFor(id);
+        update(id, "claim_expires_at = clock_timestamp() + interval '1 second'");
+        CountDownLatch holding = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch renewing = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var owner = executor.submit(() -> transaction().executeWithoutResult(status -> {
+                entityManager.createNativeQuery("SELECT id FROM background_jobs WHERE id = :id FOR UPDATE")
+                        .setParameter("id", id).getSingleResult();
+                holding.countDown();
+                await(release);
+            }));
+            assertThat(holding.await(5, TimeUnit.SECONDS)).isTrue();
+            var renewal = executor.submit(() -> { renewing.countDown(); return jobs.renew(claim); });
+            assertThat(renewing.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> renewal.get(1500, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(java.util.concurrent.TimeoutException.class);
+            release.countDown();
+            owner.get(5, TimeUnit.SECONDS);
+            assertThat(renewal.get(5, TimeUnit.SECONDS)).isFalse();
+            assertThat(load(id).getClaimToken()).isEqualTo(claim.claimToken());
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+            executor.awaitTermination(5, TimeUnit.SECONDS);
+        }
+    }
+
+    private ClaimedJob claimFor(UUID id) {
+        var claim = jobs.claimNext(JobType.FILE_PURGE).orElseThrow();
+        assertThat(claim.id()).isEqualTo(id);
+        return claim;
+    }
+
+
+    @Test
     void duplicateCreationPreservesProgressAndRejectsDifferentIdentity() {
         UUID id = job();
         UUID aggregate = load(id).getAggregateId();
