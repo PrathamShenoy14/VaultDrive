@@ -2,9 +2,11 @@
 
 `background_jobs` is the authoritative execution record. `outbox_events` records
 notification delivery: `PUBLISHED` means broker acceptance, never completed work.
-V14 and `com.vaultdrive.job` add persistence only. No API creates jobs yet, and no
-consumer, execution worker, recovery scheduler, Garage deletion, or reconciliation
-is wired in this phase. Existing purge and outbox behavior is unchanged.
+V14 and `com.vaultdrive.job` provide the Phase 2A persistence foundation. Phase 2B
+adds an opt-in [notification consumer](purge-consumer.md) that creates jobs after
+matching committed outbox intent. No API directly creates jobs, and no execution
+worker, recovery scheduler, Garage deletion or reconciliation is implemented.
+Existing purge APIs and outbox publisher behavior are unchanged.
 
 ## Identity and creation
 
@@ -16,8 +18,8 @@ ID with a different type or aggregate is rejected. Distinct events for the same
 aggregate are allowed; future consumers must validate intent against business
 state. This persistence layer is not an authorization boundary.
 
-Creation joins the caller transaction, or starts one if absent. Future consumers
-must acknowledge only after that transaction commits. Rollback leaves no job.
+Creation joins the caller transaction, or starts one if absent. The Phase 2B
+consumer acknowledges only after its ingestion transaction commits. Rollback leaves no job.
 Neither aggregate nor event has a foreign key: jobs must survive business metadata
 and outbox retention. Terminal retention must preserve deduplication identity;
 deleting a job would allow replay to recreate work. No retention/reset tooling exists.

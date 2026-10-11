@@ -1,6 +1,6 @@
 # ADR-0008: Transactional outbox and durable asynchronous jobs
 
-- Status: Accepted; broker infrastructure, outbox persistence, leased publishing and durable job foundation implemented; consumers and workers planned
+- Status: Accepted; broker infrastructure, outbox persistence, leased publishing, durable jobs and notification consumer implemented; execution workers planned
 - Date: 2026-10-09
 
 ## Context
@@ -26,7 +26,7 @@ Garage/S3 calls will remain outside metadata database transactions. Workers will
 - Publishers and consumers must assume at-least-once effects and be idempotent; exactly-once delivery is not required.
 - Purge and reconciliation workers must preserve the lifecycle, hierarchy, ownership, and lock-order invariants in ADRs 0005–0007.
 - The earlier polling-first possibility in ADR-0006 is superseded by this decision.
-- Phase 1A provides development RabbitMQ infrastructure; Phase 1B provides atomic purge-request outbox persistence; Phase 1C provides leased publication, confirms, bounded retries, and expired-claim recovery; Phase 2A provides job persistence and fenced lifecycle/recovery primitives. Consumers, execution workers, recovery scheduling, and physical deletion remain unimplemented.
+- Phase 1A provides development RabbitMQ infrastructure; Phase 1B provides atomic purge-request outbox persistence; Phase 1C provides leased publication, confirms, bounded retries, and expired-claim recovery; Phase 2A provides job persistence and fenced lifecycle/recovery primitives; Phase 2B provides validated notification ingestion with commit-before-ACK and sanitized quarantine. Execution workers, recovery scheduling, and physical deletion remain unimplemented.
 
 ## Phase 1B schema and transaction decision
 
@@ -51,11 +51,11 @@ The partial index `(next_attempt_at, created_at, id) WHERE delivery_status = 'PE
 
 The delivery contract is at least once: only committed outbox rows may be published. If RabbitMQ accepts a notification and the publisher crashes before recording `PUBLISHED`, a retry may publish the same UUID again. Future consumers must tolerate duplicate publication and redelivery, use the event UUID for notification deduplication where useful, and conditionally claim/advance PostgreSQL durable jobs idempotently. Deduplication alone must not suppress recovery of unfinished work. Broker acknowledgement is not a business-state commit; the outbox is not a durable purge job table.
 
-Existing pending-purge requests predating V12 are not backfilled by this migration. Recovery/backfill, event retention, and consumer handling of unknown versions remain future tasks. Phase 1B added no broker execution; Phase 1C below supplies publisher claiming and retry bookkeeping while leaving consumers, Garage deletion, and workers unimplemented.
+Existing pending-purge requests predating V12 are not backfilled by this migration. Recovery/backfill and event retention remain future tasks. Phase 1B added no broker execution; Phase 1C below supplies publication only. Phase 2B separately handles notification ingestion and quarantines unknown versions; Garage deletion and execution workers remain unimplemented.
 
 ## Deferred decisions
 
-Consumer integration, physical worker execution, recovery scheduling, event/job retention, historical-intent backfill, ordering guarantees, and operational thresholds remain open. The Phase 1B event contract remains unchanged. Publisher-specific choices are recorded below; Phase 2A job choices follow separately.
+Physical worker execution, recovery scheduling, outbox/job/quarantine retention, historical-intent backfill, ordering guarantees, and operational thresholds remain open. The Phase 1B event contract remains unchanged. Publisher, job and consumer choices are recorded separately below.
 
 ## Phase 1C publisher protocol
 
@@ -96,3 +96,19 @@ Completion/retry lock the job row before reading protected state and checking th
 `claimNext(type)` also recovers expired due jobs with new tokens, or marks abandoned final attempts `FAILED`. It examines at most 20 candidates per call and returns at most one executable claim. Future polling must repeat scans even after an empty result that cleared exhausted rows. Terminal rows stop automatic attempts and retain identity/reference. No automatic reset, renewal, consumer, scheduler, historical-intent backfill, checkpoints, or worker execution is added. Recovery of notifications that never created jobs remains a later phase.
 
 Database fencing cannot cancel stale external I/O. A crash after an external effect but before outcome commit can repeat that effect; future executors still require idempotence and upload writer fencing. Tests cover concurrent claims/creation, rollback, skip-locked/released locks, stale/expired outcomes including lock waits, backoff and both exhaustion paths against real PostgreSQL. See [the job state machine and recovery contract](../background-jobs.md).
+
+## Phase 2B notification ingestion and quarantine
+
+An opt-in Spring AMQP container consumes the existing publisher queue with manual acknowledgement, one consumer and prefetch one per instance. It declares no topology and changes no existing broker queue arguments or policies. Startup is disabled by default with `vaultdrive.purge.consumer.enabled=false`; deployment enablement is separate from repository verification. No Garage I/O, job execution, hierarchy locking or file/folder mutation occurs in ingestion.
+
+Validation accepts the existing v1 file/folder envelope only: strict JSON object parsing, integer payload version, canonical event/aggregate/owner/resource UUIDs, matching AMQP message ID (and type if present), type/aggregate/payload consistency and a valid creation timestamp. Duplicate JSON keys, trailing tokens and bodies over 64 KiB are rejected. Compatible extra fields are ignored. In an independent short JPA transaction, the consumer matches required fields against the committed immutable outbox event, then creates/finds the job with the event UUID. It does not require `PUBLISHED`, since notification delivery can precede publisher outcome commit. Outbox read precedes job insertion; no hierarchy/resource locks or external I/O enter that transaction.
+
+The transactional ingestion proxy must return after commit before `basicAck(tag, false)` runs outside every database transaction. A listener invoked inside an enclosing transaction is rejected. Flush or an apparently successful insert is not sufficient for ACK. Duplicate deliveries preserve all job progress, including terminal state. Rollback/commit failure leaves the delivery unacknowledged; commit followed by a lost ACK leaves the same job for idempotent broker redelivery. No distributed/channel transaction or exactly-once claim is made.
+
+Permanently invalid deliveries are durably quarantined in PostgreSQL before ACK instead of adding a RabbitMQ DLX. V15 adds a ledger keyed by SHA-256 body fingerprint, with nullable parsed event UUID, a controlled reason and database creation time. The first invalid disposition is retained idempotently. Raw bodies/headers and exception text are not stored or logged; this intentionally sacrifices recovery of arbitrary invalid bytes. Unsupported versions/types, unknown/mismatched outbox events and conflicting job identities create no new job. A later corrected replay is not suppressed by the quarantine ledger.
+
+Database access/transaction failures retry at most three times per broker delivery, using separate transactions and one-/two-second delays outside transactions. Exhaustion stops the container with a sanitized fatal error, leaving the delivery unacknowledged; channel closure permits broker redelivery after an explicit restart. The same rule protects quarantine writes during an outage. Interruptions, unexpected errors and uncertain ACKs also stop consumption. There is no immediate reject/requeue hot loop, automatic database-recovery restart, or durable cross-restart ingestion attempt counter. Operators must not add a rapid process restart loop. Framework connection recovery remains separate from this database retry budget.
+
+This PostgreSQL quarantine/stop policy preserves existing RabbitMQ topology and keeps durable disposition in PostgreSQL. Its trade-offs are head-of-line pausing during a sustained database outage, reset retry budgets on explicit restart, and no raw invalid-message recovery. Outbox records must be retained for inbound validation/replay; deleting a source early quarantines even a duplicate as `UNKNOWN_EVENT`. Retention, replay tooling and recovery of notifications/jobs that never arrived remain future work.
+
+PostgreSQL tests establish commit-before-ACK, commit failure rollback, duplicate/terminal replay, quarantine and its constraints. Live isolated-vhost tests exercise publisher-to-consumer delivery, malformed/unsupported messages, bounded failure/stop, restart/redelivery and commit-before-ACK loss. They use UUID-suffixed test topology only. See [consumer configuration and operational recovery](../purge-consumer.md). No execution worker, reconciliation, storage deletion, or running development API deployment is added.

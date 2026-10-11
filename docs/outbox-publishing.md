@@ -4,6 +4,10 @@
 
 The backend now supplies a PostgreSQL leased outbox publisher and RabbitMQ confirm/return transport. It does not consume notifications, create durable purge jobs, delete Garage objects, or backfill old purge intents. PostgreSQL remains authoritative; `PUBLISHED` describes notification acceptance, not deletion. [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md) records the protocol, payload versioning, topology, and failure trade-offs.
 
+Phase 2B separately adds an opt-in [notification consumer](purge-consumer.md) for
+job creation. `PURGE_CONSUMER_ENABLED` defaults to false independently of publisher
+enablement. Consumer quarantine uses PostgreSQL and changes no publisher topology.
+
 ## Windows connectivity and private configuration
 
 Keep the [Phase 1A SSH tunnel](rabbitmq-development.md) running before enabling publication or executing broker tests:

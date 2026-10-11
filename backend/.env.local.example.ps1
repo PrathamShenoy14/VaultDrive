@@ -9,5 +9,6 @@ $env:RABBITMQ_USERNAME="replace-with-local-rabbitmq-user"
 $env:RABBITMQ_PASSWORD="replace-with-local-rabbitmq-password"
 $env:RABBITMQ_VHOST="/"
 $env:OUTBOX_PUBLISHER_ENABLED="false"
+$env:PURGE_CONSUMER_ENABLED="false"
 # Enable live tests only after isolated test-vhost setup is explicitly approved.
 # $env:RABBITMQ_TEST_VHOST="vaultdrive_outbox_test"

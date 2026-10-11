@@ -41,7 +41,7 @@ See [development setup and verification instructions](rabbitmq-development.md). 
 - [x] Insert file/folder purge-intent events with Spring Data JPA inside the existing business transaction; reject standalone writer calls.
 - [x] Add real PostgreSQL tests for atomic commit/rollback, uncommitted visibility, insertion failures, ownership/eligibility rejection, and repeated requests on both paths.
 
-See [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md). Phase 1B covers persistence; Phase 1C adds publication and publisher recovery; Phase 2A adds job persistence and lifecycle recovery primitives. Consumers, execution workers, recovery scheduling, and backfill of historical intents remain unimplemented. Test execution results belong in the task report.
+See [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md). Phase 1B covers persistence; Phase 1C adds publication and publisher recovery; Phase 2A adds job persistence and lifecycle recovery primitives; Phase 2B adds opt-in consumer ingestion. Execution workers, recovery scheduling, and backfill of historical intents remain unimplemented. Test execution results belong in the task report.
 
 ## Phase 1C — Reliable outbox publication
 
@@ -56,7 +56,7 @@ See [publisher development/recovery instructions](outbox-publishing.md) and ADR-
 
 Goal: remove Garage objects asynchronously and finalize metadata without pretending PostgreSQL and S3 share a transaction.
 
-- Partially implemented ADR-0008 architecture: development RabbitMQ, atomic purge-request outbox persistence, leased publication and durable job lifecycle primitives are present; consumers, physical purge and recovery scheduling remain planned.
+- Partially implemented ADR-0008 architecture: development RabbitMQ, atomic purge-request outbox persistence, leased publication, durable job lifecycle primitives and consumer ingestion are present; physical purge and recovery scheduling remain planned.
 - Consume at-least-once notifications idempotently; extend atomic outbox persistence to future business transitions where required.
 - Have idempotent workers claim durable jobs in PostgreSQL; use scheduled database scans to recover missed notifications, retries, and interrupted work. Database polling is a recovery and publishing mechanism, not an alternative execution topology.
 - Define safe job claiming for multiple worker instances, retry/backoff, attempt metadata, and terminal-failure handling.
@@ -75,10 +75,25 @@ Exit criteria: a committed deletion request survives restart, is retried safely,
 - [x] Cover competing claims, duplicate creation, stale completion, lease recovery, rollback, backoff and exhaustion against PostgreSQL.
 - [x] Document the [state machine and crash behavior](background-jobs.md) in ADR-0008 and architecture notes.
 
-This phase supplies persistence primitives only. No notifications are consumed,
-no purge request automatically creates a job yet, and no Garage/folder execution,
-stale-upload reconciliation, notification backfill, or recovery scheduler is implemented.
-The overall Phase 2 exit criteria remain pending. Execution results belong in task reports.
+Phase 2A supplies persistence primitives only; Phase 2B below connects notification
+delivery to job creation. Garage/folder execution, stale-upload reconciliation,
+notification backfill and recovery scheduling remain planned. The overall Phase 2
+exit criteria remain pending. Execution results belong in task reports.
+
+### Phase 2B — RabbitMQ consumer integration (completed)
+
+- [x] Add a disabled-by-default manual-ACK consumer for existing v1 file/folder purge events, without broker topology changes.
+- [x] Validate strict envelopes and committed outbox identity; create/find the stable event-ID job in one short transaction before ACK.
+- [x] Preserve job progress on duplicate/redelivered notifications, including commit-before-ACK loss.
+- [x] Bound database retries to three attempts with one-/two-second delays; stop with unacked work on exhaustion for explicit restart/redelivery.
+- [x] Add V15 sanitized PostgreSQL quarantine for permanently invalid messages; commit quarantine before ACK, retaining no raw payload/exception.
+- [x] Cover PostgreSQL rollback/commit ordering and live isolated-vhost delivery, quarantine, failure/stop and redelivery.
+- [x] Document [consumer configuration, acknowledgement and recovery](purge-consumer.md).
+
+No purge worker, Garage deletion, upload reconciliation or backfill is implemented.
+Runtime startup remains disabled until explicitly enabled; verification does not
+deploy the development API. Raw invalid-message recovery, outbox/job/quarantine
+retention and recovery scheduling remain open.
 
 ## Phase 3 — Refine concurrency without weakening correctness
 
