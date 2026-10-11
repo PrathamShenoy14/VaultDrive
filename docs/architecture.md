@@ -1,6 +1,6 @@
 # VaultDrive architecture
 
-Last reconciled with the repository on 2026-10-10.
+Last reconciled with the repository on 2026-10-11.
 
 ## Status legend
 
@@ -28,7 +28,7 @@ PostgreSQL and Garage do not share a transaction. Code must make cross-system fa
 ### Platform and persistence — Committed
 
 - Java 21, Spring Boot 4.1.1, Maven wrapper, Spring MVC, Spring Data JPA, validation, and Spring Security.
-- PostgreSQL schema managed by Flyway migrations V1-V13. Hibernate validates the schema (`ddl-auto=validate`) rather than creating it.
+- PostgreSQL schema managed by Flyway migrations V1-V14. Hibernate validates the schema (`ddl-auto=validate`) rather than creating it.
 - Configuration comes from properties and environment variables. Secrets are not intended for source control.
 
 ### Authentication and security — Committed
@@ -76,13 +76,15 @@ The file endpoint accepts only an owned, trashed `READY` file whose purge has no
 
 A pending-purge folder makes every descendant ineligible for restore, move, upload reservation/finalization, file purge request, or other metadata mutation. Folder and file restore explicitly check pending-purge ancestry before ordinary inaccessible-parent root fallback.
 
-Accepted file and folder requests now also append a version-1 purge-intent event to `outbox_events` in the same JPA transaction through a mandatory-transaction writer. Business state and event commit or roll back together, including after flush. Ownership/eligibility rejection and repeated requests append no event. A folder request emits one root intent, not a subtree event list. This completes durable intent plus notification persistence only. No purge worker exists. Garage deletion, database-row finalization, retry/backoff, job claiming, crash recovery, observability, and dead-letter handling remain planned.
+Accepted file and folder requests now also append a version-1 purge-intent event to `outbox_events` in the same JPA transaction through a mandatory-transaction writer. Business state and event commit or roll back together, including after flush. Ownership/eligibility rejection and repeated requests append no event. A folder request emits one root intent, not a subtree event list. No purge worker exists. Phase 2A supplies job persistence, claiming, retry/backoff and lease recovery primitives, but does not connect them to these request paths. Garage deletion, database-row finalization, execution/recovery scheduling, observability, and dead-letter handling remain planned.
 
 ### Asynchronous processing — Partially implemented
 
-ADR-0008 selects a PostgreSQL transactional outbox, RabbitMQ work notifications, PostgreSQL-backed durable job state, idempotent workers, and scheduler-driven recovery. Purge-request API transactions atomically persist business changes and outbox events; the opt-in publisher delivers committed notifications and recovers expired publication claims through database polling. Workers claiming durable PostgreSQL jobs, missed-notification recovery, and interrupted-job recovery remain planned. Database polling is a recovery and publishing mechanism within this design, not an alternative to RabbitMQ.
+ADR-0008 selects a PostgreSQL transactional outbox, RabbitMQ work notifications, PostgreSQL-backed durable job state, idempotent workers, and scheduler-driven recovery. Purge-request API transactions atomically persist business changes and outbox events; the opt-in publisher delivers committed notifications and recovers expired publication claims through database polling. Phase 2A adds durable job claiming and interrupted-claim recovery primitives. Execution workers, missed-notification recovery and job recovery scheduling remain planned. Database polling is a recovery and publishing mechanism within this design, not an alternative to RabbitMQ.
 
-RabbitMQ development infrastructure is deployed on the Ubuntu VM as recorded in [Phase 1A setup instructions](rabbitmq-development.md). AMQP and management bind to VM loopback and Windows accesses them through SSH forwarding. Phase 1B adds outbox persistence and atomic purge-request insertion. Phase 1C adds opt-in scheduled publication: PostgreSQL due-row locking and durable token/lease claims, persistent RabbitMQ messages to a durable direct exchange/quorum queue, correlated confirms with mandatory-return checks, bounded exponential retries, and expired-claim recovery. Claims commit before broker I/O; only an unexpired matching token can record completion. [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md) records the at-least-once contract and [publisher instructions](outbox-publishing.md) describe configuration/recovery. No consumers, durable jobs, purge workers, Garage deletion, historical-intent backfill, or job recovery scheduler are implemented. Default polling remains disabled until explicitly enabled with private broker configuration.
+RabbitMQ development infrastructure is deployed on the Ubuntu VM as recorded in [Phase 1A setup instructions](rabbitmq-development.md). AMQP and management bind to VM loopback and Windows accesses them through SSH forwarding. Phase 1B adds outbox persistence and atomic purge-request insertion. Phase 1C adds opt-in scheduled publication: PostgreSQL due-row locking and durable token/lease claims, persistent RabbitMQ messages to a durable direct exchange/quorum queue, correlated confirms with mandatory-return checks, bounded exponential retries, and expired-claim recovery. Claims commit before broker I/O; only an unexpired matching token can record completion. [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md) records the at-least-once contract and [publisher instructions](outbox-publishing.md) describe configuration/recovery. No consumers, purge workers, Garage deletion, historical-intent backfill, or job recovery scheduler are implemented. Default publisher polling remains disabled until explicitly enabled with private broker configuration.
+
+Phase 2A adds `background_jobs` and a minimal JPA service/repository. The primary key is the stable event UUID, so duplicate creation preserves even terminal progress; mismatched type/aggregate identity is rejected. Supported jobs are file/folder purge references without payload or cascading foreign keys. Job execution state is independent from outbox delivery state: `PENDING -> RUNNING -> SUCCEEDED`, with retry to `PENDING` and terminal `FAILED`. Ten attempts, a 30-second lease, capped one-to-60-second exponential backoff and database-clock deadlines are recorded in ADR-0008. Claim/recovery uses ordered job-row `FOR UPDATE SKIP LOCKED`; completion/retry takes the job row lock before checking the live token/lease. No hierarchy/resource locks or external I/O enter these transactions. Expired due claims can be recovered through bounded calls to `claimNext`; no scheduler or automatic request-to-job integration exists. Tokens fence database writes, not stale external effects. See [job state and crash recovery](background-jobs.md).
 
 ## Current consistency and concurrency model
 
@@ -102,9 +104,11 @@ Phase 1B PostgreSQL tests cover file/folder outbox commit, rollback after both f
 
 Phase 1C adds simultaneous same-resource purge requests with both first-request commit/rollback outcomes, PostgreSQL concurrent publisher/skip-locked tests, release of row locks before network I/O, token/expiry fencing, expired-claim backoff, bounded exhaustion, and replay. Transport tests inject negative confirms, timeouts and mandatory returns. Isolated live RabbitMQ tests cover positive confirms, persistent messages, mandatory returns, and replay after actual broker acceptance. Outbound-I/O hardening uses non-blocking NIO with a bounded frame queue and enqueue timeout, bounded I/O executors, and interruptible polling shutdown. Local client-queue/socket tests and PostgreSQL tests cover saturation recovery, subsequent event progress, stale-lease rejection during a stall, and bounded scheduler shutdown; live broker tests exercise NIO. Consumer processing is not implemented or tested. Final executed test results belong in the task report.
 
+Phase 2A PostgreSQL tests cover concurrent duplicate job creation, one-job competing claims, skip-locked selection, released row locks, claim rollback and uncommitted creation, token/expiry fencing before and after recovery, completion waiting for a lock, persisted attempt-based backoff, known/abandoned exhaustion, terminal replay, type filtering and schema guards. They validate persistence and recovery primitives only; no execution worker, notification-to-job recovery or physical purge is tested. Executed results belong in the task report.
+
 ## Known gaps and pending decisions
 
-- Remaining ADR-0008 async implementation: durable-job schema, worker claim/fencing and recovery policy, historical intent backfill, retention, and worker ownership semantics. Publisher leases/retries and notification topology are implemented; production load, process-kill/restart, and multi-node failure experiments remain unverified.
+- Remaining ADR-0008 async implementation: consumer/worker execution, recovery scheduling, historical intent backfill, retention, renewal and resource ownership semantics. Publisher policy and job lifecycle/fencing/recovery primitives are implemented; production load, process-kill/restart, and multi-node failure experiments remain unverified.
 - Remaining file-side coordination: future purge/reconciliation workers.
 - Reconciliation for stale `UPLOADING`, `FAILED`, orphaned objects, and uncertain finalization.
 - Folder/file purge workers and final subtree deletion semantics.

@@ -1,6 +1,6 @@
 # ADR-0008: Transactional outbox and durable asynchronous jobs
 
-- Status: Accepted; broker infrastructure, outbox persistence and leased publishing implemented; workers and durable jobs planned
+- Status: Accepted; broker infrastructure, outbox persistence, leased publishing and durable job foundation implemented; consumers and workers planned
 - Date: 2026-10-09
 
 ## Context
@@ -26,7 +26,7 @@ Garage/S3 calls will remain outside metadata database transactions. Workers will
 - Publishers and consumers must assume at-least-once effects and be idempotent; exactly-once delivery is not required.
 - Purge and reconciliation workers must preserve the lifecycle, hierarchy, ownership, and lock-order invariants in ADRs 0005–0007.
 - The earlier polling-first possibility in ADR-0006 is superseded by this decision.
-- Phase 1A provides development RabbitMQ infrastructure; Phase 1B provides atomic purge-request outbox persistence; Phase 1C provides leased publication, confirms, bounded retries, and expired-claim recovery. Durable jobs, consumers, workers, job recovery, and physical deletion remain unimplemented.
+- Phase 1A provides development RabbitMQ infrastructure; Phase 1B provides atomic purge-request outbox persistence; Phase 1C provides leased publication, confirms, bounded retries, and expired-claim recovery; Phase 2A provides job persistence and fenced lifecycle/recovery primitives. Consumers, execution workers, recovery scheduling, and physical deletion remain unimplemented.
 
 ## Phase 1B schema and transaction decision
 
@@ -55,7 +55,7 @@ Existing pending-purge requests predating V12 are not backfilled by this migrati
 
 ## Deferred decisions
 
-Durable-job schemas and states, worker claim/fencing, job recovery, event retention, historical-intent backfill, ordering guarantees, and operational thresholds remain open. The Phase 1B event contract remains unchanged. Publisher-specific choices are recorded below; they do not define purge-worker claiming.
+Consumer integration, physical worker execution, recovery scheduling, event/job retention, historical-intent backfill, ordering guarantees, and operational thresholds remain open. The Phase 1B event contract remains unchanged. Publisher-specific choices are recorded below; Phase 2A job choices follow separately.
 
 ## Phase 1C publisher protocol
 
@@ -82,3 +82,17 @@ Automatic polling is opt-in (`OUTBOX_PUBLISHER_ENABLED=true`) and disabled in th
 The confirmation deadline starts after `RabbitTemplate.send`, so it cannot bound blocking socket writes. Enabled publisher configuration now uses the bundled Java client's non-blocking NIO transport, a bounded 128-frame queue and one-second per-frame enqueue timeout. This removes the blocking socket-write path instead of abandoning a stuck executor future. Queue saturation is a retryable I/O failure; enqueued frames can still reach the broker after an uncertain timeout, preserving the same at-least-once/fencing contract. No database transaction, outbox schema, topology, or payload changes.
 
 One-thread bounded I/O and separate shutdown executors prevent unbounded worker growth. The single fixed-delay scheduler interrupts in-flight work on shutdown, connections have a one-second close-handshake timeout, and executor termination waits are finite. Defaults apply to the current small intent notifications, not an absolute total-event or application-shutdown deadline. NIO is deprecated in this client; using it avoids adding Netty dependencies in this focused fix. A future client upgrade must retain equivalent non-blocking, bounded backpressure and shutdown semantics. See the runbook for exact capacities, timeout composition, and test limitations.
+
+## Phase 2A durable job foundation
+
+V14 creates `background_jobs` separately from the outbox. The job ID is the stable event UUID, enforced by the primary key, with one logical job per event. `ON CONFLICT DO NOTHING` creation joins the caller transaction, validates duplicate type/aggregate identity, and never resets existing work. Aggregate/event references have no foreign keys so jobs and deduplication survive metadata/outbox retention. Terminal job retention must preserve that identity. Job types are initially `FILE_PURGE` and `FOLDER_PURGE`; no payload is stored. Future consumers must validate event versions and business eligibility before creation/execution.
+
+The lifecycle is `PENDING -> RUNNING -> SUCCEEDED`, with retry to `PENDING` and terminal `FAILED` at exhaustion. PostgreSQL enforces valid type/aggregate combinations, statuses, attempt bounds, complete claim pairs only for `RUNNING`, attempt timestamps, terminal timestamps, and controlled failure codes. Partial due/expired indexes and an aggregate lookup index support scans. Creation, claim, outcome and terminal timestamps remain durable and use database time.
+
+Claims use independent short JPA transactions with ordered job-row `FOR UPDATE SKIP LOCKED`, a fresh UUID token, a 30-second lease, and an incremented attempt. Ten total attempts are persisted per job. Backoff starts at one second, doubles per attempt, and caps at 60 seconds. Known failure schedules from database time when recorded; each claim pre-records a crash retry deadline of lease expiration plus backoff. Both deadlines must pass for abandoned-claim recovery. These fixed defaults are a foundation policy, not measured operational tuning or a long-operation lease design.
+
+Completion/retry lock the job row before reading protected state and checking the token and unexpired lease with PostgreSQL's clock, then apply a fenced conditional update. Persisted counters determine retry/exhaustion; caller snapshot counters are not trusted. Only job rows are locked, with no hierarchy/resource locks. Claims commit before returning immutable snapshots. Future orchestration must have no enclosing transaction during external I/O; `REQUIRES_NEW` alone does not close an outer transaction. Existing APIs, purge intent, outbox and storage boundaries are unchanged.
+
+`claimNext(type)` also recovers expired due jobs with new tokens, or marks abandoned final attempts `FAILED`. It examines at most 20 candidates per call and returns at most one executable claim. Future polling must repeat scans even after an empty result that cleared exhausted rows. Terminal rows stop automatic attempts and retain identity/reference. No automatic reset, renewal, consumer, scheduler, historical-intent backfill, checkpoints, or worker execution is added. Recovery of notifications that never created jobs remains a later phase.
+
+Database fencing cannot cancel stale external I/O. A crash after an external effect but before outcome commit can repeat that effect; future executors still require idempotence and upload writer fencing. Tests cover concurrent claims/creation, rollback, skip-locked/released locks, stale/expired outcomes including lock waits, backoff and both exhaustion paths against real PostgreSQL. See [the job state machine and recovery contract](../background-jobs.md).

@@ -41,7 +41,7 @@ See [development setup and verification instructions](rabbitmq-development.md). 
 - [x] Insert file/folder purge-intent events with Spring Data JPA inside the existing business transaction; reject standalone writer calls.
 - [x] Add real PostgreSQL tests for atomic commit/rollback, uncommitted visibility, insertion failures, ownership/eligibility rejection, and repeated requests on both paths.
 
-See [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md). Phase 1B covers persistence; Phase 1C below adds publication and publisher recovery. Consumers, workers, durable jobs, job recovery, and backfill of historical intents remain unimplemented. Test execution results belong in the task report.
+See [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md). Phase 1B covers persistence; Phase 1C adds publication and publisher recovery; Phase 2A adds job persistence and lifecycle recovery primitives. Consumers, execution workers, recovery scheduling, and backfill of historical intents remain unimplemented. Test execution results belong in the task report.
 
 ## Phase 1C — Reliable outbox publication
 
@@ -56,7 +56,7 @@ See [publisher development/recovery instructions](outbox-publishing.md) and ADR-
 
 Goal: remove Garage objects asynchronously and finalize metadata without pretending PostgreSQL and S3 share a transaction.
 
-- Partially implemented ADR-0008 architecture: development RabbitMQ, atomic purge-request outbox persistence and leased publication are present; consumers, PostgreSQL-backed durable jobs, physical purge and job recovery remain planned.
+- Partially implemented ADR-0008 architecture: development RabbitMQ, atomic purge-request outbox persistence, leased publication and durable job lifecycle primitives are present; consumers, physical purge and recovery scheduling remain planned.
 - Consume at-least-once notifications idempotently; extend atomic outbox persistence to future business transitions where required.
 - Have idempotent workers claim durable jobs in PostgreSQL; use scheduled database scans to recover missed notifications, retries, and interrupted work. Database polling is a recovery and publishing mechanism, not an alternative execution topology.
 - Define safe job claiming for multiple worker instances, retry/backoff, attempt metadata, and terminal-failure handling.
@@ -66,6 +66,19 @@ Goal: remove Garage objects asynchronously and finalize metadata without pretend
 - Add operational signals for pending age, retries, failures, and orphan detection.
 
 Exit criteria: a committed deletion request survives restart, is retried safely, cannot be restored, and eventually reaches a documented terminal state.
+
+### Phase 2A — Durable PostgreSQL job foundation (completed)
+
+- [x] Add V14 stable event/job identity, typed aggregate references, lifecycle/attempt/lease timestamps, constraints and scan indexes.
+- [x] Add idempotent transactional creation and independent short claim/complete/retry transactions with row locking and durable token fencing.
+- [x] Persist ten-attempt budgets, 30-second leases, one-to-60-second exponential backoff, abandoned-claim recovery and terminal `FAILED` state.
+- [x] Cover competing claims, duplicate creation, stale completion, lease recovery, rollback, backoff and exhaustion against PostgreSQL.
+- [x] Document the [state machine and crash behavior](background-jobs.md) in ADR-0008 and architecture notes.
+
+This phase supplies persistence primitives only. No notifications are consumed,
+no purge request automatically creates a job yet, and no Garage/folder execution,
+stale-upload reconciliation, notification backfill, or recovery scheduler is implemented.
+The overall Phase 2 exit criteria remain pending. Execution results belong in task reports.
 
 ## Phase 3 — Refine concurrency without weakening correctness
 
@@ -111,7 +124,7 @@ Exit criteria: correctness tests remain green and measured contention improves f
 
 ## Explicitly undecided
 
-- Durable jobs, worker claiming/fencing/retry, job recovery/backfill, and retention within the ADR-0008 direction. Publisher-specific claims, notification topology and bounded retries are decided in Phase 1C.
+- Worker execution/ownership, recovery scheduling/backfill, lease renewal, operational tuning and event/job retention within ADR-0008. Publisher-specific policy is decided in Phase 1C; job identity, states, fencing and bounded retries are decided in Phase 2A.
 - Granular lock mechanism and namespace key.
 - Hard-delete retention delay and user-visible cancellation policy.
 - Refresh-token/logout design and JWT key evolution.
