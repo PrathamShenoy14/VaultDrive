@@ -1,10 +1,11 @@
 # Durable job worker foundation (Phase 2C)
 
 The opt-in worker schedules existing PostgreSQL jobs and dispatches registered
-`JobHandler` implementations. No file/folder purge handler is provided in this
-slice. Enabling the foundation alone leaves purge jobs untouched: there is no
-placeholder handler that marks them successful. Garage deletion, resource
-finalization, upload reconciliation and missed-notification backfill remain planned.
+`JobHandler` implementations. Phase 2D.1 now registers a real
+[file byte-purge handler](file-purge.md), with immutable targets and the accepted
+trusted-writer storage contract. Explicit enablement can execute eligible file jobs.
+Folder purge, resource finalization, upload reconciliation and missed-notification
+backfill remain planned. Scheduling and consumers stay disabled by default.
 
 ## Configuration and capacity
 
@@ -150,7 +151,8 @@ latch-coordinated handlers to exercise concurrent schedulers, execution outside
 transactions, automatic renewal, crash/timeout recovery, capacity reservation,
 slow renewal isolation and shutdown. `JobWorkerConfigurationTest` checks disabled
 startup, absent/duplicate handlers, timing/capacity validation and actual Spring
-context closure. No test handler is registered in production code.
+context closure. No test handler is registered in production code. Phase 2D.1's
+production file handler has separate real Garage coverage in [file purge](file-purge.md).
 
 Load the ignored local environment before running Maven. Run focused tests first:
 

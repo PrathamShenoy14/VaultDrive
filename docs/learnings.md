@@ -100,4 +100,25 @@ Phase 2C reserves a bounded local slot before the database claim, so waiting in 
 
 A renewable lease must move the durable crash retry deadline too; extending only expiration can otherwise lose abandoned-attempt backoff. PostgreSQL renewal uses row-lock-before-read plus live-token fencing and never increments attempts. Local monotonic lease proof starts before the database call, including its latency, rather than starting a new execution window on a delayed response. A separate runtime cap prevents endless renewal. These checks reduce local uncertainty but cannot fence external effects or account for every database clock jump.
 
-Graceful shutdown first stops admission, lets finished results commit within a finite waiting budget, then stops renewal and requests interruption. Unfinished claims expire using the final durable deadlines, including any in-flight renewal that committed late. Waiting is bounded even when a daemon task ignores interruption; absolute task termination is not promised. No production handler is supplied, so enabling scheduling alone cannot falsely complete purge work. Tests signalling database results must wait for `afterCommit`, not merely a spied method's return inside its transactional proxy.
+Graceful shutdown first stops admission, lets finished results commit within a finite waiting budget, then stops renewal and requests interruption. Unfinished claims expire using the final durable deadlines, including any in-flight renewal that committed late. Waiting is bounded even when a daemon task ignores interruption; absolute task termination is not promised. Phase 2C supplied no production handler; Phase 2D.1 separately supplies real file byte purge. Tests signalling database results must wait for `afterCommit`, not merely a spied method's return inside its transactional proxy.
+
+## Immutable targets and trusted storage writers
+
+An event UUID identifies intent, not bytes. Phase 2D.1 copies the upload's exact
+namespace/endpoint/region/bucket/key into an immutable PostgreSQL target in the
+same transaction as purge intent and the v1 outbox event. Legacy rows cannot prove
+their original location and receive no inferred target. Configuration drift fails
+closed instead of redirecting an old job to today's bucket.
+
+Garage 2.3.0 exposes internal version IDs without S3 version-specific DELETE:
+persisting that response header would not create a deletion fence. We explicitly
+accept trusted writers rather than claim storage-side immutability. A retained key
+allocation prevents intentional application reuse even after file removal. One
+committed write invocation and disabled SDK retries avoid creating competing upload
+attempts; uncertain failed uploads require new keys and later reconciliation.
+
+A stale DELETE can still finish outside its database lease. Permanent nonreuse
+makes it address the same old object; job token/expiry fencing rejects its late
+completion. An out-of-band overwrite or namespace/alias reassignment violates the
+accepted contract and can destroy replacement bytes. Idempotence and lease fencing
+are distinct from storage identity enforcement. See [file purge](file-purge.md).

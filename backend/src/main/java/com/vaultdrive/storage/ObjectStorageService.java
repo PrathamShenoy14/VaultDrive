@@ -14,4 +14,7 @@ public interface ObjectStorageService {
     StorageObject download(String storageKey);
 
     void delete(String storageKey);
+
+    /** Purge uses the durable target; adapters must reject incompatible storage bindings. */
+    void delete(StorageTarget target);
 }

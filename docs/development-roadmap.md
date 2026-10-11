@@ -41,7 +41,7 @@ See [development setup and verification instructions](rabbitmq-development.md). 
 - [x] Insert file/folder purge-intent events with Spring Data JPA inside the existing business transaction; reject standalone writer calls.
 - [x] Add real PostgreSQL tests for atomic commit/rollback, uncommitted visibility, insertion failures, ownership/eligibility rejection, and repeated requests on both paths.
 
-See [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md). Phase 1B covers persistence; Phase 1C adds publication and publisher recovery; Phase 2A adds job persistence; Phase 2B adds consumer ingestion; Phase 2C adds opt-in worker scheduling/renewal and supported-type recovery. Physical purge handlers and backfill of historical intents remain unimplemented. Test execution results belong in the task report.
+See [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md). Phase 1B covers persistence; Phase 1C adds publication and publisher recovery; Phase 2A adds job persistence; Phase 2B adds consumer ingestion; Phase 2C adds opt-in worker scheduling/renewal and supported-type recovery. Phase 2D.1 adds file byte purge; folder execution and historical-intent backfill remain unimplemented. Test execution results belong in the task report.
 
 ## Phase 1C — Reliable outbox publication
 
@@ -56,7 +56,7 @@ See [publisher development/recovery instructions](outbox-publishing.md) and ADR-
 
 Goal: remove Garage objects asynchronously and finalize metadata without pretending PostgreSQL and S3 share a transaction.
 
-- Partially implemented ADR-0008 architecture: development RabbitMQ, atomic purge-request outbox persistence, leased publication, durable job lifecycle primitives, consumer ingestion and opt-in worker scheduling/renewal are present; physical purge handlers and missed-job backfill remain planned.
+- Partially implemented ADR-0008 architecture: development RabbitMQ, atomic purge-request outbox persistence, leased publication, durable jobs, consumer ingestion, opt-in scheduling/renewal and trusted-writer file byte purge are present; folder purge, metadata finalization and missed-job backfill remain planned.
 - Consume at-least-once notifications idempotently; extend atomic outbox persistence to future business transitions where required.
 - Have idempotent workers claim durable jobs in PostgreSQL; use scheduled database scans to recover missed notifications, retries, and interrupted work. Database polling is a recovery and publishing mechanism, not an alternative execution topology.
 - Define safe job claiming for multiple worker instances, retry/backoff, attempt metadata, and terminal-failure handling.
@@ -76,7 +76,7 @@ Exit criteria: a committed deletion request survives restart, is retried safely,
 - [x] Document the [state machine and crash behavior](background-jobs.md) in ADR-0008 and architecture notes.
 
 Phase 2A supplies persistence primitives; Phase 2B connects notification delivery to
-job creation and Phase 2C adds scheduling/renewal. Garage/folder purge handlers,
+job creation and Phase 2C adds scheduling/renewal. Phase 2D.1 adds file byte purge; folder handlers,
 stale-upload reconciliation and notification backfill remain planned. The overall Phase 2
 exit criteria remain pending. Execution results belong in task reports.
 
@@ -90,7 +90,8 @@ exit criteria remain pending. Execution results belong in task reports.
 - [x] Cover PostgreSQL rollback/commit ordering and live isolated-vhost delivery, quarantine, failure/stop and redelivery.
 - [x] Document [consumer configuration, acknowledgement and recovery](purge-consumer.md).
 
-No purge worker, Garage deletion, upload reconciliation or backfill is implemented.
+Phase 2B itself adds no job execution or Garage deletion. Phase 2D.1 supplies file
+byte purge; upload reconciliation and backfill remain unimplemented.
 Runtime startup remains disabled until explicitly enabled; verification does not
 deploy the development API. Raw invalid-message recovery and outbox/job/quarantine
 retention remain open; Phase 2C below adds supported-type scheduling and renewal.
@@ -106,9 +107,25 @@ retention remain open; Phase 2C below adds supported-type scheduling and renewal
 - [x] Cover concurrent schedulers, renewal/stale tokens, lock-wait expiry, crash/timeout recovery, capacity, slow renewal and shutdown against PostgreSQL.
 - [x] Document [worker configuration and recovery](job-workers.md).
 
-All scheduling stays disabled by default. No file/folder purge handler, Garage
-deletion, stale-upload reconciliation or missed-notification/job backfill exists.
-Actual storage execution, retention/reset tooling and operational tuning remain open.
+All scheduling stays disabled by default. Phase 2C added no storage handler;
+Phase 2D.1 below supplies file byte purge. Folder execution, stale-upload
+reconciliation, missed-notification/job backfill, retention/reset tooling and tuning
+remain open.
+
+### Phase 2D.1 — File byte purge under trusted writers
+
+- [x] Retain Garage 2.3.0 with the explicit trusted-writer/nonreplacement contract.
+- [x] Add V16 immutable upload bindings, permanent key allocations and event-ID purge targets; do not infer legacy bindings.
+- [x] Commit verified targets with existing purge intent and unchanged v1 outbox events.
+- [x] Register the real file handler with bounded Garage I/O, object-absence success, cancellation and fenced worker completion.
+- [x] Prevent repeated application writes to allocated keys and disable SDK retries; keep external I/O outside PostgreSQL transactions.
+- [x] Cover atomic rollback, migration/legacy safety, duplicate/stale execution, failed retries, competing writes and unrelated/newer object preservation with isolated fixtures.
+- [x] Document [storage assumptions and operational recovery](file-purge.md).
+
+Workers and consumers remain disabled by default. Job success records the byte
+deletion outcome only: metadata finalization and recursive folder purge remain
+planned. Independent writers can bypass application protections; Garage does not
+enforce conditional/version-specific deletion. Execution results belong in task reports.
 
 ## Phase 3 — Refine concurrency without weakening correctness
 

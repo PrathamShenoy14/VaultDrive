@@ -38,4 +38,29 @@ File restore and permanent-delete request acquire the shared hierarchy lock befo
 - Add future purge/reconciliation race coverage when those workers are implemented.
 - A reproducible baseline and post-change contention measurement.
 
+## Phase 2D.1 storage admission and file purge
+
+New upload allocation insertion follows the file flush under the existing shared
+owner hierarchy lock. Storage write admission reads immutable allocation identity
+to identify the owner, then takes the shared owner hierarchy lock, freshly queries
+and pessimistically locks the eligible UPLOADING file row, and consumes the
+allocation row. The order is hierarchy, file, allocation; commit precedes PUT.
+The durable one-write marker and retained key constraints prevent another
+application invocation from writing the same key. No lock spans storage I/O.
+
+File purge preparation similarly reads only immutable event-ID target identity
+before taking the shared owner hierarchy lock, then freshly locks the matching
+owned pending READY file row and validates key/version/purge timestamp and
+pending-purge ancestry. It does not mutate the namespace or finalize metadata.
+The resource transaction commits before live job-token renewal and DELETE; job
+row locks never overlap hierarchy/file locks. Existing worker completion is fenced
+in its own short transaction. A stale external effect is still possible under the
+accepted [trusted-writer contract](../file-purge.md).
+
+Real PostgreSQL/Garage tests cover competing writes, row-lock-before-admission,
+resource/job lock release before storage I/O, stale claim rejection and late
+effects without newer-object deletion. Existing hierarchy/request races remain
+in the full verification suite. Metadata finalization/folder traversal will need
+their own locking decisions and race coverage.
+
 No performance benchmark currently exists, so this ADR makes no throughput claim.

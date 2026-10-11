@@ -1,6 +1,6 @@
 # ADR-0008: Transactional outbox and durable asynchronous jobs
 
-- Status: Accepted; broker infrastructure, outbox persistence, leased publishing, durable jobs, notification consumer and worker scheduling foundation implemented; physical purge handlers planned
+- Status: Accepted; broker/outbox/job/consumer/worker foundation and trusted-writer file byte purge implemented; folder purge and metadata finalization planned
 - Date: 2026-10-09
 
 ## Context
@@ -26,7 +26,7 @@ Garage/S3 calls will remain outside metadata database transactions. Workers will
 - Publishers and consumers must assume at-least-once effects and be idempotent; exactly-once delivery is not required.
 - Purge and reconciliation workers must preserve the lifecycle, hierarchy, ownership, and lock-order invariants in ADRs 0005–0007.
 - The earlier polling-first possibility in ADR-0006 is superseded by this decision.
-- Phase 1A provides development RabbitMQ infrastructure; Phase 1B provides atomic purge-request outbox persistence; Phase 1C provides leased publication, confirms, bounded retries, and expired-claim recovery; Phase 2A provides job persistence and fenced lifecycle/recovery primitives; Phase 2B provides validated notification ingestion with commit-before-ACK and sanitized quarantine; Phase 2C provides bounded worker dispatch, lease renewal and scheduled recovery for registered handler types. Physical purge handlers, missed-job backfill and deletion remain unimplemented.
+- Phase 1A provides development RabbitMQ infrastructure; Phase 1B provides atomic purge-request outbox persistence; Phase 1C provides leased publication, confirms, bounded retries, and expired-claim recovery; Phase 2A provides job persistence and fenced lifecycle/recovery primitives; Phase 2B provides validated notification ingestion with commit-before-ACK and sanitized quarantine; Phase 2C provides bounded worker dispatch, lease renewal and scheduled recovery for registered handler types. Phase 2D.1 adds trusted-writer file byte purge. Folder purge, metadata finalization and missed-job backfill remain unimplemented.
 
 ## Phase 1B schema and transaction decision
 
@@ -51,11 +51,11 @@ The partial index `(next_attempt_at, created_at, id) WHERE delivery_status = 'PE
 
 The delivery contract is at least once: only committed outbox rows may be published. If RabbitMQ accepts a notification and the publisher crashes before recording `PUBLISHED`, a retry may publish the same UUID again. Future consumers must tolerate duplicate publication and redelivery, use the event UUID for notification deduplication where useful, and conditionally claim/advance PostgreSQL durable jobs idempotently. Deduplication alone must not suppress recovery of unfinished work. Broker acknowledgement is not a business-state commit; the outbox is not a durable purge job table.
 
-Existing pending-purge requests predating V12 are not backfilled by this migration. Recovery/backfill and event retention remain future tasks. Phase 1B added no broker execution; Phase 1C below supplies publication only. Phase 2B separately handles notification ingestion and quarantines unknown versions; Garage deletion and execution workers remain unimplemented.
+Existing pending-purge requests predating V12 are not backfilled by this migration. Recovery/backfill and event retention remain future tasks. Phase 1B added no broker execution; Phase 1C below supplies publication only. Phase 2B separately handles notification ingestion and quarantines unknown versions; Phase 2D.1 below supplies file byte deletion without changing v1 events.
 
 ## Deferred decisions
 
-Physical purge execution, missed-notification/job backfill, outbox/job/quarantine retention, ordering guarantees and operational tuning remain open. The Phase 1B event contract remains unchanged. Publisher, job, consumer and worker foundation choices are recorded separately below.
+Folder purge execution, metadata finalization, missed-notification/job backfill, outbox/job/quarantine retention, ordering guarantees and operational tuning remain open. The Phase 1B event contract remains unchanged. Publisher, job, consumer, worker foundation and Phase 2D.1 file-purge choices are recorded separately below.
 
 ## Phase 1C publisher protocol
 
@@ -126,3 +126,50 @@ The five-minute default max runtime limits perpetual renewal. A conservative mon
 Context closure immediately stops new claim admission. The worker allows active completion/renewal within one default five-second grace budget (configurable up to 60 seconds), then stops monitoring and interrupts unfinished handlers, renewals and control loops. All waiting shares that deadline. Unresponsive daemon threads can outlive this wait; no replacement pool bypasses stuck capacity. In-flight claims or renewals may commit after shutdown begins, so later recovery uses final persisted deadlines. Legitimately finished outcome transactions already begun may commit. Other unfinished work is not forcibly completed or immediately rearmed.
 
 Supported-type polling recovers missed execution wakeups and expired attempts through the existing claim scan/backoff/exhaustion protocol. It does not materialize jobs missing from lost notifications or historical intent. Tests use real PostgreSQL for concurrent schedulers, renewal/lock-wait fencing, capacity, crash/timeout recovery, slow renewal isolation and shutdown; Spring context closure is also exercised. No physical purge handler or process-kill/load experiment is added. See [worker configuration and failure scenarios](../job-workers.md).
+
+## Phase 2D.1 file byte purge and trusted-writer decision
+
+Retain Garage 2.3.0 and explicitly accept trusted storage writers. Garage's S3
+boundary does not enforce write-once keys or generation-specific DELETE. All
+authorized writers/operators must honor permanent nonreuse, no replacement of
+finalized content, and stable storage namespace/endpoint/bucket bindings. An
+out-of-band overwrite or alias/endpoint reassignment can make a replayed DELETE
+remove replacement bytes. This is accepted risk, not a guarantee from UUIDs,
+metadata versions, ETags or leases. No gateway/provider migration is introduced.
+
+V16 adds `file_storage_objects` retained key allocations and `file_purge_targets`
+immutable event-ID deletion targets. New UPLOADING reservations capture a logical
+namespace (`S3_NAMESPACE`, default `garage-default`), endpoint, region and bucket.
+A short shared-hierarchy/eligible-file-row/allocation-row transaction consumes
+one storage write invocation before PUT. Allocations survive file removal; primary
+key/unique constraints and monotonic identity triggers prohibit intentional key
+reuse. SDK retries are disabled to avoid overlapping uncertain upload attempts.
+Migration reserves legacy keys as consumed without inventing original bindings.
+
+For a new verified file, pending-purge flush, immutable target insertion and v1
+outbox append share one PostgreSQL transaction. Target identity includes the file
+version/purge timestamp plus exact upload binding/key. The event payload and
+notification/job protocols remain unchanged; separate target rows have no
+cascading foreign keys. Legacy requests lacking a verified target remain accepted
+by the API but fail closed during execution; no implicit backfill is performed.
+
+The FILE_PURGE handler reads its immutable event-ID target, acquires the shared
+owner hierarchy lock, freshly locks/validates the matching owned pending READY
+file row and checks pending-purge ancestry. That transaction commits before job
+renewal and Garage I/O. Job-row locks never overlap hierarchy/file locks. The
+adapter rejects binding drift instead of constructing clients from persisted URLs
+or resolving a new target. Only the matching configured client is supported.
+
+DELETE has a ten-second call and five-second attempt bound, with two-second
+connection/acquisition and five-second socket limits. Missing object success is
+distinct from missing/inaccessible buckets. Sanitized transient/access/binding/
+storage failures use the existing bounded retry/exhaustion policy. Cancellation
+checks and live-token renewal reduce stale effects; a stale in-flight DELETE can
+still finish, while fenced worker completion cannot overwrite a newer claim.
+
+Success means the intended bytes are gone or already absent. Pending file metadata
+and durable allocation/target remain; metadata finalization and folder purge are
+deferred. Workers and consumers remain disabled by default; enabling workers now
+permits actual eligible file deletion. Presigned/multipart transfers need a separate
+writer-fencing design before integration. See [the storage contract, verification
+and recovery runbook](../file-purge.md).

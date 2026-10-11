@@ -11,6 +11,9 @@ import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
+import software.amazon.awssdk.http.apache.ApacheHttpClient;
+import software.amazon.awssdk.retries.StandardRetryStrategy;
+import java.time.Duration;
 
 import software.amazon.awssdk.core.checksums.RequestChecksumCalculation;
 import software.amazon.awssdk.core.checksums.ResponseChecksumValidation;
@@ -33,6 +36,14 @@ public class S3StorageConfig {
                 .credentialsProvider(
                         StaticCredentialsProvider.create(credentials)
                 )
+                .httpClientBuilder(ApacheHttpClient.builder()
+                        .connectionTimeout(Duration.ofSeconds(2))
+                        .connectionAcquisitionTimeout(Duration.ofSeconds(2))
+                        .socketTimeout(Duration.ofSeconds(5)))
+                // An uncertain PUT must not spawn a second writer at the same key.
+                // Purge retries belong to the durable PostgreSQL job lifecycle.
+                .overrideConfiguration(config -> config.retryStrategy(
+                        StandardRetryStrategy.builder().maxAttempts(1).build()))
                 .requestChecksumCalculation(
                         RequestChecksumCalculation.WHEN_REQUIRED
                 )

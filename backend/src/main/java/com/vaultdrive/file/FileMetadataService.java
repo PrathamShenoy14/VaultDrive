@@ -6,6 +6,7 @@ import com.vaultdrive.file.exception.UploadFinalizationRejectedException;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
 import com.vaultdrive.outbox.OutboxEvent;
 import com.vaultdrive.outbox.OutboxWriter;
+import com.vaultdrive.storage.FileStorageIdentityService;
 import com.vaultdrive.user.UserRepository;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
@@ -34,19 +35,22 @@ public class FileMetadataService {
     private final FolderAccessValidator folderAccessValidator;
     private final HierarchyCoordinator hierarchyCoordinator;
     private final OutboxWriter outboxWriter;
+    private final FileStorageIdentityService storageIdentity;
 
     public FileMetadataService(
             StoredFileRepository storedFileRepository,
             UserRepository userRepository,
             FolderAccessValidator folderAccessValidator,
             HierarchyCoordinator hierarchyCoordinator,
-            OutboxWriter outboxWriter
+            OutboxWriter outboxWriter,
+            FileStorageIdentityService storageIdentity
     ) {
         this.storedFileRepository = storedFileRepository;
         this.userRepository = userRepository;
         this.folderAccessValidator = folderAccessValidator;
         this.hierarchyCoordinator = hierarchyCoordinator;
         this.outboxWriter = outboxWriter;
+        this.storageIdentity = storageIdentity;
     }
 
     @Transactional
@@ -72,7 +76,9 @@ public class FileMetadataService {
             );
         }
 
-        return storedFileRepository.saveAndFlush(file);
+        StoredFile saved = storedFileRepository.saveAndFlush(file);
+        storageIdentity.reserve(saved);
+        return saved;
     }
 
     @Transactional
@@ -212,9 +218,11 @@ public class FileMetadataService {
         file.requestPermanentDeletion();
 
         StoredFile saved = storedFileRepository.saveAndFlush(file);
-        outboxWriter.append(OutboxEvent.filePurgeRequested(
+        OutboxEvent event = OutboxEvent.filePurgeRequested(
                 ownerId, fileId, saved.getPurgeRequestedAt()
-        ));
+        );
+        storageIdentity.recordPurgeTarget(saved, event);
+        outboxWriter.append(event);
         return saved;
     }
 

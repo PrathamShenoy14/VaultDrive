@@ -27,7 +27,7 @@ For opt-in leased RabbitMQ publication, local connectivity, and recovery, see [O
 ### Infrastructure
 - Docker
 - Ubuntu Server (VirtualBox development environment)
-- RabbitMQ with PostgreSQL transactional outbox publication; consumers and purge workers remain planned
+- RabbitMQ with PostgreSQL outbox publication, opt-in notification ingestion and trusted-writer file byte purge; execution remains disabled by default
 
 ### Authentication
 - BCrypt password hashing
@@ -96,7 +96,7 @@ For opt-in leased RabbitMQ publication, local connectivity, and recovery, see [O
 - Paginated file listing, rename, move, trash, and restore
 - PostgreSQL metadata separated from immutable object-storage keys
 - Upload lifecycle states (`UPLOADING`, `READY`, `FAILED`)
-- Pending-purge lifecycle state in the database; the asynchronous purge worker is not yet implemented
+- Pending-purge lifecycle state with immutable deletion targets and opt-in file byte purge; legacy unknown bindings fail closed
 
 ## API Endpoints
 
@@ -297,7 +297,7 @@ backend/
 
 ### File Management
 
-- Reliable asynchronous Garage purge worker and retry handling
+- Recursive folder purge, file metadata finalization and audited legacy purge recovery
 - Reconciliation for stale uploads and orphaned objects
 - Presigned and resumable transfers
 - File versioning and quotas
@@ -352,7 +352,7 @@ These features are planned and have not yet been implemented.
 
 **Current milestone:**
 
-Implementing a retryable asynchronous purge worker. A granular concurrency refactor remains planned after the current behavior is protected by database-backed concurrency tests.
+File byte purge now uses durable immutable targets and bounded retries under the accepted [trusted-writer contract](docs/file-purge.md). Folder purge, metadata finalization and legacy recovery remain planned. A granular concurrency refactor remains planned after the current behavior is protected by database-backed concurrency tests.
 
 ## Project Goals
 

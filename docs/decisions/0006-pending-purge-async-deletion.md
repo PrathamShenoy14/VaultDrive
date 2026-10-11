@@ -1,6 +1,6 @@
 # ADR-0006: Durable pending-purge deletion
 
-- Status: Request transition implemented; asynchronous worker planned
+- Status: Request transition and trusted-writer file byte purge implemented; folder purge and metadata finalization planned
 - Date: 2026-10-09
 
 ## Context
@@ -22,7 +22,9 @@ Folder requests take the exclusive owner hierarchy lock, pessimistically lock th
 - Tested: PostgreSQL-backed races for both restore/permanent-delete winner orders.
 - Implemented in Phase 1B: file/folder purge-intent outbox events persisted atomically with new requests; schema and payload contract are recorded in ADR-0008.
 - Implemented in Phase 1C: leased outbox publication, broker confirms, bounded publisher retries and expired publisher-claim recovery. This does not execute purge intent.
-- Not implemented: file/folder workers, subtree traversal/deletion execution, worker claim/fencing/retry, final row deletion, job recovery, metrics, or purge repair tooling.
+- Implemented in Phases 2A–2C: durable job claims, fencing, bounded retry, opt-in execution/renewal and expired-claim recovery.
+- Implemented in Phase 2D.1: immutable file deletion targets and physical byte purge under the accepted trusted-writer assumption; legacy unknown bindings fail closed. See [file purge](../file-purge.md) and ADR-0008.
+- Not implemented: folder/subtree execution, final metadata deletion, historical-intent/missed-job backfill, metrics or purge repair tooling.
 
 ## Consequences
 

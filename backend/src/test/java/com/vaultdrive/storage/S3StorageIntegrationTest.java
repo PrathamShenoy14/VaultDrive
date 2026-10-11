@@ -22,6 +22,7 @@ import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 import java.io.InputStream;
+import java.util.UUID;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -39,49 +40,49 @@ class S3StorageIntegrationTest {
     @Test
     void shouldPutGetAndDeleteObject() {
 
-        String key = "integration-tests/hello.txt";
+        String key = "integration-tests/" + UUID.randomUUID() + "/hello.txt";
 
         byte[] originalContent =
                 "Hello from VaultDrive".getBytes(StandardCharsets.UTF_8);
 
-        // PUT
-        s3Client.putObject(
-                PutObjectRequest.builder()
-                        .bucket(properties.bucket())
-                        .key(key)
-                        .contentType("text/plain")
-                        .build(),
-                RequestBody.fromBytes(originalContent)
-        );
+        try {
+            s3Client.putObject(
+                    PutObjectRequest.builder()
+                            .bucket(properties.bucket())
+                            .key(key)
+                            .contentType("text/plain")
+                            .build(),
+                    RequestBody.fromBytes(originalContent)
+            );
 
-        // GET
-        ResponseBytes<GetObjectResponse> downloaded =
-                s3Client.getObjectAsBytes(
-                        GetObjectRequest.builder()
-                                .bucket(properties.bucket())
-                                .key(key)
-                                .build()
-                );
+            ResponseBytes<GetObjectResponse> downloaded =
+                    s3Client.getObjectAsBytes(
+                            GetObjectRequest.builder()
+                                    .bucket(properties.bucket())
+                                    .key(key)
+                                    .build()
+                    );
 
-        assertEquals("text/plain", downloaded.response().contentType());
-        assertArrayEquals(originalContent, downloaded.asByteArray());
+            assertEquals("text/plain", downloaded.response().contentType());
+            assertArrayEquals(originalContent, downloaded.asByteArray());
 
-        // DELETE
-        s3Client.deleteObject(builder -> builder
-                .bucket(properties.bucket())
-                .key(key)
-        );
+            s3Client.deleteObject(builder -> builder
+                    .bucket(properties.bucket())
+                    .key(key)
+            );
 
-        // VERIFY DELETE
-        assertThrows(
-                NoSuchKeyException.class,
-                () -> s3Client.getObjectAsBytes(
-                        GetObjectRequest.builder()
-                                .bucket(properties.bucket())
-                                .key(key)
-                                .build()
-                )
-        );
+            assertThrows(
+                    NoSuchKeyException.class,
+                    () -> s3Client.getObjectAsBytes(
+                            GetObjectRequest.builder()
+                                    .bucket(properties.bucket())
+                                    .key(key)
+                                    .build()
+                    )
+            );
+        } finally {
+            s3Client.deleteObject(builder -> builder.bucket(properties.bucket()).key(key));
+        }
     }
 
     @Test
@@ -89,22 +90,22 @@ class S3StorageIntegrationTest {
             throws Exception {
     
         String key =
-                "integration-tests/storage-service-download.txt";
+                "integration-tests/" + UUID.randomUUID() + "/storage-service-download.txt";
     
         byte[] originalContent =
                 "VaultDrive download integration test"
                         .getBytes(StandardCharsets.UTF_8);
     
-        s3Client.putObject(
-                PutObjectRequest.builder()
-                        .bucket(properties.bucket())
-                        .key(key)
-                        .contentType("text/plain")
-                        .build(),
-                RequestBody.fromBytes(originalContent)
-        );
-    
         try {
+            s3Client.putObject(
+                    PutObjectRequest.builder()
+                            .bucket(properties.bucket())
+                            .key(key)
+                            .contentType("text/plain")
+                            .build(),
+                    RequestBody.fromBytes(originalContent)
+            );
+
             StorageObject storageObject =
                     objectStorageService.download(key);
     

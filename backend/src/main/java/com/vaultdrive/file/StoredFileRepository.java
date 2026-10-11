@@ -99,6 +99,14 @@ public interface StoredFileRepository
     );
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select file from StoredFile file where file.id = :id and file.ownerId = :owner
+                and file.status = com.vaultdrive.file.FileStatus.UPLOADING
+                and file.deletedAt is null and file.purgeRequestedAt is null
+            """)
+    Optional<StoredFile> findUploadingForStorageWrite(@Param("id") UUID id, @Param("owner") UUID owner);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<StoredFile> findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
             UUID id,
             UUID ownerId,

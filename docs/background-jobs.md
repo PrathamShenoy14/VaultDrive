@@ -6,8 +6,9 @@ V14 and `com.vaultdrive.job` provide the Phase 2A persistence foundation. Phase 
 adds an opt-in [notification consumer](purge-consumer.md) that creates jobs after
 matching committed outbox intent. Phase 2C adds an opt-in [worker foundation](job-workers.md)
 with scheduling, renewal and expired-claim recovery for registered handler types.
-No API directly creates jobs, and no physical purge handler, Garage deletion or
-reconciliation is implemented.
+No API directly creates jobs. Phase 2D.1 adds a [file byte-purge handler](file-purge.md)
+under the accepted trusted-writer assumption. Folder purge, metadata finalization
+and reconciliation remain unimplemented.
 Existing purge APIs and outbox publisher behavior are unchanged.
 
 ## Identity and creation
@@ -27,8 +28,9 @@ and outbox retention. Terminal retention must preserve deduplication identity;
 deleting a job would allow replay to recreate work. No retention/reset tooling exists.
 
 Only `FILE_PURGE`/`FILE` and `FOLDER_PURGE`/`FOLDER` are supported. Jobs store no
-payload, names, object keys, credentials, or exception text. Future workers must
-reload ownership, ancestry, aggregate state, and lifecycle eligibility.
+payload, names, object keys, credentials, or exception text. The file handler uses
+the separate immutable event-ID purge target and reloads ownership, ancestry and
+pending-file eligibility. Missing legacy targets fail closed; jobs never infer keys.
 
 ## State machine
 
@@ -81,7 +83,7 @@ Recovery is part of `claimNext`: each call examines at most 20 eligible rows,
 marks exhausted claims failed, and returns at most one executable claim. It can
 return empty after clearing 20 exhausted rows even when work remains; future
 pollers must scan again. The opt-in Phase 2C scheduler drives these scans only for
-registered handler types; no production file/folder handler exists yet. Due pending
+registered handler types; Phase 2D.1 registers the file handler only. Due pending
 jobs can be found without notifications; abandoned jobs can be reclaimed after restart. A missed
 notification that never created a job needs future outbox-to-job recovery/backfill.
 
