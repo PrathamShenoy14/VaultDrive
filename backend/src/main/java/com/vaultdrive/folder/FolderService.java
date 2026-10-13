@@ -10,6 +10,7 @@ import com.vaultdrive.folder.exception.InvalidFolderMoveException;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
 import com.vaultdrive.outbox.OutboxEvent;
 import com.vaultdrive.outbox.OutboxWriter;
+import com.vaultdrive.worker.FolderPurgeRunService;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +32,7 @@ public class FolderService {
     private final UserRepository userRepository;
     private final HierarchyCoordinator hierarchyCoordinator;
     private final OutboxWriter outboxWriter;
+    private final FolderPurgeRunService purgeRuns;
 
     public FolderService(
             FolderRepository folderRepository,
@@ -38,7 +40,8 @@ public class FolderService {
             FolderNameValidator folderNameValidator,
             UserRepository userRepository,
             HierarchyCoordinator hierarchyCoordinator,
-            OutboxWriter outboxWriter
+            OutboxWriter outboxWriter,
+            FolderPurgeRunService purgeRuns
     ) {
         this.folderRepository = folderRepository;
         this.folderAccessValidator = folderAccessValidator;
@@ -46,6 +49,7 @@ public class FolderService {
         this.userRepository = userRepository;
         this.hierarchyCoordinator = hierarchyCoordinator;
         this.outboxWriter = outboxWriter;
+        this.purgeRuns = purgeRuns;
     }
 
     @Transactional
@@ -420,11 +424,12 @@ public class FolderService {
         );
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public void requestPermanentDeletion(
             UUID ownerId,
             UUID folderId
     ) {
+        purgeRuns.boundTransaction();
         lockFolderNamespace(ownerId);
 
         Folder folder = folderRepository
@@ -457,9 +462,11 @@ public class FolderService {
 
         folder.requestPermanentDeletion();
         folderRepository.flush();
-        outboxWriter.append(OutboxEvent.folderPurgeRequested(
+        OutboxEvent event = OutboxEvent.folderPurgeRequested(
                 ownerId, folderId, folder.getPurgeRequestedAt()
-        ));
+        );
+        outboxWriter.append(event);
+        purgeRuns.create(event);
     }
 
     private void lockFolderNamespace(UUID ownerId) {

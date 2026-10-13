@@ -136,11 +136,12 @@ enforce conditional/version-specific deletion. Execution results belong in task 
   explicit recovery of matching historical SUCCEEDED file jobs.
 - [x] Slice 3: V18 bounded CONTINUE/checkpoint accounting; PostgreSQL migration,
   fencing/exhaustion, worker capacity/cancellation/shutdown and Garage regressions verified.
-- [ ] Slices 4–6: durable paged discovery, folder byte
-  execution and bottom-up removal.
+- [x] Slice 4: V19 durable paged discovery, atomic fenced checkpoints, sealed
+  membership and standalone-finalization coordination.
+- [ ] Slices 5–6: folder byte execution and bottom-up removal.
 
-See [the approved folder purge slices](folder-purge-design.md). No folder handler,
-manifest or scheduled finalization recovery exists yet. CONTINUE and its required
+See [the approved folder purge slices](folder-purge-design.md). No folder handler
+or scheduled finalization recovery exists yet. Slice 4 manifests are implemented. CONTINUE and its required
 PostgreSQL/Garage verification are complete; live broker tests remained environment-gated.
 
 ## Phase 3 — Refine concurrency without weakening correctness

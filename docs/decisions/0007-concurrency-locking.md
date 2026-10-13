@@ -109,3 +109,27 @@ failure. No lock spans external I/O or handler dispatch. New PostgreSQL tests
 cover continuation lock-wait expiry, stale checkpoints and atomic fixture rollback.
 These passed against real PostgreSQL; executed totals and verification limits are
 recorded in [the Slice 3 record](../folder-purge-design.md#slice-3-continuation-foundation).
+
+## Phase 2D.2 Slice 4 discovery and sealed participation
+
+Folder request acceptance additionally persists a small retained run with intent
+and outbox. Request overlap checks and discovery transactions have ten-second
+transaction, five-second statement and two-second lock-wait limits; timeout rolls
+back acceptance or the current page. The stable advisory key is unchanged.
+
+Discovery acquires **exclusive owner hierarchy -> fresh root/folder reads ->
+run/frontier progress -> job checkpoint lock/fence**. It enumerates one UUID page
+at a time and never acquires hierarchy/resources after the job lock. Membership,
+cursors, scan completion and seal commit with the checkpoint CAS. The checkpoint
+also verifies authoritative job type/aggregate identity. Current resource reads
+are scalar queries rather than cached entities. No external I/O occurs.
+
+Standalone finalization retains shared hierarchy -> fresh file -> work -> job.
+A pending ancestor permits removal only with matching sealed run and exact
+standalone file membership; unsealed/legacy/mismatched state defers. Exclusive
+page/seal coordination serializes this check against discovery. Accepted root
+intent preserves all existing move/restore/upload/nested-purge barriers. Tests
+cover bounded restart, barriers, both acceptance/finalization winner orders,
+discovery/finalization overlap, cancellation and job-lock-wait expiry rollback.
+Corrupt recorded parent edges and cycles fail closed; there is no recursive Java
+walk or performance claim. Folder byte execution/removal remains future work.

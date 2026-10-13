@@ -197,3 +197,25 @@ per invocation. Load/fairness and actual process-kill behavior remain unmeasured
 Deterministic PostgreSQL checkpoint/accounting tests, worker cancellation/shutdown
 tests and Garage regressions passed. The full safely runnable suite passed with
 seven environment-gated RabbitMQ skips; see [the Slice 3 verification record](folder-purge-design.md#slice-3-continuation-foundation).
+
+## Durable discovery is a checkpointed membership proof
+
+Freezing structure at root intent makes indexed immediate-child/file keyset pages
+stable without holding one transaction for the whole tree. A retained frontier
+stores both cursors and completion flags. UUID ordering avoids OFFSET drift, and
+a full page needs a later exhaustion scan. Persisting membership and its cursor
+with the V18 checkpoint means a stale claim or duplicate revision rolls back all
+three; a crash after commit resumes instead of losing or duplicating members.
+
+A manifest captures observed lifecycle, not writer quiescence. All upload statuses
+and unknown legacy bindings belong in membership even when they cannot be purged.
+Separately trashed folders also belong to the structural subtree. Seal only after
+every frontier is exhausted and parent/owner integrity is verified; repeated edges
+signal corruption/cycles rather than productive traversal.
+
+Standalone byte deletion can overlap discovery, but metadata finalization must
+retain an accepted file until sealed membership proves it was enumerated. Exclusive
+hierarchy discovery and shared finalization preserve both winner orders. Keeping
+this explicit adapter unregistered avoids claiming complete folder execution before
+byte deletion and bottom-up removal exist. Database deadlines bound scans/locks;
+very large seal checks may still time out safely and need measured tuning.

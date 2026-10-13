@@ -196,9 +196,10 @@ public class FilePurgeProgressService {
         List<?> rows = entityManager.createNativeQuery("SELECT folder_id FROM files WHERE id = :file")
                 .setParameter("file", target.file()).getResultList();
         UUID folder = (UUID) rows.getFirst();
-        // Until manifests exist and can prove discovery sealed, every pending ancestor defers removal.
-        // The shared hierarchy lock makes this check atomic with concurrent folder purge requests.
-        if (folder != null && folders.hasPendingPurgeInAncestry(target.owner(), folder)) { return false; }
+        // Exclusive discovery versus shared finalization makes seal/membership validation atomic.
+        // Legacy/unsealed/mismatched pending ancestors still defer; byte deletion is unchanged.
+        if (folder != null && folders.hasPendingPurgeInAncestry(target.owner(), folder)
+                && !representedInSealedDiscovery(target, folder)) { return false; }
         int deleted = entityManager.createNativeQuery("DELETE FROM files f USING file_purge_work w WHERE "
                 + FILE_MATCH + " AND w.file_id = :file AND w.bytes_deleted_at IS NOT NULL")
                 .setParameter("file", target.file()).executeUpdate();
@@ -208,6 +209,33 @@ public class FilePurgeProgressService {
                 WHERE file_id = :file AND bytes_deleted_at IS NOT NULL AND metadata_finalized_at IS NULL
                 """).setParameter("file", target.file()).executeUpdate();
         return true;
+    }
+
+    private boolean representedInSealedDiscovery(Target target, UUID folder) {
+        return (Boolean) entityManager.createNativeQuery("""
+                WITH RECURSIVE ancestors AS (
+                    SELECT id, parent_folder_id, purge_requested_at FROM folders
+                    WHERE id = :folder AND owner_id = :owner
+                    UNION
+                    SELECT f.id, f.parent_folder_id, f.purge_requested_at FROM folders f
+                    JOIN ancestors a ON f.id = a.parent_folder_id WHERE f.owner_id = :owner
+                )
+                SELECT NOT EXISTS (SELECT 1 FROM ancestors a WHERE a.purge_requested_at IS NOT NULL
+                    AND NOT EXISTS (SELECT 1 FROM folder_purge_runs r
+                        JOIN folder_purge_files m ON m.event_id = r.event_id
+                        JOIN file_purge_work w ON w.file_id = m.file_id
+                        WHERE r.root_folder_id = a.id AND r.owner_id = :owner
+                            AND r.requested_at = a.purge_requested_at AND r.phase = 'DELETE_FILES'
+                            AND r.discovery_sealed_at IS NOT NULL AND m.file_id = :file
+                            AND m.standalone_event_id = :event AND m.owner_id = w.owner_id
+                            AND m.folder_id = w.folder_id AND m.storage_key = w.storage_key
+                            AND m.file_version = w.file_version AND m.file_status = w.file_status
+                            AND m.file_created_at = w.file_created_at AND m.file_updated_at = w.file_updated_at
+                            AND m.deleted_at = w.deleted_at AND m.purge_requested_at = w.purge_requested_at
+                            AND m.storage_namespace = w.storage_namespace AND m.endpoint = w.endpoint
+                            AND m.region = w.region AND m.bucket = w.bucket))
+                """).setParameter("folder", folder).setParameter("owner", target.owner())
+                .setParameter("file", target.file()).setParameter("event", target.event()).getSingleResult();
     }
 
     private void fence(Target target, ClaimedJob claim) {

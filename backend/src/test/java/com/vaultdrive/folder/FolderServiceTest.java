@@ -6,6 +6,7 @@ import com.vaultdrive.folder.exception.InvalidFolderNameException;
 import com.vaultdrive.folder.exception.InvalidFolderMoveException;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
 import com.vaultdrive.outbox.OutboxWriter;
+import com.vaultdrive.worker.FolderPurgeRunService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -52,6 +53,8 @@ class FolderServiceTest {
    @Mock
    private OutboxWriter outboxWriter;
 
+   @Mock private FolderPurgeRunService purgeRuns;
+
    private FolderService folderService;
    private FolderNameValidator folderNameValidator;
    private FolderAccessValidator folderAccessValidator;
@@ -68,7 +71,8 @@ class FolderServiceTest {
             folderNameValidator,
             userRepository,
             hierarchyCoordinator,
-            outboxWriter
+            outboxWriter,
+            purgeRuns
         );
 
         lenient()

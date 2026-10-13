@@ -76,7 +76,7 @@ The file endpoint accepts only an owned, trashed `READY` file whose purge has no
 
 A pending-purge folder makes every descendant ineligible for restore, move, upload reservation/finalization, file purge request, or other metadata mutation. Folder restore rejects its own pending purge with `404 Not Found` after the exclusive owner hierarchy lock and fresh pessimistic Trash-row read, before any mutation or root fallback. Folder and file restore explicitly check pending-purge ancestry before ordinary inaccessible-parent root fallback. V11's `chk_folders_purge_requires_deleted` remains the final database guard against restoring pending-purge metadata.
 
-Accepted file and folder requests append a version-1 purge-intent event to `outbox_events` in the same JPA transaction through a mandatory-transaction writer. Business state and event commit or roll back together, including after flush. Ownership/eligibility rejection and repeated requests append no event. A folder request emits one root intent, not a subtree event list. Phase 2A supplies durable jobs, Phase 2B ingestion and Phase 2C bounded scheduling/renewal. Phase 2D.1 adds immutable event-ID targets and a real file byte-purge handler under the accepted trusted-writer assumption. Phase 2D.2 Slice 2 adds shared byte receipts and conservative standalone metadata finalization. Legacy unknown bindings fail closed. Folder purge, missing-job backfill and operational metrics remain planned. See [file purge](file-purge.md).
+Accepted file and folder requests append a version-1 purge-intent event to `outbox_events` in the same JPA transaction through a mandatory-transaction writer. Business state and event commit or roll back together, including after flush. Ownership/eligibility rejection and repeated requests append no event. A folder request emits one root intent, not a subtree event list. Phase 2A supplies durable jobs, Phase 2B ingestion and Phase 2C bounded scheduling/renewal. Phase 2D.1 adds immutable event-ID targets and a real file byte-purge handler under the accepted trusted-writer assumption. Phase 2D.2 Slice 2 adds shared byte receipts and conservative standalone metadata finalization. Legacy unknown bindings fail closed. Folder byte execution/removal, missing-job backfill and operational metrics remain planned. See [file purge](file-purge.md).
 
 ### Asynchronous processing — Partially implemented
 
@@ -92,7 +92,7 @@ Phase 2C adds a worker foundation with two queue-free fixed-delay control loops,
 
 Phase 2D.1 adds V16 retained `file_storage_objects` key allocations and immutable `file_purge_targets` indexed by the existing event/job UUID. New uploads reserve their namespace/endpoint/region/bucket at metadata creation and consume one write invocation before Garage I/O. Legacy allocations have no inferred binding. New eligible purge requests copy the upload binding/key and expected pending-file version/timestamp atomically with intent and the unchanged v1 event. The handler validates owned pending READY state in a short hierarchy/file-row transaction, checks the live claim, then deletes only the persisted bucket/key through a matching configured storage client. Timeouts are bounded, SDK retries disabled, object absence is success, and uncertain failures use durable retries. Garage does not enforce nonreplacement: independent overwrites, alias/endpoint reassignment and late external effects remain accepted trusted-writer/operator risks. [File purge and recovery](file-purge.md) states the contract and limitations.
 
-Phase 2D.2 Slice 2 adds V17 shared `file_purge_work`, unique by file ID, with immutable storage/lifecycle identity and separate monotonic byte-deletion and metadata-finalization receipts. Resource transactions lock hierarchy → fresh file → work → job; PostgreSQL-clock token/lease fencing rolls back stale writes. Byte deletion remains outside transactions. Metadata removal and its receipt commit atomically only with a byte receipt and matching owner/folder/key/version/READY/lifecycle timestamps. Every pending folder ancestor defers removal to preserve future discovery. Retries skip DELETE when byte proof exists; missing metadata alone is never success. Explicit bounded historical-success recovery imports matching V16 outcomes without Garage calls or job resets. SUCCEEDED remains byte-only. Allocations, targets, work and job identities survive removal. Folder manifests/execution and automated finalization recovery remain planned.
+Phase 2D.2 Slice 2 adds V17 shared `file_purge_work`, unique by file ID, with immutable storage/lifecycle identity and separate monotonic byte-deletion and metadata-finalization receipts. Resource transactions lock hierarchy → fresh file → work → job; PostgreSQL-clock token/lease fencing rolls back stale writes. Byte deletion remains outside transactions. Metadata removal and its receipt commit atomically only with a byte receipt and matching owner/folder/key/version/READY/lifecycle timestamps. Pending folder ancestors defer removal until Slice 4 sealed membership exactly matches the standalone work. Retries skip DELETE when byte proof exists; missing metadata alone is never success. Explicit bounded historical-success recovery imports matching V16 outcomes without Garage calls or job resets. SUCCEEDED remains byte-only. Allocations, targets, work and job identities survive removal. Slice 4 adds sealed folder manifests; folder byte execution and automated finalization recovery remain planned.
 
 Phase 2D.2 Slice 3 implements V18 continuation accounting and a MANDATORY-transaction
 checkpoint CAS, acquired last after resource/work locks. Useful business work and
@@ -105,6 +105,17 @@ retain SUCCESS/RETRY. No folder handler or default enablement is added. Real
 PostgreSQL migration/fencing tests, worker tests and Garage regressions passed;
 see [the Slice 3 verification record](folder-purge-design.md#slice-3-continuation-foundation)
 for executed totals and the environment-gated RabbitMQ skips.
+
+Phase 2D.2 Slice 4 adds V19 retained folder runs, per-folder UUID keyset frontiers
+and immutable file membership snapshots. Request intent/outbox/run commit atomically;
+legacy initialization requires the original outbox/root intent match. One page of
+1-100 members commits with its V18 checkpoint under exclusive hierarchy coordination
+and the final job fence. All scans must complete before sealing DISCOVER -> DELETE_FILES.
+Active/trashed descendants and every upload status are represented without recursive
+Java traversal. V17 standalone finalization requires exact sealed membership beneath
+pending ancestors. The explicit discovery adapter returns CONTINUE; it is not registered
+with workers. Folder-led byte deletion/removal and automatic recovery remain planned.
+See [Slice 4 schema, bounds and recovery](folder-purge-design.md#slice-4-durable-paginated-discovery).
 
 ## Current consistency and concurrency model
 
@@ -146,9 +157,18 @@ folder-purge/finalization winner orders. Real PostgreSQL and disposable Garage
 fixtures establish durable state and object outcomes. See executed results in
 [the folder purge slice record](folder-purge-design.md).
 
+Slice 4 PostgreSQL discovery tests cover a 186-folder/392-file manifest with
+60 levels, multiple page/reclaim cycles beyond ten healthy continuations, all
+upload statuses, separately trashed resources, atomic request/run rollback,
+legacy-event validation, stale/replayed/expired checkpoints, corruption/cycles,
+complete-only sealing and both standalone-finalization winner orders. Barrier,
+cancellation/runtime and final job-lock-wait expiry tests assert durable state.
+These new fixtures invoke no Garage I/O. See the executed results in
+[the Slice 4 record](folder-purge-design.md#slice-4-durable-paginated-discovery).
+
 ## Known gaps and pending decisions
 
-- Remaining ADR-0008 async implementation: folder purge, automated finalization recovery, missed-job/historical-intent backfill, outbox/job/quarantine retention, replay/reset tooling and operational tuning. File byte purge and conservative standalone metadata finalization are implemented under the accepted trusted-writer assumption; production load, real process-kill/restart and multi-node failure experiments remain unverified.
+- Remaining ADR-0008 async implementation: folder byte execution/removal, automated finalization recovery, missed-job/historical-intent backfill, outbox/job/quarantine retention, replay/reset tooling and operational tuning. File byte purge and conservative standalone metadata finalization are implemented under the accepted trusted-writer assumption; production load, real process-kill/restart and multi-node failure experiments remain unverified.
 - Remaining file-side coordination: reconciliation and future direct-upload writer fencing.
 - Reconciliation for stale `UPLOADING`, `FAILED`, orphaned objects, and uncertain finalization.
 - Folder purge workers, discovery-safe inherited-file/subtree finalization and audited legacy storage-identity recovery.

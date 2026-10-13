@@ -151,7 +151,10 @@ public class BackgroundJobService {
                     updated_at = clock_timestamp()
                 WHERE id = :id AND status = 'RUNNING' AND claim_token = :token
                     AND claim_expires_at > clock_timestamp() AND progress_version = :expected
+                    AND job_type = :type AND aggregate_type = :aggregateType AND aggregate_id = :aggregateId
                 """).setParameter("id", claim.id()).setParameter("token", claim.claimToken())
+                .setParameter("type", claim.jobType().name()).setParameter("aggregateType", claim.aggregateType())
+                .setParameter("aggregateId", claim.aggregateId())
                 .setParameter("expected", expectedVersion).executeUpdate();
         if (changed != 1) {
             throw new IllegalStateException("Checkpoint is stale or claim is not live");

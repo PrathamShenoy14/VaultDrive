@@ -4,7 +4,7 @@ The opt-in worker schedules existing PostgreSQL jobs and dispatches registered
 `JobHandler` implementations. Phase 2D.1 now registers a real
 [file byte-purge handler](file-purge.md), with immutable targets and the accepted
 trusted-writer storage contract. Explicit enablement can execute eligible file jobs.
-Slice 2 adds conservative standalone finalization. Folder purge, upload reconciliation and missed-notification
+Slice 2 adds conservative standalone finalization. Folder byte execution/removal, upload reconciliation and missed-notification
 backfill remain planned. Scheduling and consumers stay disabled by default.
 
 ## Configuration and capacity
@@ -194,3 +194,23 @@ Spring contexts do not exhaust the development PostgreSQL connection limit.
 Production pool configuration and VM infrastructure are unchanged. Test results
 belong in task reports. No real process-kill, production load, broker
 failover or physical purge validation is claimed by this foundation.
+
+## Slice 4 explicit folder discovery
+
+`FolderPurgeDiscovery` is an explicit adapter, not a registered `JobHandler`.
+Folder jobs therefore remain untouched by autonomous scheduling, even with worker
+enablement. Slice 5 will register a handler that can safely continue beyond discovery.
+The adapter requires no enclosing transaction and a live context with at least ten
+seconds remaining runtime. It executes one page of 1-100 members, checking context
+activity within the transaction and before/after it, then returns CONTINUE after
+an atomic V18 checkpoint. Callers record the ordinary fenced continuation outcome.
+The sealing page also returns CONTINUE: DELETE_FILES is durable but the folder
+purge is not SUCCEEDED. Calling discovery again on a sealed run advances no revision
+and is rejected by the adapter; it must not spend budget looping at that boundary.
+
+Each page uses ten-second transaction, five-second statement and two-second
+lock-wait bounds. Cancellation rolls back when observed before checkpoint; if a
+legitimate page already committed, cancellation suppresses the late result and
+lease abandonment preserves its progress for recovery. There is no cumulative
+successful-traversal failure charge, new RabbitMQ topology or autonomous enablement.
+See [folder discovery and recovery](folder-purge-design.md#slice-4-durable-paginated-discovery).

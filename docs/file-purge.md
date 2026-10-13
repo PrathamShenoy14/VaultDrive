@@ -113,10 +113,12 @@ purge timestamps, and a still-matching V16 target/allocation. Any mismatch retai
 metadata; byte success remains independently meaningful.
 
 An original standalone file intent can delete bytes beneath pending folder
-ancestry, but metadata removal is conservatively deferred beneath **every** pending
-folder ancestor. The shared hierarchy lock makes this check atomic with exclusive
-folder purge requests. No manifest or discovery-complete exception exists yet;
-retained file rows preserve future enumeration. Folder byte execution and
+ancestry, but metadata removal is deferred beneath each pending folder ancestor until
+its Slice 4 run is sealed and exact file membership matches the standalone work.
+The shared hierarchy lock makes this check atomic with exclusive folder purge
+requests. Unknown/unsealed runs or missing/mismatched membership still defer removal.
+Retained file rows preserve enumeration; sealed manifests survive standalone removal.
+Folder byte execution and
 never-written inherited-file proofs remain later slices. UPLOADING/FAILED writers
 and unknown legacy bindings are not newly executable.
 
@@ -209,3 +211,21 @@ Remove-Item Env:RABBITMQ_TEST_VHOST -ErrorAction SilentlyContinue
 Live Garage test mutation requires explicit authorization. Results and any excluded
 broker checks belong in task reports. No production load or real process-kill proof
 is claimed.
+
+## Slice 4 discovery participation and recovery
+
+V19 retains folder run identity/frontiers and file membership separately from V17
+work. Discovery creates no inherited file-purge work and performs no Garage I/O.
+Standalone byte receipts remain valid during traversal. Finalization acquires the
+shared hierarchy lock, then requires a sealed run for every pending ancestor,
+matching root request timestamp and exact manifest event/owner/folder/key/version/
+READY/lifecycle/binding snapshot. Missing or corrupt participation fails closed.
+Historical-success recovery uses this same finalizer without resetting a job.
+A finalizer that wins before root acceptance is outside accepted membership;
+acceptance that wins preserves the row until discovery has sealed. This check
+and metadata removal occur under the same hierarchy coordination.
+
+Resume folder discovery from its committed cursors, not by recreating events or
+resetting jobs. Discovery stops at DELETE_FILES until Slice 5. Folder-led byte
+execution and bottom-up removal remain planned. See [the discovery recovery
+contract](folder-purge-design.md#slice-4-durable-paginated-discovery).

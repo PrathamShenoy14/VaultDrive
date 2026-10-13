@@ -251,3 +251,27 @@ Garage regression tests passed; [the Slice 3 record](../folder-purge-design.md#s
 records executed totals and seven environment-gated RabbitMQ skips. No real
 process-kill experiment is claimed. File handlers, Garage deletion and
 V17 finalization retain their behavior and disabled worker/consumer defaults.
+
+## Phase 2D.2 Slice 4 durable subtree discovery
+
+V19 retains a run keyed by the unchanged root event/job UUID and unique root,
+with owner/request timestamp and DISCOVER -> DELETE_FILES seal. New acceptance
+atomically commits root intent, v1 outbox and run. Legacy initialization validates
+original committed outbox identity and the fresh root intent; missing/mismatched
+or pre-outbox events are not inferred. Consumer ingestion and topology are unchanged.
+
+Retained folder frontier and file membership tables use per-run UUID identities,
+keyset cursors, complete flags and immutable observation snapshots, with no
+cascading resource/outbox/job references. All upload statuses and separately
+trashed descendants are discovered. One bounded page and its final V18 checkpoint
+commit together; stale claims/revisions/leases or identity mismatch roll back all
+work. Complete enumeration and integrity checks precede the durable phase seal.
+Healthy CONTINUE never spends failure budget; committed progress after crash
+remains subject to the existing one-time abandonment charge.
+
+An explicit adapter returns CONTINUE for pages, including sealing, and stops at
+the next phase. It is deliberately not registered with workers until Slice 5
+implements folder byte execution. No successful folder purge is reported here.
+V17 standalone metadata removal beneath pending roots now requires exact sealed
+manifest participation. Root barrier, trusted-writer/storage safeguards and disabled
+defaults are preserved. See [Slice 4](../folder-purge-design.md#slice-4-durable-paginated-discovery).
