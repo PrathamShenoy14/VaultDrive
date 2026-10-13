@@ -462,6 +462,22 @@ class FolderRepositoryTest {
     }
 
     @Test
+    void shouldRejectRestoringPendingPurgeFolderAtDatabaseLevel() {
+        User owner = createUser();
+        Folder folder = new Folder(owner.getId(), null, "Documents");
+        folder.softDelete();
+        folder.requestPermanentDeletion();
+        folder = folderRepository.saveAndFlush(folder);
+
+        // Bypass service eligibility to verify V11 remains the final guard.
+        folder.restore(null, "Documents");
+
+        assertThatThrownBy(folderRepository::flush)
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasStackTraceContaining("chk_folders_purge_requires_deleted");
+    }
+
+    @Test
     void shouldRejectPurgeRequestWithoutSoftDeletion() {
         User owner = createUser();
         Folder folder = folderRepository.saveAndFlush(

@@ -122,3 +122,24 @@ makes it address the same old object; job token/expiry fencing rejects its late
 completion. An out-of-band overwrite or namespace/alias reassignment violates the
 accepted contract and can destroy replacement bytes. Idempotence and lease fencing
 are distinct from storage identity enforcement. See [file purge](file-purge.md).
+
+## Restore eligibility includes the target's own purge state
+
+Checking pending-purge ancestors alone misses a directly purged folder, including
+a root folder with no ancestry. V11 correctly rejects clearing `deleted_at` while
+`purge_requested_at` remains set, but that constraint failure can surface as HTTP
+500. Folder restore now filters the freshly locked owned Trash row for a null
+purge timestamp and uses the existing not-found exception before fallback or
+mutation. The exclusive owner hierarchy lock followed by the pessimistic row
+lock still serializes restore and purge; tests cover both commit winner orders,
+direct service rejection with unchanged state, and a service-bypassing invalid restore
+that the database rejects. The application guard supplies API semantics while
+the unchanged constraint supplies the final invariant. Folder execution and
+metadata finalization remain planned.
+
+The direct regression is PostgreSQL service coverage plus the existing controller
+not-found mapping coverage. An exploratory real-service MockMvc request with the
+default Open EntityManager in View setting failed earlier in hierarchy coordination
+(`Hierarchy coordination requires an active transaction`), before eligibility was
+checked. That transaction-joining issue remains outside this slice; these tests
+do not establish an end-to-end HTTP result under that configuration.

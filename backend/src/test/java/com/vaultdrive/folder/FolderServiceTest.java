@@ -1161,6 +1161,41 @@ class FolderServiceTest {
     }
 
     @Test
+    void shouldRejectRestoreOfFolderWithOwnPendingPurgeBeforeRootFallback() {
+        UUID ownerId = UUID.randomUUID();
+        UUID parentId = UUID.randomUUID();
+        Folder folder = new Folder(ownerId, parentId, "Documents");
+        folder.softDelete();
+        folder.requestPermanentDeletion();
+        Instant deletedAt = folder.getDeletedAt();
+        Instant purgeRequestedAt = folder.getPurgeRequestedAt();
+        Instant updatedAt = folder.getUpdatedAt();
+
+        when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNotNull(
+                folder.getId(), ownerId
+        )).thenReturn(Optional.of(folder));
+
+        assertThatThrownBy(() ->
+                folderService.restoreFolder(ownerId, folder.getId())
+        ).isInstanceOf(FolderNotFoundException.class)
+                .hasMessage("Deleted folder not found");
+
+        InOrder order = inOrder(hierarchyCoordinator, userRepository, folderRepository);
+        order.verify(hierarchyCoordinator).acquireExclusive(ownerId);
+        order.verify(userRepository).existsById(ownerId);
+        order.verify(folderRepository).findByIdAndOwnerIdAndDeletedAtIsNotNull(
+                folder.getId(), ownerId
+        );
+        verifyNoMoreInteractions(folderRepository);
+        verifyNoInteractions(outboxWriter);
+        assertThat(folder.getDeletedAt()).isEqualTo(deletedAt);
+        assertThat(folder.getPurgeRequestedAt()).isEqualTo(purgeRequestedAt);
+        assertThat(folder.getUpdatedAt()).isEqualTo(updatedAt);
+        assertThat(folder.getParentFolderId()).isEqualTo(parentId);
+        assertThat(folder.getName()).isEqualTo("Documents");
+    }
+
+    @Test
     void shouldRestoreDeletedRootFolder() {
         UUID ownerId = UUID.randomUUID();
 

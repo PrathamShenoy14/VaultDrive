@@ -52,6 +52,90 @@ class FolderPurgeConcurrencyIntegrationTest {
     private OutboxEventRepository outboxEventRepository;
 
     @Test
+    void ownPendingPurgeRestoreRejectsAndPreservesState() throws Exception {
+        Fixture fixture = createFixture("direct-restore", false, false);
+        try {
+            folderService.requestPermanentDeletion(fixture.ownerId(), fixture.parentFolderId());
+            Folder before = requireFolder(fixture.parentFolderId());
+
+            assertThatThrownBy(() -> folderService.restoreFolder(
+                    fixture.ownerId(), fixture.parentFolderId()
+            )).isInstanceOf(FolderNotFoundException.class)
+                    .hasMessage("Deleted folder not found");
+
+            Folder after = requireFolder(fixture.parentFolderId());
+            assertThat(after.getDeletedAt()).isEqualTo(before.getDeletedAt());
+            assertThat(after.getPurgeRequestedAt()).isEqualTo(before.getPurgeRequestedAt());
+            assertThat(after.getUpdatedAt()).isEqualTo(before.getUpdatedAt());
+            assertThat(after.getParentFolderId()).isNull();
+            assertThat(after.getName()).isEqualTo(before.getName());
+            assertThat(outboxEventRepository.findByAggregateTypeAndAggregateId(
+                    "FOLDER", fixture.parentFolderId()
+            )).hasSize(1);
+        } finally {
+            deleteFixture(fixture);
+        }
+    }
+
+    @Test
+    void folderPurgeWinsAndRejectsConcurrentRestoreOfSameFolder() throws Exception {
+        Fixture fixture = createFixture("same-folder-purge-wins", false, false);
+        assertRejectedAfterConcurrentParentPurge(
+                fixture,
+                () -> folderService.restoreFolder(fixture.ownerId(), fixture.parentFolderId()),
+                () -> {
+                    Folder folder = requireFolder(fixture.parentFolderId());
+                    assertThat(folder.getDeletedAt()).isNotNull();
+                    assertThat(folder.getPurgeRequestedAt()).isNotNull();
+                    assertThat(folder.getParentFolderId()).isNull();
+                    assertThat(folder.getName()).isEqualTo("Parent");
+                }
+        );
+    }
+
+    @Test
+    void folderRestoreWinsAndRejectsConcurrentPurgeOfSameFolder() throws Exception {
+        Fixture fixture = createFixture("same-folder-restore-wins", false, false);
+        CountDownLatch restoreFlushed = new CountDownLatch(1);
+        CountDownLatch releaseRestore = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<?> restore = executor.submit(() -> inTransaction(() -> {
+                folderService.restoreFolder(fixture.ownerId(), fixture.parentFolderId());
+                restoreFlushed.countDown();
+                await(releaseRestore);
+            }));
+            assertThat(restoreFlushed.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<?> purge = executor.submit(() -> folderService.requestPermanentDeletion(
+                    fixture.ownerId(), fixture.parentFolderId()
+            ));
+            assertThatThrownBy(() -> purge.get(500, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(java.util.concurrent.TimeoutException.class);
+
+            releaseRestore.countDown();
+            restore.get(5, TimeUnit.SECONDS);
+            assertThatThrownBy(() -> purge.get(5, TimeUnit.SECONDS))
+                    .satisfies(throwable -> assertThat(rootCause(throwable))
+                            .isInstanceOf(FolderNotFoundException.class));
+
+            Folder folder = requireFolder(fixture.parentFolderId());
+            assertThat(folder.getDeletedAt()).isNull();
+            assertThat(folder.getPurgeRequestedAt()).isNull();
+            assertThat(folder.getParentFolderId()).isNull();
+            assertThat(folder.getName()).isEqualTo("Parent");
+            assertThat(outboxEventRepository.findByAggregateTypeAndAggregateId(
+                    "FOLDER", fixture.parentFolderId()
+            )).isEmpty();
+        } finally {
+            releaseRestore.countDown();
+            executor.shutdownNow();
+            deleteFixture(fixture);
+        }
+    }
+
+    @Test
     void folderPurgeRequestBlocksThenRejectsChildRestore()
             throws Exception {
         Fixture fixture = createFixture("child-restore", true, false);

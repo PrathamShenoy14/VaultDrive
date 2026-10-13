@@ -367,11 +367,14 @@ public class FolderService {
 
         lockFolderNamespace(ownerId);
         
-        // Only explicitly deleted folders can be restored.
+        // Only explicitly deleted folders without pending purge can be restored.
         Folder folder = folderRepository
                 .findByIdAndOwnerIdAndDeletedAtIsNotNull(
                         folderId,
                         ownerId
+                )
+                .filter(candidate ->
+                        candidate.getPurgeRequestedAt() == null
                 )
                 .orElseThrow(() ->
                         new FolderNotFoundException("Deleted folder not found")
