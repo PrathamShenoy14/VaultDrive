@@ -27,7 +27,13 @@ public class BackgroundJob {
     @Column(name = "status", nullable = false, length = 32)
     private JobStatus status;
     @Column(name = "attempt_count", nullable = false)
-    private int attemptCount;
+    private long attemptCount;
+    @Column(name = "failure_count", nullable = false)
+    private int failureCount;
+    @Column(name = "progress_version", nullable = false)
+    private long progressVersion;
+    @Column(name = "claim_progress_version", nullable = false)
+    private long claimProgressVersion;
     @Column(name = "max_attempts", nullable = false, updatable = false)
     private int maxAttempts;
     @Column(name = "next_attempt_at", nullable = false)
@@ -59,7 +65,13 @@ public class BackgroundJob {
 
     public JobStatus getStatus() { return status; }
 
-    public int getAttemptCount() { return attemptCount; }
+    public long getAttemptCount() { return attemptCount; }
+
+    public int getFailureCount() { return failureCount; }
+
+    public long getProgressVersion() { return progressVersion; }
+
+    public long getClaimProgressVersion() { return claimProgressVersion; }
 
     public int getMaxAttempts() { return maxAttempts; }
 
@@ -80,16 +92,19 @@ public class BackgroundJob {
     public Instant getCompletedAt() { return completedAt; }
 
     void claim(Instant now, Duration lease) {
-        if (status == JobStatus.RUNNING) {
-            lastFailureCode = "LEASE_EXPIRED";
-        }
         status = JobStatus.RUNNING;
         claimToken = UUID.randomUUID();
         claimExpiresAt = now.plus(lease);
         attemptCount++;
+        claimProgressVersion = progressVersion;
         lastAttemptAt = now;
         updatedAt = now;
-        nextAttemptAt = claimExpiresAt.plus(BackgroundJobService.backoff(attemptCount));
+        nextAttemptAt = claimExpiresAt.plus(BackgroundJobService.backoff(failureCount + 1));
+    }
+
+    void abandon() {
+        failureCount++;
+        lastFailureCode = "LEASE_EXPIRED";
     }
 
     void exhaust(Instant now) {

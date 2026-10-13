@@ -175,6 +175,8 @@ public final class JobWorker implements AutoCloseable {
             try {
                 if (result == JobHandler.Result.SUCCEEDED) {
                     jobs.complete(task.context.claim());
+                } else if (result == JobHandler.Result.CONTINUE) {
+                    jobs.continueJob(task.context.claim());
                 } else {
                     jobs.retry(task.context.claim()); // Null is never implicit success.
                 }

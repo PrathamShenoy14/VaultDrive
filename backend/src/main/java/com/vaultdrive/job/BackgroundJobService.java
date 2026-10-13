@@ -16,6 +16,7 @@ import java.util.UUID;
 public class BackgroundJobService {
     public static final int MAX_ATTEMPTS = 10;
     public static final Duration LEASE = Duration.ofSeconds(30);
+    public static final Duration CONTINUATION_DELAY = Duration.ofSeconds(1);
     private static final int RECOVERY_SCAN_LIMIT = 20;
 
     private final EntityManager entityManager;
@@ -63,7 +64,10 @@ public class BackgroundJobService {
             }
             BackgroundJob job = (BackgroundJob) rows.getFirst();
             Instant now = databaseNow();
-            if (job.getAttemptCount() >= job.getMaxAttempts()) {
+            if (job.getStatus() == JobStatus.RUNNING) {
+                job.abandon();
+            }
+            if (job.getFailureCount() >= job.getMaxAttempts()) {
                 job.exhaust(now);
                 entityManager.flush();
                 continue;
@@ -95,7 +99,7 @@ public class BackgroundJobService {
                     AND claim_expires_at > clock_timestamp()
                 """).setParameter("id", claim.id()).setParameter("token", claim.claimToken())
                 .setParameter("expires", nextExpiration)
-                .setParameter("next", nextExpiration.plus(backoff(job.getAttemptCount())))
+                .setParameter("next", nextExpiration.plus(backoff(job.getFailureCount() + 1)))
                 .executeUpdate() == 1;
     }
 
@@ -123,17 +127,73 @@ public class BackgroundJobService {
             return false;
         }
         BackgroundJob job = owned.orElseThrow();
+        return recordFailure(claim, job, "WORK_FAILED");
+    }
+
+    /**
+     * Called LAST in the same transaction as a newly committed useful work unit
+     * (cursor/member/receipt/phase advancement), never for a heartbeat or replay.
+     * CAS makes duplicate checkpoint recording fail and roll back the work too.
+     * Acquire hierarchy/resource/progress locks before this job lock; acquire no
+     * resource locks afterward. The caller owns the meaning of its checkpoint.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void checkpoint(ClaimedJob claim, long expectedVersion) {
+        if (expectedVersion < 0 || expectedVersion == Long.MAX_VALUE) {
+            throw new IllegalArgumentException("Invalid checkpoint version");
+        }
+        entityManager.flush();
+        // Scalar lock avoids any job entity cached before the protected read.
+        entityManager.createNativeQuery("SELECT id FROM background_jobs WHERE id = :id FOR UPDATE")
+                .setParameter("id", claim.id()).getResultList();
+        int changed = entityManager.createNativeQuery("""
+                UPDATE background_jobs SET progress_version = progress_version + 1,
+                    updated_at = clock_timestamp()
+                WHERE id = :id AND status = 'RUNNING' AND claim_token = :token
+                    AND claim_expires_at > clock_timestamp() AND progress_version = :expected
+                """).setParameter("id", claim.id()).setParameter("token", claim.claimToken())
+                .setParameter("expected", expectedVersion).executeUpdate();
+        if (changed != 1) {
+            throw new IllegalStateException("Checkpoint is stale or claim is not live");
+        }
+    }
+
+    /** False means stale ownership or rejected no-progress continuation; do not retry again. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean continueJob(ClaimedJob claim) {
+        Optional<BackgroundJob> owned = ownedRow(claim);
+        if (owned.isEmpty()) { return false; }
+        BackgroundJob job = owned.orElseThrow();
+        if (job.getProgressVersion() <= job.getClaimProgressVersion()) {
+            recordFailure(claim, job, "NO_PROGRESS");
+            return false;
+        }
+        return entityManager.createNativeQuery("""
+                UPDATE background_jobs SET status = 'PENDING',
+                    next_attempt_at = clock_timestamp() + :delay * interval '1 millisecond',
+                    updated_at = clock_timestamp(), claim_token = NULL, claim_expires_at = NULL
+                WHERE id = :id AND status = 'RUNNING' AND claim_token = :token
+                    AND claim_expires_at > clock_timestamp()
+                    AND progress_version > claim_progress_version
+                """).setParameter("id", claim.id()).setParameter("token", claim.claimToken())
+                .setParameter("delay", CONTINUATION_DELAY.toMillis())
+                .executeUpdate() == 1;
+    }
+
+    private boolean recordFailure(ClaimedJob claim, BackgroundJob job, String code) {
         Instant now = databaseNow();
         return entityManager.createNativeQuery("""
                 UPDATE background_jobs
-                SET status = CASE WHEN attempt_count >= max_attempts THEN 'FAILED' ELSE 'PENDING' END,
-                    completed_at = CASE WHEN attempt_count >= max_attempts THEN clock_timestamp() ELSE NULL END,
+                SET status = CASE WHEN failure_count + 1 >= max_attempts THEN 'FAILED' ELSE 'PENDING' END,
+                    completed_at = CASE WHEN failure_count + 1 >= max_attempts THEN clock_timestamp() ELSE NULL END,
+                    failure_count = failure_count + 1,
                     updated_at = clock_timestamp(), next_attempt_at = :next,
-                    claim_token = NULL, claim_expires_at = NULL, last_failure_code = 'WORK_FAILED'
+                    claim_token = NULL, claim_expires_at = NULL, last_failure_code = :code
                 WHERE id = :id AND status = 'RUNNING' AND claim_token = :token
                     AND claim_expires_at > clock_timestamp()
                 """).setParameter("id", claim.id()).setParameter("token", claim.claimToken())
-                .setParameter("next", now.plus(backoff(job.getAttemptCount()))).executeUpdate() == 1;
+                .setParameter("code", code)
+                .setParameter("next", now.plus(backoff(job.getFailureCount() + 1))).executeUpdate() == 1;
     }
 
     private Optional<BackgroundJob> ownedRow(ClaimedJob claim) {

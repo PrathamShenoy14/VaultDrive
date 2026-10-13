@@ -200,3 +200,54 @@ identity. Each candidate has a separate transaction; blocked rows do not starve
 later pages. No scheduler, HTTP endpoint, folder manifest, CONTINUE semantics,
 topology/event changes or new enablement defaults are introduced.
 See [file purge recovery](../file-purge.md) and [the remaining folder slices](../folder-purge-design.md).
+
+## Phase 2D.2 Slice 3 bounded continuation
+
+This supersedes Phase 2A's ten-total-claims accounting for background jobs only.
+V18 retains `attempt_count` as monotonic BIGINT executions/claims, introduces
+`failure_count` bounded by the existing max ten, and introduces monotonic
+`progress_version` plus the per-claim `claim_progress_version` baseline. Failures
+and abandoned claims each charge once; healthy SUCCESS and CONTINUE do not.
+Failures never reset on useful progress. Backoff is one second, doubled by failure
+ordinal and capped at sixty; crash deadlines use the next failure ordinal.
+V14–V17, publisher retry policy and RabbitMQ contracts/topology are unchanged.
+
+The explicit CONTINUE result means successful incomplete bounded work. Accept it
+only when a useful business work transaction and a newer checkpoint committed
+together during this claim. The MANDATORY-transaction checkpoint is an increment
+of exactly one with expected-version CAS, final job lock, token and PostgreSQL-clock
+lease fencing. Its exception rolls back the business work. The handler owns actual
+cursor/receipt state and must never record heartbeats or replays as progress.
+The framework can enforce revisions/fences/transaction atomicity; business meaning
+requires the future handler's work schema and tests. Slice 3 adds no folder handler.
+
+A live job-only CONTINUE transition rechecks revision advancement and ownership,
+returns the same identity to PENDING with a one-second minimum delay, clears its
+claim and preserves counters/failure history. A no-progress CONTINUE records one
+NO_PROGRESS failure, using ordinary backoff/exhaustion. A stale/expired outcome
+changes nothing. Crash after checkpoint commit but before transition retains work,
+charges abandonment on recovery, and captures the retained revision as the new
+baseline; the next invocation must advance or SUCCESS, never reuse old evidence.
+
+The worker records CONTINUE only while locally active. Bounded polls, fixed pools
+and slots remain the admission path; continuation never recursively dispatches.
+Handlers check cancellation between units and yield before their runtime deadline
+using remaining runtime. Shutdown stops new claims, permits valid completion in
+the grace period, then cancels and abandons unfinished work. Useful continuations
+have no total execution cap; per-invocation runtime/capacity and no-progress failure
+bounds prevent empty unlimited yielding. Throughput/fairness tuning is unmeasured.
+
+Migration reconstructs failures from legacy claims, subtracting one for the
+unresolved RUNNING or successful SUCCEEDED execution. Existing terminal outcomes,
+tokens and retry dates remain unchanged. Counter/budget monotonicity has database
+guards. Stop old workers for this accounting migration; mixed old/new worker
+binaries are unsupported because old binaries still spend total claims.
+
+Deterministic tests add healthy work beyond ten invocations, pure/mixed exhaustion,
+checkpoint rollback/crash replay, stale/duplicate transitions, lock-wait lease expiry,
+legacy migration, competing schedulers, no progress, runtime cancellation and
+shutdown behavior. Real PostgreSQL migration/fencing, worker integration and
+Garage regression tests passed; [the Slice 3 record](../folder-purge-design.md#slice-3-continuation-foundation)
+records executed totals and seven environment-gated RabbitMQ skips. No real
+process-kill experiment is claimed. File handlers, Garage deletion and
+V17 finalization retain their behavior and disabled worker/consumer defaults.

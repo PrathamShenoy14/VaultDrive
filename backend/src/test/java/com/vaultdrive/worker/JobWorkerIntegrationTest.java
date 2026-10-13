@@ -9,6 +9,8 @@ import com.vaultdrive.job.JobType;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
@@ -71,18 +73,27 @@ class JobWorkerIntegrationTest {
         assertThat(load(id).getAttemptCount()).isEqualTo(1);
     }
 
-    @Test
-    void concurrentSchedulersClaimDistinctJobsAndReserveCapacityBeforeClaiming() throws Exception {
+    @ParameterizedTest
+    @EnumSource(value = JobHandler.Result.class, names = {"SUCCEEDED", "CONTINUE"})
+    void concurrentSchedulersClaimDistinctJobsAndReserveCapacityBeforeClaiming(JobHandler.Result result) throws Exception {
         job(); job(); UUID untouched = job();
         CountDownLatch handling = new CountDownLatch(2);
         CountDownLatch release = new CountDownLatch(1);
-        CountDownLatch completed = observeCompletion(2);
+        CountDownLatch completed = new CountDownLatch(2);
+        if (result == JobHandler.Result.SUCCEEDED) {
+            completed = observeCompletion(2);
+        } else {
+            CountDownLatch continued = completed;
+            doAnswer(call -> { Object outcome = call.callRealMethod(); afterCommit(continued); return outcome; })
+                    .when(jobs).continueJob(any());
+        }
         List<UUID> claimed = java.util.Collections.synchronizedList(new ArrayList<>());
         var handler = handler(context -> {
+            if (result == JobHandler.Result.CONTINUE) { checkpoint(context); }
             claimed.add(context.claim().id());
             handling.countDown();
             await(release);
-            return JobHandler.Result.SUCCEEDED;
+            return result;
         });
         var one = worker(1, handler);
         var two = worker(1, handler);
@@ -100,7 +111,11 @@ class JobWorkerIntegrationTest {
             assertThat(load(untouched).getAttemptCount()).isZero();
             release.countDown();
             assertThat(completed.await(5, TimeUnit.SECONDS)).isTrue();
-            assertThat(repository.findAllById(claimed)).allSatisfy(row -> assertThat(row.getStatus()).isEqualTo(JobStatus.SUCCEEDED));
+            assertThat(repository.findAllById(claimed)).allSatisfy(row -> {
+                assertThat(row.getStatus()).isEqualTo(result == JobHandler.Result.SUCCEEDED ? JobStatus.SUCCEEDED : JobStatus.PENDING);
+                assertThat(row.getAttemptCount()).isEqualTo(1);
+                assertThat(row.getFailureCount()).isZero();
+            });
         } finally {
             release.countDown(); start.countDown();
             executor.shutdownNow(); executor.awaitTermination(5, TimeUnit.SECONDS);
@@ -143,8 +158,9 @@ class JobWorkerIntegrationTest {
         assertThat(load(id).getAttemptCount()).isEqualTo(2);
     }
 
-    @Test
-    void timeoutKeepsCapacityReservedUntilIgnoringHandlerReturnsAndLateSuccessIsSuppressed() throws Exception {
+    @ParameterizedTest
+    @EnumSource(value = JobHandler.Result.class, names = {"SUCCEEDED", "CONTINUE"})
+    void timeoutKeepsCapacityReservedUntilIgnoringHandlerReturnsAndLateResultIsSuppressed(JobHandler.Result result) throws Exception {
         UUID id = job(); UUID pending = job();
         AtomicLong time = new AtomicLong();
         CountDownLatch entered = new CountDownLatch(1);
@@ -153,13 +169,14 @@ class JobWorkerIntegrationTest {
         CountDownLatch returned = new CountDownLatch(1);
         AtomicReference<ClaimedJob> old = new AtomicReference<>();
         var worker = new JobWorker(jobs, List.of(handler(context -> {
+            checkpoint(context);
             old.set(context.claim()); entered.countDown();
             while (true) {
                 try { if (release.await(5, TimeUnit.SECONDS)) { break; } }
                 catch (InterruptedException e) { cancelled.countDown(); }
             }
             returned.countDown();
-            return JobHandler.Result.SUCCEEDED;
+            return result;
         })), properties(1), time::get);
         workers.add(worker);
         try {
@@ -179,6 +196,8 @@ class JobWorkerIntegrationTest {
             assertThat(jobs.complete(old.get())).isFalse();
             assertThat(load(id).getClaimToken()).isEqualTo(replacement.claimToken());
             assertThat(load(id).getStatus()).isEqualTo(JobStatus.RUNNING);
+            assertThat(load(id).getProgressVersion()).isEqualTo(1);
+            assertThat(load(id).getFailureCount()).isEqualTo(1);
         } finally { release.countDown(); }
     }
 
@@ -196,19 +215,21 @@ class JobWorkerIntegrationTest {
         assertThat(load(id).getAttemptCount()).isEqualTo(2);
     }
 
-    @Test
-    void shutdownStopsAdmissionBoundsWaitingAndLeavesUnfinishedClaimRecoverable() throws Exception {
+    @ParameterizedTest
+    @EnumSource(value = JobHandler.Result.class, names = {"SUCCEEDED", "CONTINUE"})
+    void shutdownStopsAdmissionBoundsWaitingAndLeavesUnfinishedClaimRecoverable(JobHandler.Result result) throws Exception {
         UUID id = job(); UUID pending = job();
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch interrupted = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         var worker = worker(1, handler(context -> {
+            checkpoint(context);
             entered.countDown();
             while (true) {
                 try { if (release.await(5, TimeUnit.SECONDS)) { break; } }
                 catch (InterruptedException e) { interrupted.countDown(); }
             }
-            return JobHandler.Result.SUCCEEDED;
+            return result;
         }));
         try {
             worker.poll();
@@ -224,6 +245,8 @@ class JobWorkerIntegrationTest {
             expire(id);
             var replacement = jobs.claimNext(JobType.FILE_PURGE).orElseThrow();
             assertThat(replacement.attemptCount()).isEqualTo(2);
+            assertThat(load(id).getFailureCount()).isEqualTo(1);
+            assertThat(load(id).getProgressVersion()).isEqualTo(1);
         } finally { release.countDown(); }
     }
 
@@ -295,6 +318,57 @@ class JobWorkerIntegrationTest {
         assertThat(retried.await(5, TimeUnit.SECONDS)).isTrue();
         assertThat(load(id).getStatus()).isEqualTo(JobStatus.PENDING);
         assertThat(load(id).getLastFailureCode()).isEqualTo("WORK_FAILED");
+    }
+
+    @Test
+    void continuationRecordsDelayedPendingWithoutRedispatchAndShutdownDuringGraceAllowsYield() throws Exception {
+        UUID id = job();
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch continued = new CountDownLatch(1);
+        doAnswer(call -> { Object result = call.callRealMethod(); afterCommit(continued); return result; })
+                .when(jobs).continueJob(any());
+        var worker = new JobWorker(jobs, List.of(handler(context -> {
+            assertThat(context.remainingRuntimeNanos()).isPositive();
+            checkpoint(context);
+            entered.countDown(); await(release);
+            return JobHandler.Result.CONTINUE;
+        })), new JobWorkerProperties(true, 1, Duration.ofSeconds(5), Duration.ofSeconds(10),
+                Duration.ofMinutes(5), Duration.ofSeconds(2)));
+        workers.add(worker);
+        try {
+            worker.poll();
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            worker.stopClaiming();
+            release.countDown();
+            worker.close();
+            assertThat(continued.await(5, TimeUnit.SECONDS)).isTrue();
+            worker.poll();
+            assertThat(load(id).getStatus()).isEqualTo(JobStatus.PENDING);
+            assertThat(load(id).getAttemptCount()).isEqualTo(1);
+            assertThat(load(id).getFailureCount()).isZero();
+            assertThat(load(id).getProgressVersion()).isEqualTo(1);
+            verify(jobs, times(1)).continueJob(any());
+            verify(jobs, never()).retry(any());
+        } finally { release.countDown(); }
+    }
+
+    @Test
+    void handlerReturningContinueWithoutCheckpointRecordsOneFailure() throws Exception {
+        UUID id = job();
+        CountDownLatch rejected = new CountDownLatch(1);
+        doAnswer(call -> { Object result = call.callRealMethod(); afterCommit(rejected); return result; })
+                .when(jobs).continueJob(any());
+        worker(1, handler(context -> JobHandler.Result.CONTINUE)).poll();
+        assertThat(rejected.await(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(load(id).getStatus()).isEqualTo(JobStatus.PENDING);
+        assertThat(load(id).getFailureCount()).isEqualTo(1);
+        assertThat(load(id).getLastFailureCode()).isEqualTo("NO_PROGRESS");
+        verify(jobs, never()).retry(any());
+    }
+
+    private void checkpoint(JobExecutionContext context) {
+        transaction().executeWithoutResult(status -> jobs.checkpoint(context.claim(), 0));
     }
 
     private JobWorker worker(int concurrency, JobHandler... handlers) {

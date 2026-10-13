@@ -4,7 +4,7 @@ The opt-in worker schedules existing PostgreSQL jobs and dispatches registered
 `JobHandler` implementations. Phase 2D.1 now registers a real
 [file byte-purge handler](file-purge.md), with immutable targets and the accepted
 trusted-writer storage contract. Explicit enablement can execute eligible file jobs.
-Folder purge, resource finalization, upload reconciliation and missed-notification
+Slice 2 adds conservative standalone finalization. Folder purge, upload reconciliation and missed-notification
 backfill remain planned. Scheduling and consumers stay disabled by default.
 
 ## Configuration and capacity
@@ -23,9 +23,9 @@ verification does not enable or deploy a running development API.
 | `shutdown-grace` | `5s` | One overall shutdown waiting budget, at most 60 seconds |
 
 Durations must be positive (at least 1 ms), at most one day, and satisfy the
-additional bounds above. The existing database lease remains 30 seconds, attempt
-budget ten, and retry backoff one to sixty seconds. No migration is needed: renewal
-updates only existing V14 claim/deadline/timestamp fields; V14/V15 are unchanged.
+additional bounds above. The database lease remains 30 seconds, failure/abandonment
+budget ten, and retry backoff one to sixty seconds. V18 separates monotonic claims
+from failures and adds continuation checkpoint revisions; V14–V17 are unchanged.
 
 Two daemon control threads run fixed-delay claim and monitoring loops, with no
 control task queues. Handler and renewal executors each have exactly `N` maximum
@@ -60,13 +60,32 @@ validate ownership, ancestry, business lifecycle and storage eligibility using
 their own short ADR-0007 transactions and race tests. They must never hold such
 transactions across external I/O.
 
-`JobHandler.handle(JobExecutionContext)` returns explicit `SUCCEEDED` or `RETRY`.
+`JobHandler.handle(JobExecutionContext)` returns explicit `SUCCEEDED`, `RETRY` or `CONTINUE`.
 Only a real handler's explicit success permits fenced completion. Null results
 and ordinary handler exceptions record a fenced retry using existing `WORK_FAILED`
 bookkeeping. Interrupted, cancelled or timed-out tasks leave their claim to expire;
 late results are suppressed. An uncertain outcome-recording database operation
 also leaves recovery to durable state rather than fabricating a second outcome.
 Fatal handler errors are sanitized and abandoned without raw exception logging.
+
+CONTINUE means a bounded invocation succeeded but work remains. Before returning,
+commit a newly useful work unit and `BackgroundJobService.checkpoint(claim,
+expectedVersion)` in the same short transaction, following the
+[checkpoint and lock contract](background-jobs.md#continuation-checkpoint-contract-phase-2d2-slice-3).
+The worker accepts the result only while the context remains active. Its fenced
+transition requires a checkpoint newer than the claim baseline, otherwise it
+charges one NO_PROGRESS failure. Existing file handlers keep SUCCESS/RETRY behavior.
+
+A continuation releases its actual worker slot after outcome recording and waits
+at least one PostgreSQL-clock second before becoming claimable. Only regular
+fixed-delay polls admit it again; no recursive dispatch, immediate completion
+callback, or new queue bypasses concurrency limits. `remainingRuntimeNanos()` lets
+handlers choose a unit or yield while still active; max runtime and conservative
+lease deadlines still suppress late CONTINUE results. There is no cumulative
+runtime limit across useful invocations, but each invocation is bounded and an
+empty yield spends the bounded failure budget. Cancellation/shutdown after grace
+abandons even checkpointed work; legitimate CONTINUE during grace may commit
+PENDING, while admission remains stopped.
 
 Handlers must call `context.checkActive()` between bounded work units, propagate
 interruption and bound their own external I/O. `context.claim()` is an immutable
@@ -81,7 +100,7 @@ protected state after acquiring it, and requires `RUNNING`, the exact token and 
 unexpired lease using PostgreSQL's clock. It then conditionally updates again with
 the same fencing predicate. Expiration becomes at least database-now plus 30
 seconds, never shorter than the existing lease. `next_attempt_at` moves to the
-renewed expiration plus the persisted attempt's backoff. Attempts, token and
+renewed expiration plus backoff for the next failure ordinal. Counters, token and
 lifecycle state do not change. Expired or replaced claims cannot be revived.
 
 The monitor dispatches renewal database calls through its bounded executor so a
@@ -132,6 +151,9 @@ No replacement handler threads are created to bypass stuck capacity.
 | after claim commit, before dispatch | lease/attempt remain; later supported-type polling reclaims when due |
 | handler/renewal interruption, timeout or shutdown | stop local work/renewal; recover after final lease and retry deadline |
 | known handler failure | fenced `PENDING` retry or `FAILED` at the attempt limit |
+| useful batch commits then CONTINUE | same job delayed PENDING, no failure charged |
+| batch/checkpoint commits then process dies | retained progress; abandonment charged once on recovery |
+| CONTINUE without new committed checkpoint | NO_PROGRESS failure with backoff/exhaustion |
 | external effect then lost outcome commit | retry may repeat the effect; idempotence is required |
 | stale result/renewal after replacement | old token rejected; newer persisted state is preserved |
 | abandoned final attempt | later due scan records durable `FAILED`, with no automatic reset |
@@ -149,7 +171,10 @@ expired/replaced-token rejection and expiry during a row-lock wait.
 `JobWorkerIntegrationTest` uses isolated `job_worker_test` fixtures and bounded
 latch-coordinated handlers to exercise concurrent schedulers, execution outside
 transactions, automatic renewal, crash/timeout recovery, capacity reservation,
-slow renewal isolation and shutdown. `JobWorkerConfigurationTest` checks disabled
+slow renewal isolation and shutdown. Continuation tests also cover concurrent distinct claims/capacity,
+delayed PENDING, no-progress rejection, runtime cancellation and late CONTINUE,
+shutdown cancellation and legitimate yielding during graceful completion.
+`JobWorkerConfigurationTest` checks disabled
 startup, absent/duplicate handlers, timing/capacity validation and actual Spring
 context closure. No test handler is registered in production code. Phase 2D.1's
 production file handler has separate real Garage coverage in [file purge](file-purge.md).

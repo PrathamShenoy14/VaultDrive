@@ -3,7 +3,8 @@
 Status: Approved implementation design; implementation in progress.
 Phase 2D.2 Slice 1 completed in commit `8ca8d9b`.
 Phase 2D.2 Slice 2 completed and verified on 2026-10-13.
-Slices 3–6 remain pending.
+Phase 2D.2 Slice 3 completed and verified on 2026-10-13.
+Slices 4–6 remain pending.
 
 Recommend **one durable folder job, a paged subtree manifest, and shared per-file deletion progress**. Keep the existing trusted-writer contract, v1 events, RabbitMQ topology, and storage adapter. Add explicit continuation handling so successful batches do not exhaust the retry budget.
 
@@ -88,13 +89,59 @@ Each invocation performs bounded database pages and bounded storage operations, 
 
 A parent job avoids creating one child job/event per descendant and avoids dependency scheduling. It sacrifices intra-subtree parallelism, which is appropriate for the smallest implementation; unrelated roots still use existing worker capacity.
 
-The current [`JobHandler.Result`](../backend/src/main/java/com/vaultdrive/worker/JobHandler.java) supports only success/retry, and claims consume ten total attempts. Add fenced `CONTINUE` handling:
+Slice 3 extends [`JobHandler.Result`](../backend/src/main/java/com/vaultdrive/worker/JobHandler.java) with fenced `CONTINUE` handling:
 
-- Successful continuation returns the same job to due `PENDING` without consuming failure budget.
+- Successful continuation returns the same job to `PENDING`, due after one second, without consuming failure budget.
 - Keep a monotonic claim count separate from bounded failed/abandoned execution accounting.
 - Real failures retain backoff and terminal exhaustion.
 - Crashes, cancellation, and lease abandonment still consume failure budget.
-- Require durable progress for normal continuation, preventing endless empty yields.
+- Require a newer committed job-local checkpoint than the claim baseline, preventing endless empty yields.
+
+### Slice 3 continuation foundation
+
+V18 widens `attempt_count` to a monotonic BIGINT claim count and adds bounded
+`failure_count`, `progress_version` and `claim_progress_version`. Existing terminal
+outcomes and deadlines remain intact; historical failures are prior claims minus
+one unresolved RUNNING or successful SUCCEEDED execution. Failure/abandonment
+ordinals drive the unchanged one-to-sixty-second backoff and ten-failure limit.
+Monotonic guards prohibit counter resets; all applied V14–V17 migrations remain intact.
+
+For future folder handlers, atomically advance a useful durable cursor/member,
+receipt, or phase/unit and call `BackgroundJobService.checkpoint(claim,
+expectedVersion)` last in that same short transaction. Its MANDATORY transaction,
+expected-version CAS, job-row lock and PostgreSQL-clock token/lease check make
+stale/duplicate recording roll back the business work. Empty scans, heartbeats,
+unchanged cursors and replayed receipts do not qualify. Actual folder cursor/work
+schemas are deferred to Slice 4; this slice supplies the revision/fencing contract.
+Resource/work locks precede the final job lock. No storage I/O spans a transaction.
+
+CONTINUE uses an independent job-only transaction and requires progress newer
+than the baseline captured on this claim. It releases the token and schedules the
+same job one second later without resetting failures. Missing progress charges a
+single NO_PROGRESS failure; stale tokens/expired leases change nothing. A crash
+after checkpoint commit retains progress, consumes abandonment on recovery, and
+the new claim must advance further or finish SUCCESS. Check cancellation between
+units and use `remainingRuntimeNanos()` to yield before the local runtime deadline.
+Late yields after cancellation are suppressed. Regular bounded polling admits
+continuations; there is no immediate rescheduling path or new task queue.
+
+Tests cover fifteen successful continuations then SUCCESS, pure and mixed
+failure/abandonment exhaustion, committed-progress crash recovery, stale/duplicate
+outcomes, atomic work/checkpoint rollback, no-progress rejection, PostgreSQL lease
+expiry during a row-lock wait, legacy migration, concurrent workers/capacity and
+runtime/shutdown cancellation. Verification on 2026-10-13: all 93 focused tests
+passed, including 30 PostgreSQL job tests, 14 worker integration tests and 44
+PostgreSQL/Garage file-purge regressions. The full safely runnable suite ran 545
+tests: 538 passed, 7 environment-gated RabbitMQ tests skipped, zero failures/errors.
+V17-to-V18 backfill, real PostgreSQL fencing/constraints and disposable Garage
+fixtures passed. Read-only schema inspection confirmed the new column types,
+constraints and monotonic-counter trigger. Compilation and `git diff --check`
+passed. The broker contract was unchanged and not reverified live; no process-kill
+or load claim is made.
+
+No production handler returns CONTINUE yet. File SUCCESS/RETRY, V17 finalization,
+Garage behavior, APIs, v1 events/topology and disabled defaults remain unchanged.
+Folder discovery, recursive deletion and automatic recovery stay deferred.
 
 For each object: prepare/validate briefly, commit, renew/check the claim, DELETE outside transactions, then record a fenced receipt. Preserve current absence/error classification and binding checks.
 
@@ -184,7 +231,7 @@ Legacy standalone requests missing V16 targets remain blocked even if today's al
 |---|---|
 | 1. Restore eligibility — COMPLETE (`8ca8d9b`) | Rejects own pending folder purge as `404`; concurrency and regression tests passed. |
 | 2. Shared file progress/finalization — COMPLETE | V17 identity/receipts, standalone finalization and bounded historical recovery; rollback, stale/expired fencing, missing-row replay, retained allocations and concurrent folder guards verified. |
-| 3. Bounded continuation | Extend worker/service accounting; prove healthy work beyond ten batches completes, while ten failures/abandonments exhaust. |
+| 3. Bounded continuation — COMPLETE | V18 separate claims/failures, fenced atomic checkpoint contract and delayed CONTINUE; PostgreSQL migration/fencing, worker cancellation/capacity and Garage regressions passed. |
 | 4. Durable subtree discovery | Add run, folder frontier, and file membership records; test paged restart, complete inclusion, nested intents, moves/restores, and finalization-versus-discovery races. |
 | 5. Folder byte execution | Register the folder handler; test existing file-job overlap, partial DELETE recovery, unsafe uploads, legacy bindings, and binding drift. |
 | 6. Bottom-up removal | Test FK guards, blocked descendants, stale finalizers, root-last deletion, and crash after root removal before job completion. |
@@ -194,5 +241,5 @@ Use append-only migrations after V16 for progress/manifest tables, uniqueness an
 Keep batches, execution budgets, database waits, and queues bounded. Memory should scale with page size; durable manifest storage necessarily scales with subtree size. Batch tuning and throughput remain unmeasured.
 
 The original design review was read-only. Slice 1 and the Slice 2 implementation
-are documented above; Slices 3–6 remain planned. Test execution results above
+and Slice 3 verification are documented above; Slices 4–6 remain planned. Test execution results above
 describe repository verification, not production enablement or load measurements.

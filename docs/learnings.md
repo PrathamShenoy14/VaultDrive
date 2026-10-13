@@ -168,3 +168,32 @@ removal. Historical SUCCEEDED recovery imports authoritative byte outcomes only
 with matching retained V16 identity; bounded keyset pages advance past blocked
 rows without resetting jobs. Recovery remains an explicit service operation,
 not automatic scheduling or inferred legacy repair.
+
+## Successful batches must not consume a failure budget
+
+A long job can perform more than ten useful batches without failing. V18 separates
+the monotonic claim count from bounded failed/abandoned executions. Count a real
+failure at its fenced outcome or abandonment at locked recovery, never erase prior
+failures after healthy work. Backoff follows failure ordinal, while each claim
+pre-records the next abandonment deadline. Legacy terminal outcomes keep their
+meaning; migration subtracts only one unresolved/successful execution from prior
+claims when reconstructing failures.
+
+A success flag cannot establish progress. CONTINUE requires a job-local revision
+newer than the baseline captured when this claim started. Advance that revision
+last, in the same transaction as a newly useful cursor/receipt/phase mutation,
+using expected-version CAS and token/clock fencing. Rollback removes both work
+and evidence; a committed checkpoint survives a lost continuation transition.
+Recovery then charges abandonment and takes a new baseline, so old evidence cannot
+authorize endless empty yields. Business meaning remains a handler contract;
+generic infrastructure cannot infer whether an arbitrary cursor is useful.
+
+One-second eligibility delay plus normal polling prevents completion callbacks
+from becoming a busy dispatch loop. The actual handler keeps its slot until it
+returns, even after cancellation; late CONTINUE cannot bypass runtime or shutdown
+bounds. A legitimate grace-period yield can leave delayed PENDING for a later
+worker. Healthy jobs may have unlimited useful invocations, with bounded runtime
+per invocation. Load/fairness and actual process-kill behavior remain unmeasured.
+Deterministic PostgreSQL checkpoint/accounting tests, worker cancellation/shutdown
+tests and Garage regressions passed. The full safely runnable suite passed with
+seven environment-gated RabbitMQ skips; see [the Slice 3 verification record](folder-purge-design.md#slice-3-continuation-foundation).

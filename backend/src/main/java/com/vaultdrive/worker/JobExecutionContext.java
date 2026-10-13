@@ -25,6 +25,11 @@ public final class JobExecutionContext {
     /** Identity/token snapshot; its original expiration is not the renewed deadline. */
     public ClaimedJob claim() { return claim; }
 
+    /** Remaining local runtime for choosing a bounded unit or yielding early. */
+    public long remainingRuntimeNanos() {
+        return Math.max(0, maxRuntimeNanos - (nanoTime.getAsLong() - startedAt));
+    }
+
     public boolean isActive() {
         long now = nanoTime.getAsLong();
         return !cancelled.get() && now - startedAt < maxRuntimeNanos

@@ -89,3 +89,23 @@ order and finalizer, with locked authoritative SUCCEEDED status replacing a live
 claim; it never rearms that job. PostgreSQL/Garage tests cover both folder winner
 orders, duplicate finalizers, cached stale rows, rollback and lease expiry during
 job-lock waits. See [file purge](../file-purge.md).
+
+## Phase 2D.2 Slice 3 continuation checkpoints
+
+The generic checkpoint follows the same hierarchy → freshly protected resource →
+work/progress → job order. `BackgroundJobService.checkpoint` requires the caller's
+existing transaction, flushes work, takes the job lock last, then applies an
+expected-version CAS with the exact claim token and PostgreSQL-clock live lease.
+A failed CAS/fence throws and rolls back work; no hierarchy/resource lock may be
+acquired afterward. The revision must accompany a newly useful durable business
+unit, never a heartbeat or replay. Each future handler must verify that semantic
+and atomicity contract for its own work schema.
+
+CONTINUE itself locks only the job row in a separate transaction after the work
+commit. It reads protected accounting/checkpoints under that lock and rechecks
+the token, lease and progress predicate at the transition. Cancellation may leave
+committed progress with an abandoned claim; recovery preserves it and charges one
+failure. No lock spans external I/O or handler dispatch. New PostgreSQL tests
+cover continuation lock-wait expiry, stale checkpoints and atomic fixture rollback.
+These passed against real PostgreSQL; executed totals and verification limits are
+recorded in [the Slice 3 record](../folder-purge-design.md#slice-3-continuation-foundation).
