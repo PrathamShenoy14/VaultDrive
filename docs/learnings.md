@@ -143,3 +143,28 @@ default Open EntityManager in View setting failed earlier in hierarchy coordinat
 (`Hierarchy coordination requires an active transaction`), before eligibility was
 checked. That transaction-joining issue remains outside this slice; these tests
 do not establish an end-to-end HTTP result under that configuration.
+
+## Byte success and metadata finalization need separate receipts
+
+A byte DELETE can succeed before PostgreSQL knows it, and metadata removal can
+commit before a worker records job completion. V17 shared per-file work retains
+immutable target/lifecycle identity and establishes each receipt once. Separate
+short transactions make a lost byte receipt repeat the same retained DELETE,
+while a committed receipt lets later finalization skip Garage. Metadata removal
+and its receipt are atomic; a missing file without durable proof is ambiguous.
+SUCCEEDED still means bytes deleted/absent, preserving historical job meaning.
+
+Resource checkpoints need hierarchy → fresh resource → work → job ordering.
+Reading scalar resource state after coordination avoids JPA's cached stale entity
+problem. A token/clock check after job-lock waits and at the final write must roll
+back all earlier progress if ownership was lost. Job-only renewal does not take
+resource locks, and no transaction spans Garage I/O.
+
+A pending parent purge must retain file metadata even after standalone byte
+deletion, or future paged discovery could miss an accepted descendant. Shared
+hierarchy finalization and exclusive folder requests serialize both winner
+orders. Until manifests exist, every pending ancestor conservatively blocks
+removal. Historical SUCCEEDED recovery imports authoritative byte outcomes only
+with matching retained V16 identity; bounded keyset pages advance past blocked
+rows without resetting jobs. Recovery remains an explicit service operation,
+not automatic scheduling or inferred legacy repair.

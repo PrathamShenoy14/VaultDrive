@@ -123,9 +123,22 @@ remain open.
 - [x] Document [storage assumptions and operational recovery](file-purge.md).
 
 Workers and consumers remain disabled by default. Job success records the byte
-deletion outcome only: metadata finalization and recursive folder purge remain
-planned. Independent writers can bypass application protections; Garage does not
+deletion outcome only; Slice 2 below tracks standalone metadata finalization
+separately. Recursive folder purge remains planned. Independent writers can bypass
+application protections; Garage does not
 enforce conditional/version-specific deletion. Execution results belong in task reports.
+
+### Phase 2D.2 — Shared progress and folder purge
+
+- [x] Slice 1: reject restoration of a folder with its own pending purge.
+- [x] Slice 2: V17 shared per-file identity and monotonic byte/finalization receipts;
+  integrate standalone execution, conservative pending-folder guards and bounded
+  explicit recovery of matching historical SUCCEEDED file jobs.
+- [ ] Slices 3–6: continuation accounting, durable paged discovery, folder byte
+  execution and bottom-up removal.
+
+See [the approved folder purge slices](folder-purge-design.md). No folder handler,
+manifest, CONTINUE result or scheduled finalization recovery exists yet.
 
 ## Phase 3 — Refine concurrency without weakening correctness
 

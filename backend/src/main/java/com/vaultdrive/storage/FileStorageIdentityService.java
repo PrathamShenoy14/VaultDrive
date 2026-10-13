@@ -4,8 +4,6 @@ import com.vaultdrive.file.StoredFile;
 import com.vaultdrive.file.StoredFileRepository;
 import com.vaultdrive.folder.FolderAccessValidator;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
-import com.vaultdrive.job.ClaimedJob;
-import com.vaultdrive.job.JobType;
 import com.vaultdrive.outbox.OutboxEvent;
 import jakarta.persistence.EntityManager;
 import org.springframework.stereotype.Service;
@@ -91,33 +89,4 @@ public class FileStorageIdentityService {
                 .executeUpdate();
     }
 
-    @Transactional
-    public StorageTarget preparePurge(ClaimedJob claim) {
-        if (claim.jobType() != JobType.FILE_PURGE || !"FILE".equals(claim.aggregateType())) {
-            throw new IllegalStateException("Invalid file purge identity");
-        }
-        List<?> owners = entityManager.createNativeQuery("""
-                SELECT owner_id FROM file_purge_targets WHERE event_id = :event AND file_id = :file
-                """).setParameter("event", claim.id()).setParameter("file", claim.aggregateId()).getResultList();
-        if (owners.isEmpty()) { throw new IllegalStateException("Verified purge target is absent"); }
-        UUID owner = (UUID) owners.getFirst();
-        // Immutable target read precedes shared hierarchy lock; protected file read follows it.
-        // Lock order: shared owner hierarchy, pending file row. No job locks in this transaction.
-        hierarchy.acquireShared(owner);
-        List<?> targets = entityManager.createNativeQuery("""
-                SELECT t.storage_namespace, t.endpoint, t.region, t.bucket, t.storage_key
-                FROM file_purge_targets t JOIN files f ON f.id = t.file_id
-                WHERE t.event_id = :event AND t.file_id = :file AND f.owner_id = t.owner_id
-                    AND f.storage_key = t.storage_key AND f.version = t.file_version
-                    AND f.status = 'READY' AND f.deleted_at IS NOT NULL
-                    AND f.purge_requested_at = t.requested_at
-                FOR UPDATE OF f
-                """).setParameter("event", claim.id()).setParameter("file", claim.aggregateId()).getResultList();
-        if (targets.isEmpty()) { throw new IllegalStateException("File purge state does not match target"); }
-        StoredFile file = entityManager.find(StoredFile.class, claim.aggregateId());
-        folders.requireNoPendingPurgeInAncestry(owner, file.getFolderId());
-        Object[] values = (Object[]) targets.getFirst();
-        return new StorageTarget((String) values[0], (String) values[1], (String) values[2],
-                (String) values[3], (String) values[4]);
-    }
 }

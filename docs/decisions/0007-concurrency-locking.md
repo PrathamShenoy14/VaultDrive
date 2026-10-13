@@ -66,3 +66,26 @@ in the full verification suite. Metadata finalization/folder traversal will need
 their own locking decisions and race coverage.
 
 No performance benchmark currently exists, so this ADR makes no throughput claim.
+
+## Phase 2D.2 Slice 2 progress and finalization
+
+Resource progress transactions extend the order to **shared owner hierarchy lock,
+fresh scalar file-row lock/read, work-row lock, job-row lock for final fencing**.
+Only immutable V16 identity is read before hierarchy coordination. Scalar queries
+avoid stale JPA first-level resource state. Job token/type/aggregate and
+PostgreSQL-clock lease checks after the final job lock and at the final write roll
+back stale work, byte receipts and metadata removal. Existing job-only operations
+retain their protocol; no path takes hierarchy/resource locks while holding a job
+lock first. Garage I/O occurs only after preparation commits and before receipt
+recording begins.
+
+Standalone metadata finalization requires an exact captured owner/folder/key/
+version/READY/lifecycle match and a durable byte receipt. Every pending folder
+ancestor defers removal until a future manifest can prove sealed discovery. The
+shared hierarchy lock coordinates this check/removal with exclusive folder purge
+requests in both winner orders. Byte deletion from the original standalone intent
+may continue beneath that barrier. Historical-success recovery uses the same
+order and finalizer, with locked authoritative SUCCEEDED status replacing a live
+claim; it never rearms that job. PostgreSQL/Garage tests cover both folder winner
+orders, duplicate finalizers, cached stale rows, rollback and lease expiry during
+job-lock waits. See [file purge](../file-purge.md).

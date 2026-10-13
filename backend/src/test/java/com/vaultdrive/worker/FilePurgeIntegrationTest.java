@@ -4,6 +4,9 @@ import com.vaultdrive.file.FileMetadataService;
 import com.vaultdrive.file.FileService;
 import com.vaultdrive.file.StoredFile;
 import com.vaultdrive.file.StoredFileRepository;
+import com.vaultdrive.folder.FolderRepository;
+import com.vaultdrive.folder.FolderService;
+import com.vaultdrive.hierarchy.HierarchyCoordinator;
 import com.vaultdrive.job.BackgroundJobRepository;
 import com.vaultdrive.job.BackgroundJobService;
 import com.vaultdrive.job.ClaimedJob;
@@ -73,6 +76,11 @@ class FilePurgeIntegrationTest {
     @MockitoSpyBean private OutboxWriter writer;
     @Autowired private FileStorageIdentityService identity;
     @Autowired private FilePurgeJobHandler handler;
+    @MockitoSpyBean private FilePurgeProgressService progress;
+    @Autowired private FilePurgeRecoveryService recovery;
+    @Autowired private FolderService folders;
+    @Autowired private FolderRepository folderRepository;
+    @Autowired private HierarchyCoordinator hierarchy;
     @MockitoSpyBean private ObjectStorageService storage;
     @MockitoSpyBean private BackgroundJobService jobs;
     @Autowired private BackgroundJobRepository jobRepository;
@@ -88,6 +96,7 @@ class FilePurgeIntegrationTest {
     private final List<UUID> fileIds = new ArrayList<>();
     private final List<UUID> eventIds = new ArrayList<>();
     private final List<String> objectKeys = new ArrayList<>();
+    private final List<UUID> folderIds = new ArrayList<>();
 
     @BeforeEach void setup() {
         transaction = new TransactionTemplate(transactionManager);
@@ -96,6 +105,7 @@ class FilePurgeIntegrationTest {
 
     @AfterEach void cleanup() {
         reset(storage, jobs);
+        reset(AopTestUtils.<FilePurgeProgressService>getUltimateTargetObject(progress));
         reset(AopTestUtils.<OutboxWriter>getUltimateTargetObject(writer));
         transaction.executeWithoutResult(status -> {
             for (Object row : entityManager.createNativeQuery("""
@@ -125,10 +135,17 @@ class FilePurgeIntegrationTest {
                 outbox.deleteAllById(eventIds);
                 entityManager.createNativeQuery("DELETE FROM file_purge_targets WHERE owner_id = :owner")
                         .setParameter("owner", owner).executeUpdate();
+                entityManager.createNativeQuery("DELETE FROM file_purge_work WHERE owner_id = :owner")
+                        .setParameter("owner", owner).executeUpdate();
                 fileRepository.deleteAllById(fileIds);
                 fileRepository.flush();
                 entityManager.createNativeQuery("DELETE FROM file_storage_objects WHERE owner_id = :owner")
                         .setParameter("owner", owner).executeUpdate();
+                for (UUID folder : folderIds) {
+                    outbox.deleteAll(outbox.findByAggregateTypeAndAggregateId("FOLDER", folder));
+                    folderRepository.deleteById(folder);
+                    folderRepository.flush();
+                }
                 users.deleteById(owner);
             });
         }
@@ -150,6 +167,8 @@ class FilePurgeIntegrationTest {
                         .setParameter("id", file.getId()).getSingleResult();
                 entityManager.createNativeQuery("SELECT id FROM background_jobs WHERE id = :id FOR UPDATE NOWAIT")
                         .setParameter("id", claim.id()).getSingleResult();
+                entityManager.createNativeQuery("SELECT file_id FROM file_purge_work WHERE file_id = :id FOR UPDATE NOWAIT")
+                        .setParameter("id", file.getId()).getSingleResult();
             });
             invoked.set(call.getArgument(0));
             return call.callRealMethod();
@@ -163,7 +182,9 @@ class FilePurgeIntegrationTest {
         assertThat(handler.handle(context(claim))).isEqualTo(JobHandler.Result.SUCCEEDED);
         assertThat(jobs.complete(claim)).isTrue();
         assertThat(jobRepository.findById(claim.id()).orElseThrow().getStatus()).isEqualTo(JobStatus.SUCCEEDED);
-        assertThat(fileRepository.findById(file.getId()).orElseThrow().getPurgeRequestedAt()).isNotNull();
+        assertThat(fileRepository.findById(file.getId())).isEmpty();
+        assertReceipts(file, true, true);
+        verify(storage, times(1)).delete(any(StorageTarget.class));
     }
 
     @Test void actualWorkerRecordsFencedSuccessOnlyAfterStorageSuccess() throws Exception {
@@ -186,6 +207,440 @@ class FilePurgeIntegrationTest {
             assertThat(jobRepository.findById(event).orElseThrow().getStatus()).isEqualTo(JobStatus.SUCCEEDED);
             assertMissing(file);
         }
+    }
+
+    @Test void deleteWithoutReceiptReplaysTheSameTargetAfterCrash() throws Exception {
+        StoredFile file = uploaded();
+        ClaimedJob claim = purge(file);
+        doThrow(new IllegalStateException("Injected crash before receipt"))
+                .when(AopTestUtils.<FilePurgeProgressService>getUltimateTargetObject(progress)).recordBytesDeleted(any());
+        assertThatThrownBy(() -> handler.handle(context(claim))).isInstanceOf(IllegalStateException.class);
+        assertMissing(file);
+        assertReceipts(file, false, false);
+        assertThat(fileRepository.findById(file.getId())).isPresent();
+        reset(AopTestUtils.<FilePurgeProgressService>getUltimateTargetObject(progress));
+        assertThat(handler.handle(context(claim))).isEqualTo(JobHandler.Result.SUCCEEDED);
+        verify(storage, times(2)).delete(binding.target(file.getStorageKey()));
+        assertReceipts(file, true, true);
+    }
+
+    @Test void receiptSurvivesFinalizationCrashAndRetrySkipsGarage() throws Exception {
+        StoredFile file = uploaded();
+        ClaimedJob claim = purge(file);
+        doThrow(new IllegalStateException("Injected crash after receipt"))
+                .when(AopTestUtils.<FilePurgeProgressService>getUltimateTargetObject(progress)).finalizeMetadata(any());
+        assertThatThrownBy(() -> handler.handle(context(claim))).isInstanceOf(IllegalStateException.class);
+        assertReceipts(file, true, false);
+        assertThat(fileRepository.findById(file.getId())).isPresent();
+        reset(AopTestUtils.<FilePurgeProgressService>getUltimateTargetObject(progress));
+        assertThat(jobs.retry(claim)).isTrue();
+        due(claim.id(), false);
+        ClaimedJob next = jobs.claimNext(JobType.FILE_PURGE).orElseThrow();
+        assertThat(handler.handle(context(next))).isEqualTo(JobHandler.Result.SUCCEEDED);
+        verify(storage, times(1)).delete(any(StorageTarget.class));
+        assertReceipts(file, true, true);
+        assertThat(fileRepository.findById(file.getId())).isEmpty();
+    }
+
+    @Test void workReceiptAndMetadataTransactionsRollBackIndependently() {
+        StoredFile file = uploaded();
+        ClaimedJob claim = purge(file);
+        transaction.executeWithoutResult(status -> { progress.prepare(claim); status.setRollbackOnly(); });
+        assertThat(workCount()).isZero();
+        var prepared = progress.prepare(claim);
+        storage.delete(prepared.target());
+        transaction.executeWithoutResult(status -> { progress.recordBytesDeleted(claim); status.setRollbackOnly(); });
+        assertReceipts(file, false, false);
+        progress.recordBytesDeleted(claim);
+        transaction.executeWithoutResult(status -> {
+            assertThat(progress.finalizeMetadata(claim)).isTrue();
+            assertThat(entityManager.createNativeQuery("SELECT count(*) FROM files WHERE id = :file")
+                    .setParameter("file", file.getId()).getSingleResult()).isEqualTo(0L);
+            status.setRollbackOnly();
+        });
+        assertReceipts(file, true, false);
+        assertThat(fileRepository.findById(file.getId())).isPresent();
+        assertThat(progress.finalizeMetadata(claim)).isTrue();
+        assertReceipts(file, true, true);
+    }
+
+    @ParameterizedTest @ValueSource(booleans = {false, true})
+    void missingMetadataWithoutReceiptNeverMeansSuccess(boolean prepared) {
+        StoredFile file = uploaded();
+        ClaimedJob claim = purge(file);
+        if (prepared) { progress.prepare(claim); }
+        fileRepository.deleteById(file.getId());
+        clearInvocations(storage);
+        assertThatThrownBy(() -> handler.handle(context(claim))).isInstanceOf(IllegalStateException.class);
+        verify(storage, never()).delete(any(StorageTarget.class));
+        if (prepared) { assertReceipts(file, false, false); }
+        else { assertThat(workCount()).isZero(); }
+        assertBytes(file, "fixture");
+    }
+
+    @Test void missingMetadataWithByteReceiptDoesNotInventFinalizationReceipt() throws Exception {
+        StoredFile file = uploaded();
+        ClaimedJob claim = purge(file);
+        deleteAndRecord(claim);
+        fileRepository.deleteById(file.getId());
+        clearInvocations(storage);
+        assertThat(handler.handle(context(claim))).isEqualTo(JobHandler.Result.SUCCEEDED);
+        verify(storage, never()).delete(any(StorageTarget.class));
+        assertReceipts(file, true, false);
+        assertThat(jobs.complete(claim)).isTrue();
+        assertThat(recovery.recoverPage(null, 100).blocked()).isEqualTo(1);
+        assertReceipts(file, true, false);
+    }
+
+    @Test void replacedTokenRollsBackReceiptAndCannotFinalize() {
+        StoredFile file = uploaded();
+        ClaimedJob stale = purge(file);
+        var prepared = progress.prepare(stale);
+        storage.delete(prepared.target());
+        due(stale.id(), true);
+        ClaimedJob current = jobs.claimNext(JobType.FILE_PURGE).orElseThrow();
+        assertThatThrownBy(() -> progress.recordBytesDeleted(stale))
+                .isInstanceOf(FilePurgeProgressService.StaleClaimException.class);
+        assertReceipts(file, false, false);
+        progress.recordBytesDeleted(current);
+        assertThatThrownBy(() -> progress.finalizeMetadata(stale))
+                .isInstanceOf(FilePurgeProgressService.StaleClaimException.class);
+        assertReceipts(file, true, false);
+        assertThat(fileRepository.findById(file.getId())).isPresent();
+        assertThat(progress.finalizeMetadata(current)).isTrue();
+    }
+
+    @Test void receiptFenceChecksDatabaseClockAfterWaitingForJobLock() throws Exception {
+        StoredFile file = uploaded();
+        ClaimedJob claim = purge(file);
+        var prepared = progress.prepare(claim);
+        storage.delete(prepared.target());
+        assertExpiredAfterJobLockWait(claim, () -> progress.recordBytesDeleted(claim));
+        assertReceipts(file, false, false);
+        assertThat(fileRepository.findById(file.getId())).isPresent();
+    }
+
+    @Test void finalizationFenceChecksDatabaseClockAfterWaitingForJobLock() throws Exception {
+        StoredFile file = uploaded();
+        ClaimedJob claim = purge(file);
+        deleteAndRecord(claim);
+        assertExpiredAfterJobLockWait(claim, () -> progress.finalizeMetadata(claim));
+        assertReceipts(file, true, false);
+        assertThat(fileRepository.findById(file.getId())).isPresent();
+    }
+
+    @Test void duplicateConcurrentExecutionSharesOneWorkAndFinalization() throws Exception {
+        StoredFile file = uploaded();
+        ClaimedJob claim = purge(file);
+        CyclicBarrier deleting = new CyclicBarrier(2);
+        doAnswer(call -> {
+            deleting.await(5, TimeUnit.SECONDS); // Both prepare before either receipt commits.
+            return call.callRealMethod();
+        }).when(storage).delete(any(StorageTarget.class));
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var one = executor.submit(() -> handler.handle(context(claim)));
+            var two = executor.submit(() -> handler.handle(context(claim)));
+            assertThat(one.get(10, TimeUnit.SECONDS)).isEqualTo(JobHandler.Result.SUCCEEDED);
+            assertThat(two.get(10, TimeUnit.SECONDS)).isEqualTo(JobHandler.Result.SUCCEEDED);
+            assertThat(workCount()).isEqualTo(1);
+            assertReceipts(file, true, true);
+            assertThat(fileRepository.findById(file.getId())).isEmpty();
+        } finally { executor.shutdownNow(); executor.awaitTermination(5, TimeUnit.SECONDS); }
+    }
+
+    @ParameterizedTest @ValueSource(strings = {
+            "version = version + 1", "updated_at = updated_at + interval '1 second'",
+            "status = 'FAILED'", "deleted_at = deleted_at + interval '1 second'",
+            "purge_requested_at = purge_requested_at + interval '1 second'"})
+    void changedLifecycleAfterDeleteRetainsMetadataAndByteSuccess(String change) throws Exception {
+        StoredFile file = uploaded();
+        ClaimedJob claim = purge(file);
+        deleteAndRecord(claim);
+        transaction.executeWithoutResult(status -> entityManager.createNativeQuery(
+                "UPDATE files SET " + change + " WHERE id = :file")
+                .setParameter("file", file.getId()).executeUpdate());
+        assertThat(progress.finalizeMetadata(claim)).isFalse();
+        assertThat(handler.handle(context(claim))).isEqualTo(JobHandler.Result.SUCCEEDED);
+        assertReceipts(file, true, false);
+        assertThat(fileRepository.findById(file.getId())).isPresent();
+    }
+
+    @Test void changedStorageKeyOrFolderCannotBeFinalized() {
+        UUID destination = folder();
+        for (String change : List.of("storage_key = storage_key || '/changed'", "folder_id = :folder")) {
+            StoredFile file = uploaded();
+            ClaimedJob claim = purge(file);
+            deleteAndRecord(claim);
+            transaction.executeWithoutResult(status -> {
+                var query = entityManager.createNativeQuery("UPDATE files SET " + change + " WHERE id = :file")
+                        .setParameter("file", file.getId());
+                if (change.contains(":folder")) { query.setParameter("folder", destination); }
+                query.executeUpdate();
+            });
+            assertThat(progress.finalizeMetadata(claim)).isFalse();
+            assertReceipts(file, true, false);
+            assertThat(fileRepository.findById(file.getId())).isPresent();
+            assertThat(jobs.complete(claim)).isTrue();
+        }
+    }
+
+    @Test void changedOwnershipCannotBeFinalized() {
+        UUID otherOwner = users.saveAndFlush(new User(UUID.randomUUID() + "@example.com", "test-hash", "Other fixture")).getId();
+        StoredFile file = uploaded();
+        ClaimedJob claim = purge(file);
+        deleteAndRecord(claim);
+        try {
+            transaction.executeWithoutResult(status -> entityManager.createNativeQuery(
+                    "UPDATE files SET owner_id = :owner WHERE id = :file")
+                    .setParameter("owner", otherOwner).setParameter("file", file.getId()).executeUpdate());
+            assertThat(progress.finalizeMetadata(claim)).isFalse();
+            assertReceipts(file, true, false);
+            assertThat(fileRepository.findById(file.getId()).orElseThrow().getOwnerId()).isEqualTo(otherOwner);
+        } finally {
+            transaction.executeWithoutResult(status -> entityManager.createNativeQuery(
+                    "UPDATE files SET owner_id = :owner WHERE id = :file")
+                    .setParameter("owner", owner).setParameter("file", file.getId()).executeUpdate());
+            users.deleteById(otherOwner);
+        }
+    }
+
+    @Test void finalizationPreservesPermanentAllocationTargetAndJobIdentity() throws Exception {
+        StoredFile file = uploaded();
+        ClaimedJob claim = purge(file);
+        assertThat(handler.handle(context(claim))).isEqualTo(JobHandler.Result.SUCCEEDED);
+        assertThat(jobs.complete(claim)).isTrue();
+        assertThat(targetCount()).isEqualTo(1);
+        assertThat(workCount()).isEqualTo(1);
+        assertThat(jobRepository.findById(claim.id())).isPresent();
+        StoredFile reused = new StoredFile(UUID.randomUUID(), owner, null, "reused.txt", file.getStorageKey(), null, 1);
+        assertThatThrownBy(() -> metadata.createUploading(reused)).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> identity.beginWrite(file.getStorageKey())).isInstanceOf(IllegalStateException.class);
+        transaction.executeWithoutResult(status -> assertThat(entityManager.createNativeQuery(
+                "SELECT count(*) FROM file_storage_objects WHERE file_id = :file")
+                .setParameter("file", file.getId()).getSingleResult()).isEqualTo(1L));
+    }
+
+    @Test void workIdentityAndReceiptsAreImmutableAndFinalizationRequiresBytes() {
+        StoredFile file = uploaded();
+        ClaimedJob claim = purge(file);
+        progress.prepare(claim);
+        assertSqlRejected("UPDATE file_purge_work SET bucket = 'wrong' WHERE owner_id = :owner");
+        assertSqlRejected("UPDATE file_purge_work SET file_version = file_version + 1 WHERE owner_id = :owner");
+        assertSqlRejected("UPDATE file_purge_work SET metadata_finalized_at = clock_timestamp() WHERE owner_id = :owner");
+        deleteAndRecord(claim);
+        assertSqlRejected("UPDATE file_purge_work SET bytes_deleted_at = NULL, byte_receipt_job_id = NULL WHERE owner_id = :owner");
+        assertSqlRejected("UPDATE file_purge_work SET byte_receipt_job_id = gen_random_uuid() WHERE owner_id = :owner");
+        assertThat(progress.finalizeMetadata(claim)).isTrue();
+        assertSqlRejected("UPDATE file_purge_work SET metadata_finalized_at = NULL WHERE owner_id = :owner");
+        assertReceipts(file, true, true);
+    }
+
+    @Test void historicalSuccessImportsAuthoritativeOutcomeWithoutGarageOrJobReset() {
+        StoredFile file = uploaded();
+        ClaimedJob claim = purge(file);
+        storage.delete(binding.target(file.getStorageKey())); // Old handler's authoritative success.
+        assertThat(jobs.complete(claim)).isTrue();
+        var before = jobRepository.findById(claim.id()).orElseThrow();
+        clearInvocations(storage);
+        var page = recovery.recoverPage(null, 1);
+        assertThat(page.examined()).isEqualTo(1);
+        assertThat(page.finalized()).isEqualTo(1);
+        assertThat(page.nextCursor()).isEqualTo(claim.id());
+        verify(storage, never()).delete(any(StorageTarget.class));
+        assertReceipts(file, true, true);
+        assertThat(fileRepository.findById(file.getId())).isEmpty();
+        var after = jobRepository.findById(claim.id()).orElseThrow();
+        assertThat(after.getStatus()).isEqualTo(JobStatus.SUCCEEDED);
+        assertThat(after.getAttemptCount()).isEqualTo(before.getAttemptCount());
+        assertThat(after.getCompletedAt()).isEqualTo(before.getCompletedAt());
+        assertThat(after.getUpdatedAt()).isEqualTo(before.getUpdatedAt());
+        assertThat(recovery.recoverPage(null, 1).examined()).isZero();
+    }
+
+    @Test void historicalMissingOrChangedMetadataDoesNotInventWorkAndFailedJobsAreExcluded() {
+        StoredFile missing = uploaded();
+        ClaimedJob first = purge(missing);
+        storage.delete(binding.target(missing.getStorageKey()));
+        assertThat(jobs.complete(first)).isTrue();
+        fileRepository.deleteById(missing.getId());
+        StoredFile changed = uploaded();
+        ClaimedJob second = purge(changed);
+        storage.delete(binding.target(changed.getStorageKey()));
+        assertThat(jobs.complete(second)).isTrue();
+        transaction.executeWithoutResult(status -> entityManager.createNativeQuery(
+                "UPDATE files SET version = version + 1 WHERE id = :file")
+                .setParameter("file", changed.getId()).executeUpdate());
+        StoredFile failed = uploaded();
+        ClaimedJob third = purge(failed);
+        transaction.executeWithoutResult(status -> entityManager.createNativeQuery("""
+                UPDATE background_jobs SET status = 'FAILED', completed_at = clock_timestamp(),
+                    claim_token = NULL, claim_expires_at = NULL WHERE id = :id
+                """).setParameter("id", third.id()).executeUpdate());
+        var page = recovery.recoverPage(null, 100);
+        assertThat(page.examined()).isEqualTo(2);
+        assertThat(page.blocked()).isEqualTo(2);
+        assertThat(page.finalized()).isZero();
+        assertThat(workCount()).isZero();
+        assertThat(jobRepository.findById(first.id()).orElseThrow().getStatus()).isEqualTo(JobStatus.SUCCEEDED);
+        assertBytes(failed, "fixture");
+    }
+
+    @Test void recoveryKeysetBoundsProgressPastBlockedRows() {
+        for (int i = 0; i < 3; i++) {
+            StoredFile file = uploaded();
+            ClaimedJob claim = purge(file);
+            storage.delete(binding.target(file.getStorageKey()));
+            assertThat(jobs.complete(claim)).isTrue();
+            fileRepository.deleteById(file.getId());
+        }
+        var first = recovery.recoverPage(null, 2);
+        assertThat(first.examined()).isEqualTo(2);
+        assertThat(first.blocked()).isEqualTo(2);
+        var second = recovery.recoverPage(first.nextCursor(), 2);
+        assertThat(second.examined()).isEqualTo(1);
+        assertThat(recovery.recoverPage(second.nextCursor(), 2).examined()).isZero();
+        assertThatThrownBy(() -> recovery.recoverPage(null, 101)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test void pendingParentAllowsByteReceiptButRetainsFileForFutureDiscovery() throws Exception {
+        UUID folder = folder();
+        StoredFile file = uploadedIn(folder);
+        ClaimedJob claim = purge(file);
+        folders.deleteFolder(owner, folder);
+        folders.requestPermanentDeletion(owner, folder);
+        assertThat(handler.handle(context(claim))).isEqualTo(JobHandler.Result.SUCCEEDED);
+        assertThat(jobs.complete(claim)).isTrue();
+        assertMissing(file);
+        assertReceipts(file, true, false);
+        assertThat(fileRepository.findById(file.getId())).isPresent();
+        assertThat(recovery.recoverPage(null, 100).blocked()).isEqualTo(1);
+        assertReceipts(file, true, false);
+    }
+
+    @ParameterizedTest @ValueSource(booleans = {false, true})
+    void folderPurgeAndFileFinalizationRespectBothWinnerOrders(boolean folderWins) throws Exception {
+        UUID folder = folder();
+        StoredFile file = uploadedIn(folder);
+        ClaimedJob claim = purge(file);
+        deleteAndRecord(claim);
+        folders.deleteFolder(owner, folder);
+        CountDownLatch protectedWrite = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch attempted = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var first = executor.submit(() -> transaction.executeWithoutResult(status -> {
+                if (folderWins) { folders.requestPermanentDeletion(owner, folder); }
+                else { assertThat(progress.finalizeMetadata(claim)).isTrue(); }
+                protectedWrite.countDown();
+                await(release);
+            }));
+            assertThat(protectedWrite.await(5, TimeUnit.SECONDS)).isTrue();
+            var second = executor.submit(() -> {
+                attempted.countDown();
+                if (folderWins) { assertThat(progress.finalizeMetadata(claim)).isFalse(); }
+                else { folders.requestPermanentDeletion(owner, folder); }
+            });
+            assertThat(attempted.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> second.get(300, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(java.util.concurrent.TimeoutException.class);
+            release.countDown();
+            first.get(5, TimeUnit.SECONDS);
+            second.get(5, TimeUnit.SECONDS);
+            assertReceipts(file, true, !folderWins);
+            assertThat(fileRepository.findById(file.getId()).isPresent()).isEqualTo(folderWins);
+            assertThat(folderRepository.findById(folder).orElseThrow().getPurgeRequestedAt()).isNotNull();
+        } finally { release.countDown(); executor.shutdownNow(); executor.awaitTermination(5, TimeUnit.SECONDS); }
+    }
+
+    @Test void finalizerReadsFreshStateAfterHierarchyLockEvenWithCachedEntity() throws Exception {
+        StoredFile file = uploaded();
+        ClaimedJob claim = purge(file);
+        deleteAndRecord(claim);
+        CountDownLatch cached = new CountDownLatch(1);
+        CountDownLatch modified = new CountDownLatch(1);
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            var result = executor.submit(() -> transaction.execute(status -> {
+                entityManager.find(StoredFile.class, file.getId());
+                cached.countDown();
+                await(modified);
+                return progress.finalizeMetadata(claim);
+            }));
+            assertThat(cached.await(5, TimeUnit.SECONDS)).isTrue();
+            transaction.executeWithoutResult(status -> {
+                hierarchy.acquireExclusive(owner);
+                entityManager.createNativeQuery("UPDATE files SET version = version + 1 WHERE id = :file")
+                        .setParameter("file", file.getId()).executeUpdate();
+            });
+            modified.countDown();
+            assertThat(result.get(5, TimeUnit.SECONDS)).isFalse();
+            assertReceipts(file, true, false);
+            assertThat(fileRepository.findById(file.getId())).isPresent();
+        } finally { modified.countDown(); executor.shutdownNow(); executor.awaitTermination(5, TimeUnit.SECONDS); }
+    }
+
+    private void deleteAndRecord(ClaimedJob claim) {
+        var prepared = progress.prepare(claim);
+        storage.delete(prepared.target());
+        progress.recordBytesDeleted(claim);
+    }
+
+    private void assertSqlRejected(String sql) {
+        assertThatThrownBy(() -> transaction.executeWithoutResult(status -> entityManager.createNativeQuery(sql)
+                .setParameter("owner", owner).executeUpdate())).hasRootCauseInstanceOf(java.sql.SQLException.class);
+    }
+
+    private long workCount() {
+        return transaction.execute(status -> ((Number) entityManager.createNativeQuery(
+                "SELECT count(*) FROM file_purge_work WHERE owner_id = :owner")
+                .setParameter("owner", owner).getSingleResult()).longValue());
+    }
+
+    private UUID folder() {
+        UUID id = folders.createFolder(owner, null, "Purge folder");
+        folderIds.add(id);
+        return id;
+    }
+
+    private StoredFile uploadedIn(UUID folder) {
+        var result = files.uploadFile(owner, folder,
+                new MockMultipartFile("file", "fixture.txt", "text/plain", "fixture".getBytes()));
+        fileIds.add(result.fileId());
+        StoredFile file = fileRepository.findById(result.fileId()).orElseThrow();
+        objectKeys.add(file.getStorageKey());
+        return file;
+    }
+
+    private void assertExpiredAfterJobLockWait(ClaimedJob claim, Runnable mutation) throws Exception {
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch attempted = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var holder = executor.submit(() -> transaction.executeWithoutResult(status -> {
+                entityManager.createNativeQuery("SELECT id FROM background_jobs WHERE id = :id FOR UPDATE")
+                        .setParameter("id", claim.id()).getSingleResult();
+                locked.countDown();
+                await(release);
+                due(claim.id(), true); // Commit expiration while the contender is waiting.
+            }));
+            assertThat(locked.await(5, TimeUnit.SECONDS)).isTrue();
+            var contender = executor.submit(() -> { attempted.countDown(); mutation.run(); });
+            assertThat(attempted.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> contender.get(300, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(java.util.concurrent.TimeoutException.class);
+            release.countDown();
+            holder.get(5, TimeUnit.SECONDS);
+            assertThatThrownBy(() -> contender.get(5, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(FilePurgeProgressService.StaleClaimException.class);
+        } finally { release.countDown(); executor.shutdownNow(); executor.awaitTermination(5, TimeUnit.SECONDS); }
+    }
+
+    private static void await(CountDownLatch latch) {
+        try { assertThat(latch.await(10, TimeUnit.SECONDS)).isTrue(); }
+        catch (InterruptedException failure) { Thread.currentThread().interrupt(); throw new AssertionError(failure); }
     }
 
     @Test void initiallyMissingObjectIsSuccess() throws Exception {
@@ -261,7 +716,8 @@ class FilePurgeIntegrationTest {
             assertThat(handler.handle(context(replacement))).isEqualTo(JobHandler.Result.SUCCEEDED);
             assertThat(jobs.complete(replacement)).isTrue();
             release.countDown();
-            assertThat(result.get(5, TimeUnit.SECONDS)).isEqualTo(JobHandler.Result.SUCCEEDED);
+            assertThatThrownBy(() -> result.get(5, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(InterruptedException.class);
             assertThat(jobs.complete(stale)).isFalse();
             assertMissing(old);
             assertBytes(newer, "fixture");
@@ -528,6 +984,16 @@ class FilePurgeIntegrationTest {
     private long targetCount() {
         return transaction.execute(status -> ((Number) entityManager.createNativeQuery(
                 "SELECT count(*) FROM file_purge_targets WHERE owner_id = :owner").setParameter("owner", owner).getSingleResult()).longValue());
+    }
+
+    private void assertReceipts(StoredFile file, boolean bytes, boolean finalized) {
+        transaction.executeWithoutResult(status -> {
+            Object[] receipts = (Object[]) entityManager.createNativeQuery("""
+                    SELECT bytes_deleted_at IS NOT NULL, metadata_finalized_at IS NOT NULL
+                    FROM file_purge_work WHERE file_id = :file
+                    """).setParameter("file", file.getId()).getSingleResult();
+            assertThat(receipts).containsExactly(bytes, finalized);
+        });
     }
 
     private void due(UUID id, boolean expire) {

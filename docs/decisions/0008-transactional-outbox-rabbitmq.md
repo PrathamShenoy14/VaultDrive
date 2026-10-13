@@ -1,6 +1,6 @@
 # ADR-0008: Transactional outbox and durable asynchronous jobs
 
-- Status: Accepted; broker/outbox/job/consumer/worker foundation and trusted-writer file byte purge implemented; folder purge and metadata finalization planned
+- Status: Accepted; broker/outbox/job/consumer/worker foundation, trusted-writer file byte purge and standalone metadata finalization implemented; folder purge planned
 - Date: 2026-10-09
 
 ## Context
@@ -26,7 +26,7 @@ Garage/S3 calls will remain outside metadata database transactions. Workers will
 - Publishers and consumers must assume at-least-once effects and be idempotent; exactly-once delivery is not required.
 - Purge and reconciliation workers must preserve the lifecycle, hierarchy, ownership, and lock-order invariants in ADRs 0005–0007.
 - The earlier polling-first possibility in ADR-0006 is superseded by this decision.
-- Phase 1A provides development RabbitMQ infrastructure; Phase 1B provides atomic purge-request outbox persistence; Phase 1C provides leased publication, confirms, bounded retries, and expired-claim recovery; Phase 2A provides job persistence and fenced lifecycle/recovery primitives; Phase 2B provides validated notification ingestion with commit-before-ACK and sanitized quarantine; Phase 2C provides bounded worker dispatch, lease renewal and scheduled recovery for registered handler types. Phase 2D.1 adds trusted-writer file byte purge. Folder purge, metadata finalization and missed-job backfill remain unimplemented.
+- Phase 1A provides development RabbitMQ infrastructure; Phase 1B provides atomic purge-request outbox persistence; Phase 1C provides leased publication, confirms, bounded retries, and expired-claim recovery; Phase 2A provides job persistence and fenced lifecycle/recovery primitives; Phase 2B provides validated notification ingestion with commit-before-ACK and sanitized quarantine; Phase 2C provides bounded worker dispatch, lease renewal and scheduled recovery for registered handler types. Phase 2D.1 adds trusted-writer file byte purge; Phase 2D.2 Slice 2 adds shared file receipts and standalone metadata finalization. Folder purge and missed-job backfill remain unimplemented.
 
 ## Phase 1B schema and transaction decision
 
@@ -55,7 +55,7 @@ Existing pending-purge requests predating V12 are not backfilled by this migrati
 
 ## Deferred decisions
 
-Folder purge execution, metadata finalization, missed-notification/job backfill, outbox/job/quarantine retention, ordering guarantees and operational tuning remain open. The Phase 1B event contract remains unchanged. Publisher, job, consumer, worker foundation and Phase 2D.1 file-purge choices are recorded separately below.
+Folder purge execution, missed-notification/job backfill, outbox/job/quarantine retention, ordering guarantees and operational tuning remain open. Standalone metadata finalization is supplied by Phase 2D.2 Slice 2 below. The Phase 1B event contract remains unchanged. Publisher, job, consumer, worker foundation and file-purge choices are recorded separately below.
 
 ## Phase 1C publisher protocol
 
@@ -173,3 +173,30 @@ deferred. Workers and consumers remain disabled by default; enabling workers now
 permits actual eligible file deletion. Presigned/multipart transfers need a separate
 writer-fencing design before integration. See [the storage contract, verification
 and recovery runbook](../file-purge.md).
+
+## Phase 2D.2 Slice 2 shared progress and metadata finalization
+
+V17 adds `file_purge_work`, unique by file ID and storage key, with immutable
+verified binding and resource lifecycle snapshot. Monotonic byte/finalization
+receipts survive metadata removal without cascading foreign keys. V16 targets
+and permanent allocations remain unchanged. FILE_PURGE preparation, byte receipt
+recording and metadata finalization use short separate resource transactions;
+Garage I/O remains outside them. Their order is hierarchy, fresh resource, work,
+then job for final fencing, extending the resource-checkpoint protocol without
+changing existing job-only locking. Token and PostgreSQL-clock lease failures
+roll back all progress in that transaction.
+
+Metadata removal requires authoritative byte proof and a fresh exact lifecycle/
+ownership/identity match. Removal and its receipt commit atomically. Pending
+folder ancestry defers removal conservatively so future discovery cannot lose a
+descendant; original standalone byte deletion may still proceed. Retries use
+committed receipts, never missing metadata alone. SUCCEEDED retains its byte-only
+meaning; metadata finalization is tracked separately.
+
+Explicit bounded keyset recovery imports authoritative historical SUCCEEDED file
+outcomes only through matching V16 targets and allocations, under the same final
+job lock. It does not call Garage, reset/reinterpret jobs or infer missing legacy
+identity. Each candidate has a separate transaction; blocked rows do not starve
+later pages. No scheduler, HTTP endpoint, folder manifest, CONTINUE semantics,
+topology/event changes or new enablement defaults are introduced.
+See [file purge recovery](../file-purge.md) and [the remaining folder slices](../folder-purge-design.md).

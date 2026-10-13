@@ -2,11 +2,12 @@
 
 Status: Approved implementation design; implementation in progress.
 Phase 2D.2 Slice 1 completed in commit `8ca8d9b`.
-Slices 2–6 remain pending.
+Phase 2D.2 Slice 2 completed and verified on 2026-10-13.
+Slices 3–6 remain pending.
 
 Recommend **one durable folder job, a paged subtree manifest, and shared per-file deletion progress**. Keep the existing trusted-writer contract, v1 events, RabbitMQ topology, and storage adapter. Add explicit continuation handling so successful batches do not exhaust the retry budget.
 
-The current [file handler](../backend/src/main/java/com/vaultdrive/worker/FilePurgeJobHandler.java) deletes bytes only; [V16](../backend/src/main/resources/db/migration/V16__persist_file_storage_identity_and_purge_targets.sql) retains immutable targets and allocations. Folder execution and metadata removal remain unimplemented.
+The current [file handler](../backend/src/main/java/com/vaultdrive/worker/FilePurgeJobHandler.java) uses shared file progress and conditional metadata finalization; [V16](../backend/src/main/resources/db/migration/V16__persist_file_storage_identity_and_purge_targets.sql) retains immutable targets and allocations. Folder execution and subtree metadata removal remain unimplemented.
 
 This design follows [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md), [ADR-0007](decisions/0007-concurrency-locking.md), [file purge](file-purge.md), [background jobs](background-jobs.md), and [job workers](job-workers.md).
 
@@ -112,6 +113,54 @@ Use the same file finalizer for standalone and folder work:
 
 Continue documenting file `SUCCEEDED` as proof of byte deletion. Use a separate finalization marker so historical successes remain meaningful.
 
+### Slice 2 implementation and recovery
+
+[V17](../backend/src/main/resources/db/migration/V17__create_shared_file_purge_work.sql)
+adds `file_purge_work`, with file-ID primary key, unique retained key, immutable
+owner/folder/version/status/lifecycle snapshot and exact verified storage binding.
+Nullable `bytes_deleted_at` plus `byte_receipt_job_id` establish byte success;
+`metadata_finalized_at` is separate and requires byte proof. Constraints and an
+update trigger prohibit identity changes and receipt clearing/replacement. No
+resource or job foreign key can cascade away work. V16 is untouched.
+
+[FilePurgeProgressService](../backend/src/main/java/com/vaultdrive/worker/FilePurgeProgressService.java)
+prepares verified pending READY work, records byte receipts after Garage I/O,
+and separately finalizes freshly matching metadata. These are independent short
+transactions, with hierarchy/resource/work/job lock order and PostgreSQL-clock
+fencing. Finalization checks owner, folder, storage key, version, READY state and
+all captured lifecycle timestamps. It atomically removes metadata and establishes
+its receipt. Original standalone byte deletion may proceed beneath pending
+folder ancestry, but every pending ancestor defers metadata removal. No manifest
+or discovery-sealed exception exists in Slice 2.
+
+A lost byte receipt replays the immutable DELETE; a committed receipt skips I/O
+on retry. A lost metadata transaction rolls back both removal and finalization
+receipt. A lost job completion after removal replays from retained receipts.
+Missing metadata alone never proves byte success or establishes a finalization
+receipt. Missing metadata with byte proof can finish the byte job while remaining
+unfinalized for review.
+
+[FilePurgeRecoveryService](../backend/src/main/java/com/vaultdrive/worker/FilePurgeRecoveryService.java)
+provides explicit UUID-keyset recovery pages of 1–100 historical `SUCCEEDED`
+file jobs with matching V16 targets. Each candidate independently verifies
+allocation/work identity, locks the successful job last, imports authoritative
+byte success and applies the same finalizer. No job status, attempts or timestamps
+change; no Garage call or inferred target is used. Missing/changed historical
+metadata cannot create a work snapshot. Blocked candidates do not starve later
+pages; restart from the beginning on a subsequent pass. Recovery is not scheduled
+or exposed as an HTTP API. See [file purge recovery](file-purge.md).
+
+This slice does not implement folder runs/manifests, subtree discovery,
+never-written inherited-file proof, folder execution/removal or CONTINUE semantics.
+Workers, consumers and publisher retain disabled defaults and v1 contracts.
+
+Validation: 96 focused tests passed, including 44 PostgreSQL/Garage file-purge
+tests. The full safely runnable suite ran 532 tests: 525 passed, 7 environment-gated
+RabbitMQ tests skipped, zero failures/errors. Fixtures used disposable unique
+storage objects; no buckets, infrastructure or existing Garage objects were
+changed. This is deterministic crash-boundary/rollback coverage, not a real
+process-kill experiment. The broker protocol was unchanged and not reverified live.
+
 ## Failure-mode analysis
 
 | Failure | Recovery / invariant |
@@ -134,7 +183,7 @@ Legacy standalone requests missing V16 targets remain blocked even if today's al
 | Slice | Changes and acceptance evidence |
 |---|---|
 | 1. Restore eligibility — COMPLETE (`8ca8d9b`) | Rejects own pending folder purge as `404`; concurrency and regression tests passed. |
-| 2. Shared file progress/finalization | Add immutable work identity and monotonic receipts; test rollback, stale tokens, missing-row replay, retained allocations, and historical byte-success finalization. |
+| 2. Shared file progress/finalization — COMPLETE | V17 identity/receipts, standalone finalization and bounded historical recovery; rollback, stale/expired fencing, missing-row replay, retained allocations and concurrent folder guards verified. |
 | 3. Bounded continuation | Extend worker/service accounting; prove healthy work beyond ten batches completes, while ten failures/abandonments exhaust. |
 | 4. Durable subtree discovery | Add run, folder frontier, and file membership records; test paged restart, complete inclusion, nested intents, moves/restores, and finalization-versus-discovery races. |
 | 5. Folder byte execution | Register the folder handler; test existing file-job overlap, partial DELETE recovery, unsafe uploads, legacy bindings, and binding drift. |
@@ -144,4 +193,6 @@ Use append-only migrations after V16 for progress/manifest tables, uniqueness an
 
 Keep batches, execution budgets, database waits, and queues bounded. Memory should scale with page size; durable manifest storage necessarily scales with subtree size. Batch tuning and throughput remain unmeasured.
 
-The design review inspected implementation and tests without running tests or modifying code, schema, infrastructure, or data. Implementation and runtime verification remain future work.
+The original design review was read-only. Slice 1 and the Slice 2 implementation
+are documented above; Slices 3–6 remain planned. Test execution results above
+describe repository verification, not production enablement or load measurements.

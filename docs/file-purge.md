@@ -1,4 +1,4 @@
-# Physical file purge (Phase 2D.1)
+# Physical file purge (Phase 2D.1 and Phase 2D.2 Slice 2)
 
 ## Accepted storage contract
 
@@ -67,10 +67,18 @@ The production `FilePurgeJobHandler` supports `FILE_PURGE_REQUESTED` notificatio
 through the existing `FILE_PURGE` job type. There is no folder handler.
 
 Preparation reads the immutable event-ID target, takes the shared owner hierarchy
-lock, then freshly locks the matching pending READY file row. Ownership, key,
-version and purge timestamp must match; pending-purge ancestry is checked. If a
-folder purge subsequently owns that ancestry, the file job waits/fails safely and
-needs operator review. Job locks are not held with hierarchy/resource locks.
+lock, then freshly locks the file row. Ownership, key, version and purge timestamp
+must match a pending READY file and its retained verified allocation before new
+work is created. V17 captures that storage identity and lifecycle snapshot in
+`file_purge_work`, unique by file ID. Work rows have no resource/job foreign keys;
+they survive metadata removal. SQL constraints and an update trigger preserve
+immutable identity and receipts. V16 targets and allocations are unchanged.
+
+Resource transactions use **owner hierarchy lock → fresh resource rows → work
+rows → job row for final fencing**. Scalar SQL reads avoid stale managed-entity
+state. Token, job identity and PostgreSQL-clock lease checks after the job lock
+and at the final write reject stale progress by rolling back the transaction.
+Existing job-only claim/renew/complete/retry operations retain their lock protocol.
 Preparation commits before a live-token lease renewal and Garage DELETE.
 
 The storage adapter requires the persisted binding to exactly match its trusted
@@ -96,15 +104,63 @@ access/binding/storage classifications. All failed outcomes use the existing
 bounded ten-attempt/backoff lifecycle, including failures requiring operator repair;
 there is no new immediate-failure state. No raw exception detail is logged.
 
+After verified DELETE/absence, a short fenced transaction records
+`bytes_deleted_at` and `byte_receipt_job_id`. A separate fenced transaction
+conditionally deletes metadata and records `metadata_finalized_at` atomically.
+Receipts can only be established once, never cleared or replaced. Finalization
+requires matching owner, folder, key, version, READY status, creation/update/trash/
+purge timestamps, and a still-matching V16 target/allocation. Any mismatch retains
+metadata; byte success remains independently meaningful.
+
+An original standalone file intent can delete bytes beneath pending folder
+ancestry, but metadata removal is conservatively deferred beneath **every** pending
+folder ancestor. The shared hierarchy lock makes this check atomic with exclusive
+folder purge requests. No manifest or discovery-complete exception exists yet;
+retained file rows preserve future enumeration. Folder byte execution and
+never-written inherited-file proofs remain later slices. UPLOADING/FAILED writers
+and unknown legacy bindings are not newly executable.
+
 Explicit handler success permits the worker's live-token/unexpired-lease fenced
-completion. A DELETE followed by crash or lost completion is safely replayed under
-the trusted-writer contract. A cancelled or stale result cannot complete a newer
+completion. A cancelled or stale result cannot record receipts or complete a newer
 claim. No PostgreSQL transaction or hierarchy lock spans Garage I/O.
 
 **SUCCEEDED means the intended object's bytes were deleted or already absent.**
-Pending file metadata, allocation and target remain. Final metadata removal,
-recursive folder purge, reconciliation, backfill, retention and reset tooling are
-not implemented. The HTTP permanent-delete API still only records intent.
+It does not imply metadata finalization. Allocation, target, work, receipts and
+job identity remain after file metadata removal. Recursive folder purge,
+reconciliation, historical-intent backfill, retention and reset tooling remain
+unimplemented. The HTTP permanent-delete API still only records intent.
+
+## Crash recovery and historical success
+
+- DELETE succeeds but no receipt commits: retry DELETE against the same immutable
+  target. Missing metadata without a byte receipt blocks execution; it is never
+  proof that Garage deletion succeeded.
+- Byte receipt commits but finalization fails/rolls back: retry uses the receipt
+  without another DELETE. Metadata and its finalization receipt commit together.
+- Metadata removal commits but job completion is lost: replay uses retained work
+  and receipts, then the worker fences completion normally.
+- Metadata is independently missing with only a byte receipt: byte success can
+  complete, but no metadata-finalization receipt is invented. Retain for review.
+
+`FilePurgeRecoveryService.recoverPage(afterJobId, limit)` is an explicit Spring
+service operation, not a scheduled worker or HTTP endpoint. Invoke without an
+enclosing transaction; `limit` is 1–100. Start with a null cursor, pass each page's
+`nextCursor` to the next call, and stop on `examined == 0`. Restart from null in a
+later recovery pass to reconsider deferred rows. UUID keyset pagination advances
+past blocked rows; each candidate has its own short transaction. Reports count
+examined/finalized/blocked candidates, without storing raw exception details.
+
+The scan selects only matching V16 targets for `SUCCEEDED FILE_PURGE` jobs with
+no finalization receipt. It verifies target/allocation and fresh metadata before
+creating missing work. Under the final job lock it imports authoritative historical
+byte success as a receipt, then attempts the same conservative finalization.
+The import timestamp is receipt-adoption time, not an inferred Garage deletion
+time. Job status, attempts, completion time and updated time are unchanged; no
+Garage call, terminal-job reset, inferred target or success reinterpretation occurs.
+Missing/changed metadata without existing work stays blocked. Existing matching
+work can retain byte proof while finalization is deferred. FAILED/PENDING/RUNNING
+jobs and pre-V16/unknown targets are excluded. Database failures propagate;
+identity/eligibility failures remain blocked and the cursor advances.
 
 ## Enablement and recovery
 
@@ -132,7 +188,11 @@ and UUID file keys per test. It covers deletion, missing objects, successful-eff
 replay, transient failures/retry, stale/cancelled claims, late external effects,
 actual worker completion, transaction/lock release, immutable target/allocation
 guards, atomic rollback and legacy migration, and preservation of newer/unrelated
-objects. `S3ObjectStorageServiceTest` checks binding rejection, sanitized provider
+objects. Slice 2 additionally covers independent receipt/finalization crash and
+rollback boundaries, concurrent duplicates, stale/lock-wait expiry fencing,
+missing metadata, lifecycle/ownership/key mismatch, permanent allocation retention,
+historical success and bounded recovery, and both folder-purge/finalization winner
+orders. `S3ObjectStorageServiceTest` checks binding rejection, sanitized provider
 classification, no enclosing transaction and timeout configuration. Existing storage
 tests now allocate unique keys too. Tests delete only their own disposable objects;
 they do not modify buckets or VM services.
@@ -140,7 +200,9 @@ they do not modify buckets or VM services.
 ```powershell
 cd backend
 . .\.env.local.ps1
-.\mvnw.cmd "-Dtest=FilePurgeIntegrationTest,S3ObjectStorageServiceTest,S3StorageIntegrationTest,PurgeOutboxIntegrationTest" test
+.\mvnw.cmd "-Dtest=FilePurgeIntegrationTest,S3ObjectStorageServiceTest,S3StorageIntegrationTest,PurgeOutboxIntegrationTest,FolderPurgeConcurrencyIntegrationTest" test
+# For the safely runnable full suite, keep live broker tests environment-gated:
+Remove-Item Env:RABBITMQ_TEST_VHOST -ErrorAction SilentlyContinue
 .\mvnw.cmd test
 ```
 
