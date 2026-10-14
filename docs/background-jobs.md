@@ -9,8 +9,8 @@ with scheduling, renewal and expired-claim recovery for registered handler types
 No API directly creates jobs. Phase 2D.1 adds a [file byte-purge handler](file-purge.md)
 under the accepted trusted-writer assumption. Slice 2 adds conservative standalone
 metadata finalization; Slice 3 adds V18 bounded continuation. Slices 4–5 add
-folder discovery and file byte execution. Folder metadata removal and
-reconciliation remain unimplemented.
+folder discovery and file byte execution; Slice 6 adds metadata removal and
+durable FINALIZED proof. Reconciliation remains unimplemented.
 Existing purge APIs and outbox publisher behavior are unchanged.
 
 ## Identity and creation
@@ -132,7 +132,8 @@ its baseline: it must commit further useful progress to CONTINUE, or SUCCESS if
 the prior work finished the job. Old progress cannot justify endless empty yields.
 The foundation enforces transaction, CAS, monotonicity, and per-claim evidence;
 each future handler must establish the business meaning of its checkpoint and
-test its atomic cursor/receipt writes. No production handler returns CONTINUE yet.
+test its atomic cursor/receipt writes. The folder handler now uses CONTINUE for
+useful discovery, byte and metadata pages.
 
 V18 backfills failures as prior claims minus the unresolved RUNNING or successful
 SUCCEEDED execution; PENDING/FAILED claims were all failed/abandoned. It preserves
@@ -162,3 +163,19 @@ cd backend
 
 Execution results belong in task reports. No production load, process-kill,
 multi-node failure, or physical cleanup claim follows from these tests.
+
+
+## Folder terminal-success proof (Phase 2D.2 Slice 6)
+
+The folder handler's durable work state is DISCOVER -> DELETE_FILES -> DELETE_FOLDERS
+-> FINALIZED, independent of this job's PENDING/RUNNING/terminal lifecycle. File
+finalizations, leaf removal receipts and root FINALIZED progress commit with
+their checkpoints atomically. Root removal and FINALIZED share one transaction; job SUCCEEDED is a
+later fenced outcome. A missing root alone is never enough to complete a job.
+
+A new claim after lost root completion validates the retained manifest counts,
+removal receipts, verified finalized file work and absent resource rows before
+returning SUCCEEDED. Replay advances no revision. Earlier committed incomplete
+batches resume and require new progress for CONTINUE. Standalone FILE_PURGE success
+remains byte-only; folder finalization never resets standalone jobs. See [the
+folder recovery contract](folder-purge-design.md#slice-6-bottom-up-metadata-removal-and-durable-finalization).

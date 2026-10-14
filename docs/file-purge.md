@@ -1,4 +1,4 @@
-# Physical file purge (Phase 2D.1 and Phase 2D.2 Slices 2–5)
+# Physical file purge (Phase 2D.1 and Phase 2D.2 Slices 2–6)
 
 ## Accepted storage contract
 
@@ -128,8 +128,8 @@ claim. No PostgreSQL transaction or hierarchy lock spans Garage I/O.
 
 **SUCCEEDED means the intended object's bytes were deleted or already absent.**
 It does not imply metadata finalization. Allocation, target, work, receipts and
-job identity remain after file metadata removal. Bottom-up folder removal,
-reconciliation, historical-intent backfill, retention and reset tooling remain
+job identity remain after file metadata removal. Slice 6 implements bottom-up folder removal.
+Reconciliation, historical-intent backfill, retention and reset tooling remain
 unimplemented. The HTTP permanent-delete API still only records intent.
 
 ## Crash recovery and historical success
@@ -226,8 +226,8 @@ acceptance that wins preserves the row until discovery has sealed. This check
 and metadata removal occur under the same hierarchy coordination.
 
 Resume folder discovery from its committed cursors, not by recreating events or
-resetting jobs. Slice 5 resumes sealed DELETE_FILES using shared work; bottom-up
-folder removal remains planned. See [the discovery recovery
+resetting jobs. Slice 5 resumes sealed DELETE_FILES using shared work; Slice 6 completes bottom-up
+folder removal. See [the discovery recovery
 contract](folder-purge-design.md#slice-4-durable-paginated-discovery).
 
 ## Slice 5 shared folder work and blocked-file recovery
@@ -253,5 +253,22 @@ unchanged blocked retries consume ordinary failure budget, and fresh members are
 processed first. Keep the root barrier and inspect immutable membership/work/
 allocation identity during recovery. No automatic reconciliation, snapshot rewrite,
 terminal-job reset or unsafe-writer quiescence inference is provided. Folder byte
-completion transitions only to DELETE_FOLDERS; Slice 6 removal is pending.
+completion transitions to DELETE_FOLDERS; Slice 6 now executes metadata removal.
 See [Slice 5 workflow and recovery](folder-purge-design.md#slice-5-folder-led-file-byte-deletion).
+
+
+## Slice 6 shared finalization and folder recovery
+
+Folder DELETE_FOLDERS reuses V17's atomic file metadata removal/receipt primitive,
+with exact sealed member lifecycle/binding/ownership and original allocation/target
+checks. V22 also permits finalization after V20's coordinated never-written proof,
+without inventing a byte receipt. Missing metadata with only byte proof cannot
+acquire a finalization receipt. Matching already-finalized work skips removal.
+
+Folder and standalone finalizers serialize under hierarchy/resource/work locks and
+reuse immutable proof; no standalone job status, counters or receipts are reset.
+A standalone job can finish after the folder metadata/root is gone from retained
+V16/V17 identity and byte proof. Folder success additionally requires durable
+FINALIZED run proof after root-last removal. Retain all evidence for crash replay;
+missing/corrupt records require approved review rather than inferred success.
+See [Slice 6 recovery](folder-purge-design.md#slice-6-bottom-up-metadata-removal-and-durable-finalization).

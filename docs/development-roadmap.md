@@ -41,7 +41,7 @@ See [development setup and verification instructions](rabbitmq-development.md). 
 - [x] Insert file/folder purge-intent events with Spring Data JPA inside the existing business transaction; reject standalone writer calls.
 - [x] Add real PostgreSQL tests for atomic commit/rollback, uncommitted visibility, insertion failures, ownership/eligibility rejection, and repeated requests on both paths.
 
-See [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md). Phase 1B covers persistence; Phase 1C adds publication and publisher recovery; Phase 2A adds job persistence; Phase 2B adds consumer ingestion; Phase 2C adds opt-in worker scheduling/renewal and supported-type recovery. Phase 2D.1 adds file byte purge; folder execution and historical-intent backfill remain unimplemented. Test execution results belong in the task report.
+See [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md). Phase 1B covers persistence; Phase 1C adds publication and publisher recovery; Phase 2A adds job persistence; Phase 2B adds consumer ingestion; Phase 2C adds opt-in worker scheduling/renewal and supported-type recovery. Phase 2D.1 adds file byte purge; Phase 2D.2 adds folder execution; historical-intent backfill remains unimplemented. Test execution results belong in the task report.
 
 ## Phase 1C — Reliable outbox publication
 
@@ -56,7 +56,7 @@ See [publisher development/recovery instructions](outbox-publishing.md) and ADR-
 
 Goal: remove Garage objects asynchronously and finalize metadata without pretending PostgreSQL and S3 share a transaction.
 
-- Partially implemented ADR-0008 architecture: development RabbitMQ, atomic purge-request outbox persistence, leased publication, durable jobs, consumer ingestion, opt-in scheduling/renewal and trusted-writer file byte purge are present; folder purge, metadata finalization and missed-job backfill remain planned.
+- Partially implemented ADR-0008 architecture: development RabbitMQ, atomic purge-request outbox persistence, leased publication, durable jobs, consumer ingestion, opt-in scheduling/renewal and trusted-writer file byte purge are present; folder purge and metadata finalization are now implemented by Phase 2D.2; missed-job backfill remains planned.
 - Consume at-least-once notifications idempotently; extend atomic outbox persistence to future business transitions where required.
 - Have idempotent workers claim durable jobs in PostgreSQL; use scheduled database scans to recover missed notifications, retries, and interrupted work. Database polling is a recovery and publishing mechanism, not an alternative execution topology.
 - Define safe job claiming for multiple worker instances, retry/backoff, attempt metadata, and terminal-failure handling.
@@ -124,7 +124,7 @@ remain open.
 
 Workers and consumers remain disabled by default. Job success records the byte
 deletion outcome only; Slice 2 below tracks standalone metadata finalization
-separately. Recursive folder purge remains planned. Independent writers can bypass
+separately. Phase 2D.2 completes eligible recursive folder purge. Independent writers can bypass
 application protections; Garage does not
 enforce conditional/version-specific deletion. Execution results belong in task reports.
 
@@ -140,7 +140,8 @@ enforce conditional/version-specific deletion. Execution results belong in task 
   membership and standalone-finalization coordination.
 - [x] Slice 5: registered folder handler, bounded shared byte deletion/never-written
   proof, member checkpoints and DELETE_FOLDERS transition.
-- [ ] Slice 6: bottom-up folder metadata removal and root finalization.
+- [x] Slice 6: V22 bounded bottom-up folder metadata removal, retained receipts,
+  shared file finalization and atomic root/FINALIZED/checkpoint recovery.
 
 See [the approved folder purge slices](folder-purge-design.md). A folder handler
 is registered; scheduled finalization recovery remains absent. Slice 4 manifests are implemented. CONTINUE and its required

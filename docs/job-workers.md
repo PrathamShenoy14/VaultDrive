@@ -5,8 +5,8 @@ The opt-in worker schedules existing PostgreSQL jobs and dispatches registered
 [file byte-purge handler](file-purge.md), with immutable targets and the accepted
 trusted-writer storage contract. Explicit enablement can execute eligible file jobs.
 Slice 2 adds conservative standalone finalization. Slice 5 registers folder
-discovery and file byte execution. Folder metadata removal, upload reconciliation
-and missed-notification backfill remain planned. Scheduling and consumers stay disabled by default.
+discovery and file byte execution; Slice 6 adds metadata removal and FINALIZED replay.
+Upload reconciliation and missed-notification backfill remain planned. Scheduling and consumers stay disabled by default.
 
 ## Configuration and capacity
 
@@ -235,9 +235,25 @@ locks. Folder and standalone jobs coordinate through immutable V17 per-file work
 without modifying each other's job rows. Workers, consumers and publisher retain
 disabled defaults; topology and v1 notifications are unchanged.
 
-Slice 5 stops at DELETE_FOLDERS and never returns folder SUCCEEDED. Subsequent
-invocations return RETRY, so explicit enablement before Slice 6 can exhaust that
-job while preserving the completed byte phase/root barrier. Do not enable a
-production recursive purge on the assumption that metadata removal exists.
+Slice 6 replaces the former DELETE_FOLDERS RETRY stopping point with bounded
+metadata finalization. The root barrier remains until root removal commits with
+FINALIZED proof. Successful incomplete pages return CONTINUE.
 Recovery retains the same job/run/receipts, and terminal resets require separate
 approval. See [the implemented workflow and recovery](folder-purge-design.md#slice-5-folder-led-file-byte-deletion).
+
+
+## Slice 6 metadata execution and recovery
+
+At DELETE_FOLDERS, reserve ten seconds of remaining runtime and execute one
+1-20-unit database page. Remaining file finalizations precede UUID-ordered current
+leaves; the root has a separate final page. Each removal/receipt page and V18
+checkpoint commit under exclusive hierarchy coordination and the final live-token,
+PostgreSQL-clock lease fence. No storage call enters these transactions. Success
+is returned only after atomic root removal/FINALIZED or validated FINALIZED replay.
+
+A committed child page survives abandonment and resumes at current leaves. A lost
+job completion after root removal needs only retained proof replay and the usual
+fenced completion. Missing root without proof, missing receipts/manifests, changed
+lifecycle and unexpected descendants fail closed. Retain all run/member/removal,
+allocation/target/work and job identities; no terminal reset or proof repair is
+automatic. Defaults remain disabled. See [metadata recovery and bounds](folder-purge-design.md#slice-6-bottom-up-metadata-removal-and-durable-finalization).

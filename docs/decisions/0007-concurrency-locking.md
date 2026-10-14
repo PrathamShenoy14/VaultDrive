@@ -153,3 +153,31 @@ path never locks a standalone job or requires its success. Preparation commits
 before renewal/DELETE; Garage I/O never spans a PostgreSQL transaction. Both jobs
 can repeat the same immutable DELETE and establish one monotonic shared receipt.
 See [Slice 5 tests and recovery](../folder-purge-design.md#slice-5-folder-led-file-byte-deletion).
+
+
+## Phase 2D.2 Slice 6 durable metadata removal
+
+Extend the sealed run with retained V22 folder-removal receipts, immutable manifest
+counts and FINALIZED timestamp. Reuse shared V17 file removal/receipt transactions
+for verified byte proof or V20 coordinated never-written proof, preserving exact
+owner/lifecycle/storage/manifest/target validation and pending-purge barriers.
+Standalone job state/counters/receipts are never reset or replaced.
+
+Use exclusive owner hierarchy coordination for each metadata page: fresh root and
+resource rows in UUID order, allocation/work or run/removal progress, then job row
+for the final checkpoint CAS/token/PostgreSQL-clock lease fence. No resource lock
+is acquired after the job lock and no transaction spans Garage I/O. At most twenty
+files or current leaf folders are removed per ten-second transaction; statements
+and lock waits retain five-/two-second bounds. Set-based integrity scans can time
+out safely on large manifests; no performance measurement is claimed.
+
+Complete enumeration, finalized direct files, matching folder snapshots, child
+receipts and absence of actual descendants precede removal, with existing
+non-cascading FKs as the final guard. Root removal, root receipt, FINALIZED state
+and checkpoint commit together; job completion is separate. Missing root succeeds
+only from revalidated retained FINALIZED proof. Incomplete useful batches CONTINUE,
+while stale/expired/replayed checkpoints roll back mutations. Crashes resume
+committed leaves or FINALIZED replay. Counts and retained proof fail closed on
+missing manifests/metadata; no automatic repair, reset, retention or inferred
+writer quiescence is added. APIs, disabled defaults, v1 events and topology remain.
+See [Slice 6 tests and recovery](../folder-purge-design.md#slice-6-bottom-up-metadata-removal-and-durable-finalization).

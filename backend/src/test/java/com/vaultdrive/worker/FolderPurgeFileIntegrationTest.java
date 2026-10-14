@@ -122,7 +122,7 @@ class FolderPurgeFileIntegrationTest {
         }
     }
 
-    @Test void registeredHandlerDiscoversDeletesMultipleBatchesAndStopsBeforeFolderRemoval() throws Exception {
+    @Test void registeredHandlerDiscoversDeletesMultipleBatchesAndBeginsMetadataRemoval() throws Exception {
         StoredFile first = uploaded(root);
         StoredFile unrelated = uploaded(null);
         for (int i = 0; i < 42; i++) { raw(FileStatus.UPLOADING, false, true); }
@@ -142,7 +142,8 @@ class FolderPurgeFileIntegrationTest {
         assertBytes(unrelated);
         assertThat(fileRepository.existsById(first.getId())).isTrue();
         assertThat(folderRepository.existsById(root)).isTrue();
-        assertThat(handler.handle(context(claim))).isEqualTo(JobHandler.Result.RETRY);
+        assertThat(handler.handle(context(claim))).isEqualTo(JobHandler.Result.CONTINUE);
+        assertThat(count("file_purge_work", "metadata_finalized_at IS NOT NULL")).isEqualTo(20);
         assertThat(jobRepository.findById(event).orElseThrow().getStatus()).isEqualTo(JobStatus.RUNNING);
         verify(storage, times(1)).delete(any(StorageTarget.class));
     }

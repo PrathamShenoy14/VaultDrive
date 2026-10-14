@@ -236,3 +236,20 @@ rollback restores all of them. An admitted writer remains unsafe even when FAILE
 or old, because a timed-out PUT can finish later. Folder byte completion is thus a
 proof about all recorded members, while folder/root removal remains a separate
 phase and must not be claimed by the byte handler.
+
+
+## Folder metadata finalization: proof survives the resource
+
+Bottom-up removal needs retained child receipts as well as a sealed manifest:
+an absent child row alone cannot distinguish committed purge from corruption.
+V22 sealed counts detect missing records after removal; exact file work/allocation
+and lifecycle checks keep byte proof separate from metadata proof. Each bounded
+page commits removal and checkpoint together under hierarchy/resource/work/job
+lock order, so stale claims roll back physical metadata changes.
+
+Root deletion and FINALIZED proof share one transaction. The later job completion
+can be lost without losing the outcome: replay validates retained proof and finishes
+normally. Successful incomplete pages CONTINUE without consuming failure budget.
+Standalone jobs share monotonic receipts but retain their own terminal accounting.
+This provides deterministic transaction/crash-boundary recovery, not storage-side
+writer fencing, operator-proof evidence, measured load limits or process-kill proof.

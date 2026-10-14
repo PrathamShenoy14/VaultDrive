@@ -5,11 +5,11 @@ Phase 2D.2 Slice 1 completed in commit `8ca8d9b`.
 Phase 2D.2 Slice 2 completed and verified on 2026-10-13.
 Phase 2D.2 Slice 3 completed and verified on 2026-10-13.
 Slices 4–5 implement durable paginated discovery and folder-led file byte deletion.
-Slice 6 bottom-up folder removal and root finalization remain pending.
+Slice 6 implements bottom-up folder removal and durable root finalization.
 
 Recommend **one durable folder job, a paged subtree manifest, and shared per-file deletion progress**. Keep the existing trusted-writer contract, v1 events, RabbitMQ topology, and storage adapter. Add explicit continuation handling so successful batches do not exhaust the retry budget.
 
-The current [file handler](../backend/src/main/java/com/vaultdrive/worker/FilePurgeJobHandler.java) uses shared file progress and conditional metadata finalization; [V16](../backend/src/main/resources/db/migration/V16__persist_file_storage_identity_and_purge_targets.sql) retains immutable targets and allocations. Folder byte execution is implemented in Slice 5; subtree metadata removal remains unimplemented.
+The current [file handler](../backend/src/main/java/com/vaultdrive/worker/FilePurgeJobHandler.java) uses shared file progress and conditional metadata finalization; [V16](../backend/src/main/resources/db/migration/V16__persist_file_storage_identity_and_purge_targets.sql) retains immutable targets and allocations. Folder byte execution is implemented in Slice 5; Slice 6 adds subtree metadata removal.
 
 This design follows [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md), [ADR-0007](decisions/0007-concurrency-locking.md), [file purge](file-purge.md), [background jobs](background-jobs.md), and [job workers](job-workers.md).
 
@@ -236,7 +236,7 @@ Legacy standalone requests missing V16 targets remain blocked even if today's al
 | 3. Bounded continuation — COMPLETE | V18 separate claims/failures, fenced atomic checkpoint contract and delayed CONTINUE; PostgreSQL migration/fencing, worker cancellation/capacity and Garage regressions passed. |
 | 4. Durable subtree discovery — COMPLETE | V19 retained run/frontier/file manifest, transactional UUID pages and fenced CONTINUE checkpoints; restart, complete inclusion, barriers, corruption and standalone-finalization races covered. |
 | 5. Folder byte execution — COMPLETE | Registered handler, shared byte/never-written proofs, fenced member checkpoints and DELETE_FOLDERS; overlap, crash replay, unsafe bindings/writers and drift tested. |
-| 6. Bottom-up removal | Test FK guards, blocked descendants, stale finalizers, root-last deletion, and crash after root removal before job completion. |
+| 6. Bottom-up removal - COMPLETE | V22 retained folder-removal receipts/sealed counts; shared file finalization, bounded leaf removal, atomic root/FINALIZED/checkpoint, stale/duplicate/crash/FK/corruption tests. |
 
 Use append-only migrations after V16 for progress/manifest tables, uniqueness and immutable/monotonic guards, cursor/work indexes, and revised job accounting. Keep V16 targets unchanged. No HTTP payload/status contract change beyond correcting restore eligibility; no v1 event change, descendant messages, or RabbitMQ topology change.
 
@@ -393,11 +393,9 @@ The final transition takes exclusive hierarchy coordination before fresh root,
 run progress and the last job fence. All manifest members must have validated
 completion plus byte-deletion or never-written proof. V20 guards reject premature
 DELETE_FOLDERS, reversed phases, identity/seal changes and receipt replacement.
-The phase and checkpoint commit atomically. No folder metadata or root is removed,
-and the handler never reports folder SUCCEEDED in this slice. At DELETE_FOLDERS,
-further invocations return RETRY through bounded failure accounting rather than
-empty CONTINUE; autonomous enablement before Slice 6 can exhaust the remaining
-budget at that stopping point.
+The phase and checkpoint commit atomically. Slice 5 itself removed no folder
+metadata and stopped at DELETE_FOLDERS. Slice 6 below replaces that former RETRY
+boundary with metadata execution; successful incomplete batches use CONTINUE.
 
 Recovery: preserve root intent, run, manifest, allocations, shared work and jobs.
 Resume the same event/job using ordinary retry/expired-claim recovery; receipts
@@ -426,3 +424,92 @@ New Garage mutations used only disposable UUID owner/file objects; no VM
 infrastructure, credentials or existing Garage user data were changed. These tests
 establish deterministic crash/transaction boundaries, not process-kill recovery,
 throughput or load limits. Workers, consumers and publisher remain disabled by default.
+
+
+## Slice 6 bottom-up metadata removal and durable finalization
+
+[FolderPurgeMetadataService](../backend/src/main/java/com/vaultdrive/worker/FolderPurgeMetadataService.java)
+executes DELETE_FOLDERS without Garage I/O. Each invocation performs exactly one
+transactional page of 1-20 file finalizations or leaf-folder removals. Files are
+selected by UUID, then folders by UUID among eligible leaves. A parent becomes
+eligible only on a later invocation after its children's removal receipts commit.
+The root has its own final invocation after every nonroot receipt exists.
+
+[V22](../backend/src/main/resources/db/migration/V22__folder_metadata_finalization.sql)
+adds retained `folder_purge_removals`, immutable sealed folder/file counts and
+`finalized_at`. Existing sealed V19-V21 runs receive their current manifest counts;
+DISCOVER runs capture counts at sealing. Stop old workers before rollout; old
+binaries cannot execute FINALIZED. Applied V16-V21 migrations are untouched.
+Count mismatches block missing manifest records, including records for already
+removed folders. Counts complement immutable membership and fresh relational
+checks; they are not protection against an operator rewriting database evidence.
+
+The state machine is now `DISCOVER -> DELETE_FILES -> DELETE_FOLDERS -> FINALIZED`.
+DELETE_FOLDERS first removes remaining file metadata using V17's shared atomic
+removal/receipt primitive. It revalidates V19 lifecycle/ownership/binding identity,
+V16 allocations and original standalone targets, V20 completed membership and
+verified byte/never-written proof. Never-written finalization requires permanently
+precluded original allocation; V22 permits this proof in the finalization constraint.
+Missing file metadata requires an already matching metadata-finalization receipt;
+byte proof alone cannot create one. A finalized file that reappears blocks removal.
+Standalone finalizers and folder finalizers serialize through hierarchy/work locks,
+reuse the same receipts and leave standalone job outcomes/counters unchanged.
+
+Folder removal requires sealed complete enumeration, matching owner/parent/trash
+snapshot, correct root intent or no descendant intent, finalized direct files,
+child removal receipts and no actual file/child-folder rows. Unexpected descendants,
+missing resources without receipts, mismatched snapshots, unrepresented ancestor
+purges, cycles with no leaf, missing work/progress/allocations and corrupt manifests
+fail closed. PostgreSQL's non-cascading ownership/parent/file foreign keys remain
+the final guard. No root fallback, inferred target or automatic repair is added.
+
+Root deletion, root removal receipt, FINALIZED timestamp/state and final V18
+checkpoint commit atomically. The worker records job SUCCEEDED separately. A lost
+completion replays FINALIZED only after validating retained counts, complete
+membership, all folder receipts, exact verified file finalization proofs and absent
+metadata, under a live fenced claim. A missing root with DELETE_FOLDERS or missing
+run is never success. Replaying FINALIZED creates no checkpoint or replacement
+receipt. Incomplete successful pages return CONTINUE, so healthy metadata work
+can exceed ten claims without spending the failure budget.
+
+Lock order is **exclusive owner hierarchy -> fresh root and selected resource rows
+(in UUID order) -> allocation/work or run/removal progress -> job row for final
+fencing**. Each page has a ten-second transaction limit, five-second statement
+limit and two-second lock-wait limit. Context checks precede work and the final
+checkpoint; cancellation or stale revision/token/PostgreSQL-clock lease rolls back
+the entire page. The handler reserves ten seconds of remaining local runtime.
+Set-based integrity/count queries can time out for very large manifests; they fail
+closed rather than promise measured load capacity. No transaction spans Garage I/O.
+
+Recovery preserves event/job/run, manifests, original allocations/targets, file
+receipts and removal receipts. Ordinary retries/expired-claim recovery resume the
+first remaining file page or current leaves. Crash before page commit rolls back
+both removal and progress; crash after commit retains both and charges abandonment
+once. Crash after child removal never rediscovers the deleted child. Crash after
+root commit needs only validated FINALIZED replay and ordinary job completion.
+Do not clear root intent, delete retained proof, reset terminal standalone jobs,
+recreate events or rewrite snapshots. Missing/corrupt proof and unsafe writers need
+independently verified approved repair; no automatic reconciliation/reset/retention
+or scheduled historical finalization recovery is introduced. All enablement defaults,
+v1 events, RabbitMQ topology, APIs and trusted-writer assumptions remain unchanged.
+
+`FolderPurgeMetadataIntegrationTest` uses real PostgreSQL and disposable Garage
+objects for nested and many-batch deletion, child/root crash boundaries, duplicate
+and stale workers, lock-wait lease expiry, atomic checkpoint/cancellation rollback,
+both concurrent standalone finalizer orders, failed standalone overlap, FK guards,
+unexpected descendants, missing/corrupt records and durable-success replay. These
+are deterministic transaction boundaries, not process-kill or load experiments.
+Verification on 2026-10-15 (Asia/Calcutta): the expanded focused run passed 249
+tests, followed by all 30 final metadata tests after adding V21-to-V22 retained-run
+backfill coverage. The full safely runnable suite ran 650 tests: 643 passed, seven
+environment-gated RabbitMQ tests skipped, zero failures/errors. Skips were three
+RabbitOutboxIntegrationTest and four RabbitPurgeConsumerIntegrationTest cases;
+v1/topology remained unchanged and live broker behavior was not reverified.
+Real PostgreSQL migration/constraints, continuation beyond ten metadata claims,
+both concurrent standalone winner orders, stale/lock-wait fencing, rollback and
+disposable Garage regressions passed. The migration scratch schema and data roll
+back transactionally. The failed initial spy setup was corrected; its one leftover
+test fixture was cleaned with explicit approval. No VM infrastructure, credentials
+or existing Garage user objects were changed. Compilation, 84 local documentation
+links, task-source secret-pattern scanning and git diff --check passed. No
+process-kill, production load or throughput claim follows from these tests.

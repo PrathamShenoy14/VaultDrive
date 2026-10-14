@@ -12,7 +12,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.time.Duration;
 
-/** Slice 5 stops durably at DELETE_FOLDERS; it cannot report whole-folder success. */
+/** Bounded discovery, byte deletion and durable bottom-up metadata finalization. */
 @Component
 public class FolderPurgeJobHandler implements JobHandler {
     private static final Logger log = LoggerFactory.getLogger(FolderPurgeJobHandler.class);
@@ -22,14 +22,17 @@ public class FolderPurgeJobHandler implements JobHandler {
     private final FolderPurgeFileService files;
     private final ObjectStorageService storage;
     private final BackgroundJobService jobs;
+    private final FolderPurgeMetadataService metadata;
 
     public FolderPurgeJobHandler(FolderPurgeDiscovery discovery, FolderPurgeDiscoveryService checkpoints,
-                                 FolderPurgeFileService files, ObjectStorageService storage, BackgroundJobService jobs) {
+                                 FolderPurgeFileService files, ObjectStorageService storage, BackgroundJobService jobs,
+                                 FolderPurgeMetadataService metadata) {
         this.discovery = discovery;
         this.checkpoints = checkpoints;
         this.files = files;
         this.storage = storage;
         this.jobs = jobs;
+        this.metadata = metadata;
     }
 
     @Override public JobType jobType() { return JobType.FOLDER_PURGE; }
@@ -41,9 +44,14 @@ public class FolderPurgeJobHandler implements JobHandler {
         context.checkActive();
         String phase = files.phase(context.claim());
         if ("DISCOVER".equals(phase)) { return discovery.discover(context, FolderPurgeDiscoveryService.MAX_PAGE_SIZE); }
-        if ("DELETE_FOLDERS".equals(phase)) {
-            // No empty CONTINUE/SUCCEEDED: retain intent and use ordinary bounded failure accounting.
-            return Result.RETRY;
+        if ("DELETE_FOLDERS".equals(phase) || "FINALIZED".equals(phase)) {
+            if (context.remainingRuntimeNanos() < Duration.ofSeconds(10).toNanos()) {
+                throw new InterruptedException("Insufficient metadata removal runtime");
+            }
+            Result result = metadata.removeBatch(context, checkpoints.checkpointVersion(context.claim()),
+                    FolderPurgeMetadataService.MAX_BATCH_SIZE);
+            context.checkActive();
+            return result;
         }
         long version = checkpoints.checkpointVersion(context.claim());
         boolean advanced = false;

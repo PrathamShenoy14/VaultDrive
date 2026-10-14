@@ -1,6 +1,6 @@
 # ADR-0008: Transactional outbox and durable asynchronous jobs
 
-- Status: Accepted; broker/outbox/job/consumer/worker foundation, trusted-writer file byte purge and standalone metadata finalization, folder discovery/file byte execution implemented; folder metadata removal planned
+- Status: Accepted; broker/outbox/job/consumer/worker foundation, trusted-writer file byte purge and standalone metadata finalization, folder discovery/file byte execution implemented; folder metadata removal and durable finalization implemented
 - Date: 2026-10-09
 
 ## Context
@@ -26,7 +26,7 @@ Garage/S3 calls will remain outside metadata database transactions. Workers will
 - Publishers and consumers must assume at-least-once effects and be idempotent; exactly-once delivery is not required.
 - Purge and reconciliation workers must preserve the lifecycle, hierarchy, ownership, and lock-order invariants in ADRs 0005–0007.
 - The earlier polling-first possibility in ADR-0006 is superseded by this decision.
-- Phase 1A provides development RabbitMQ infrastructure; Phase 1B provides atomic purge-request outbox persistence; Phase 1C provides leased publication, confirms, bounded retries, and expired-claim recovery; Phase 2A provides job persistence and fenced lifecycle/recovery primitives; Phase 2B provides validated notification ingestion with commit-before-ACK and sanitized quarantine; Phase 2C provides bounded worker dispatch, lease renewal and scheduled recovery for registered handler types. Phase 2D.1 adds trusted-writer file byte purge; Phase 2D.2 Slice 2 adds shared file receipts and standalone metadata finalization. Folder metadata removal and missed-job backfill remain unimplemented.
+- Phase 1A provides development RabbitMQ infrastructure; Phase 1B provides atomic purge-request outbox persistence; Phase 1C provides leased publication, confirms, bounded retries, and expired-claim recovery; Phase 2A provides job persistence and fenced lifecycle/recovery primitives; Phase 2B provides validated notification ingestion with commit-before-ACK and sanitized quarantine; Phase 2C provides bounded worker dispatch, lease renewal and scheduled recovery for registered handler types. Phase 2D.1 adds trusted-writer file byte purge; Phase 2D.2 Slice 2 adds shared file receipts and standalone metadata finalization. Slice 6 adds folder metadata removal; missed-job backfill remains unimplemented.
 
 ## Phase 1B schema and transaction decision
 
@@ -55,7 +55,7 @@ Existing pending-purge requests predating V12 are not backfilled by this migrati
 
 ## Deferred decisions
 
-Folder metadata removal, missed-notification/job backfill, outbox/job/quarantine retention, ordering guarantees and operational tuning remain open. Standalone metadata finalization is supplied by Phase 2D.2 Slice 2 below. The Phase 1B event contract remains unchanged. Publisher, job, consumer, worker foundation and file-purge choices are recorded separately below.
+Missed-notification/job backfill, outbox/job/quarantine retention, ordering guarantees and operational tuning remain open. Standalone metadata finalization is supplied by Phase 2D.2 Slice 2 below. The Phase 1B event contract remains unchanged. Publisher, job, consumer, worker foundation and file-purge choices are recorded separately below.
 
 ## Phase 1C publisher protocol
 
@@ -296,8 +296,36 @@ absence succeeds, uncertain writes/bindings/lifecycle drift fail closed, and an 
 FAILED upload never establishes writer quiescence.
 
 Complete verified receipts/never-written proofs allow only DELETE_FOLDERS, with
-an atomic checkpoint and database transition guards. No folder metadata removal
-or root finalization is implemented. The handler never returns folder SUCCEEDED;
-reinvocation at this Slice 6 boundary uses ordinary bounded RETRY. Disabled worker,
+an atomic checkpoint and database transition guards. Slice 5 stopped before folder
+metadata removal/root finalization; Slice 6 below replaces that former RETRY
+boundary with bounded metadata execution. Disabled worker,
 consumer and publisher defaults and v1/RabbitMQ contracts remain unchanged.
 See [Slice 5 workflow and recovery](../folder-purge-design.md#slice-5-folder-led-file-byte-deletion).
+
+
+## Phase 2D.2 Slice 6 durable metadata removal
+
+Extend the sealed run with retained V22 folder-removal receipts, immutable manifest
+counts and FINALIZED timestamp. Reuse shared V17 file removal/receipt transactions
+for verified byte proof or V20 coordinated never-written proof, preserving exact
+owner/lifecycle/storage/manifest/target validation and pending-purge barriers.
+Standalone job state/counters/receipts are never reset or replaced.
+
+Use exclusive owner hierarchy coordination for each metadata page: fresh root and
+resource rows in UUID order, allocation/work or run/removal progress, then job row
+for the final checkpoint CAS/token/PostgreSQL-clock lease fence. No resource lock
+is acquired after the job lock and no transaction spans Garage I/O. At most twenty
+files or current leaf folders are removed per ten-second transaction; statements
+and lock waits retain five-/two-second bounds. Set-based integrity scans can time
+out safely on large manifests; no performance measurement is claimed.
+
+Complete enumeration, finalized direct files, matching folder snapshots, child
+receipts and absence of actual descendants precede removal, with existing
+non-cascading FKs as the final guard. Root removal, root receipt, FINALIZED state
+and checkpoint commit together; job completion is separate. Missing root succeeds
+only from revalidated retained FINALIZED proof. Incomplete useful batches CONTINUE,
+while stale/expired/replayed checkpoints roll back mutations. Crashes resume
+committed leaves or FINALIZED replay. Counts and retained proof fail closed on
+missing manifests/metadata; no automatic repair, reset, retention or inferred
+writer quiescence is added. APIs, disabled defaults, v1 events and topology remain.
+See [Slice 6 tests and recovery](../folder-purge-design.md#slice-6-bottom-up-metadata-removal-and-durable-finalization).

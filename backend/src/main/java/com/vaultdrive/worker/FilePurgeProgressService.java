@@ -8,6 +8,7 @@ import com.vaultdrive.storage.StorageTarget;
 import jakarta.persistence.EntityManager;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 import java.util.List;
 import java.util.UUID;
@@ -200,14 +201,68 @@ public class FilePurgeProgressService {
         // Legacy/unsealed/mismatched pending ancestors still defer; byte deletion is unchanged.
         if (folder != null && folders.hasPendingPurgeInAncestry(target.owner(), folder)
                 && !representedInSealedDiscovery(target, folder)) { return false; }
-        int deleted = entityManager.createNativeQuery("DELETE FROM files f USING file_purge_work w WHERE "
-                + FILE_MATCH + " AND w.file_id = :file AND w.bytes_deleted_at IS NOT NULL")
-                .setParameter("file", target.file()).executeUpdate();
-        if (deleted != 1) { throw new IllegalStateException("File finalization lost its resource"); }
+        return removeMatchedResource(target.file());
+    }
+
+    /** Caller holds hierarchy, fresh file/allocation and work locks; job fence comes last. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean finalizeFolderMember(UUID event, UUID file, UUID owner) {
+        boolean verified = (Boolean) entityManager.createNativeQuery("""
+                SELECT folder_purge_file_verified(:event, :file) AND EXISTS (
+                    SELECT 1 FROM folder_purge_files m JOIN folder_purge_file_progress p
+                        ON p.event_id = m.event_id AND p.file_id = m.file_id
+                    WHERE m.event_id = :event AND m.file_id = :file AND m.owner_id = :owner
+                        AND p.completed_at IS NOT NULL AND (m.purge_requested_at IS NULL OR EXISTS (
+                            SELECT 1 FROM file_purge_targets t WHERE t.event_id = m.standalone_event_id
+                                AND t.file_id = m.file_id AND ROW(t.owner_id, t.file_version, t.requested_at,
+                                    t.storage_namespace, t.endpoint, t.region, t.bucket, t.storage_key)
+                                IS NOT DISTINCT FROM ROW(m.owner_id, m.file_version, m.purge_requested_at,
+                                    m.storage_namespace, m.endpoint, m.region, m.bucket, m.storage_key))))
+                """).setParameter("event", event).setParameter("file", file).setParameter("owner", owner)
+                .getSingleResult();
+        if (!verified) { throw new IllegalStateException("Folder file finalization proof is absent"); }
+        boolean barrier = (Boolean) entityManager.createNativeQuery("""
+                WITH RECURSIVE ancestors AS (
+                    SELECT f.id, f.parent_folder_id, f.purge_requested_at FROM folders f
+                    JOIN folder_purge_files m ON m.folder_id = f.id WHERE m.event_id = :event AND m.file_id = :file
+                    UNION
+                    SELECT f.id, f.parent_folder_id, f.purge_requested_at FROM folders f
+                    JOIN ancestors a ON f.id = a.parent_folder_id
+                )
+                SELECT EXISTS (SELECT 1 FROM ancestors a WHERE a.purge_requested_at IS NOT NULL
+                    AND NOT EXISTS (SELECT 1 FROM folder_purge_runs r WHERE r.event_id = :event
+                        AND r.owner_id = :owner AND r.root_folder_id = a.id AND r.requested_at = a.purge_requested_at
+                        AND r.phase = 'DELETE_FOLDERS' AND r.discovery_sealed_at IS NOT NULL))
+                """).setParameter("event", event).setParameter("file", file).setParameter("owner", owner)
+                .getSingleResult();
+        if (barrier) { throw new IllegalStateException("Unrepresented file purge barrier"); }
+        return removeMatchedResource(file);
+    }
+
+    /** Shared atomic removal/receipt primitive, including nullable inherited lifecycle snapshots. */
+    private boolean removeMatchedResource(UUID file) {
+        boolean finalized = (Boolean) entityManager.createNativeQuery("""
+                SELECT metadata_finalized_at IS NOT NULL FROM file_purge_work WHERE file_id = :file
+                """).setParameter("file", file).getSingleResult();
+        if (finalized) {
+            boolean exists = (Boolean) entityManager.createNativeQuery("SELECT EXISTS (SELECT 1 FROM files WHERE id = :file)")
+                    .setParameter("file", file).getSingleResult();
+            if (exists) { throw new IllegalStateException("Finalized file metadata reappeared"); }
+            return false;
+        }
+        int deleted = entityManager.createNativeQuery("""
+                DELETE FROM files f USING file_purge_work w WHERE w.file_id = :file AND f.id = w.file_id
+                    AND ROW(f.owner_id, f.folder_id, f.version, f.status, f.created_at, f.updated_at,
+                        f.deleted_at, f.purge_requested_at, f.storage_key)
+                    IS NOT DISTINCT FROM ROW(w.owner_id, w.folder_id, w.file_version, w.file_status,
+                        w.file_created_at, w.file_updated_at, w.deleted_at, w.purge_requested_at, w.storage_key)
+                    AND (w.bytes_deleted_at IS NOT NULL OR w.never_written_at IS NOT NULL)
+                """).setParameter("file", file).executeUpdate();
+        if (deleted != 1) { throw new IllegalStateException("File finalization lost its matching resource"); }
         entityManager.createNativeQuery("""
                 UPDATE file_purge_work SET metadata_finalized_at = clock_timestamp()
-                WHERE file_id = :file AND bytes_deleted_at IS NOT NULL AND metadata_finalized_at IS NULL
-                """).setParameter("file", target.file()).executeUpdate();
+                WHERE file_id = :file AND metadata_finalized_at IS NULL
+                """).setParameter("file", file).executeUpdate();
         return true;
     }
 
