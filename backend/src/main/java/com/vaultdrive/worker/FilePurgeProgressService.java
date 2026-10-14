@@ -225,7 +225,7 @@ public class FilePurgeProgressService {
                         JOIN folder_purge_files m ON m.event_id = r.event_id
                         JOIN file_purge_work w ON w.file_id = m.file_id
                         WHERE r.root_folder_id = a.id AND r.owner_id = :owner
-                            AND r.requested_at = a.purge_requested_at AND r.phase = 'DELETE_FILES'
+                            AND r.requested_at = a.purge_requested_at AND r.phase IN ('DELETE_FILES', 'DELETE_FOLDERS')
                             AND r.discovery_sealed_at IS NOT NULL AND m.file_id = :file
                             AND m.standalone_event_id = :event AND m.owner_id = w.owner_id
                             AND m.folder_id = w.folder_id AND m.storage_key = w.storage_key

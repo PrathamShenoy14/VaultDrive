@@ -133,3 +133,23 @@ cover bounded restart, barriers, both acceptance/finalization winner orders,
 discovery/finalization overlap, cancellation and job-lock-wait expiry rollback.
 Corrupt recorded parent edges and cycles fail closed; there is no recursive Java
 walk or performance claim. Folder byte execution/removal remains future work.
+
+## Phase 2D.2 Slice 5 file execution locks
+
+Folder per-file preparation/receipt/proof uses **shared owner hierarchy -> fresh
+root/file/allocation -> shared V17 work/member progress -> folder job fence**.
+Original run identity is the only pre-lock read. File and allocation rows are
+locked before validation; no resource lock is acquired after the final job lock.
+The allocation lock coordinates permanent never-written preclusion with beginWrite.
+The proof, member completion and checkpoint CAS commit atomically; stale token,
+lease or revision rolls all of them back. Immutable allocation constraints prevent
+an admitted writer from being reclassified as never-written. Admitted uncertain
+writers remain blocked; no storage-side fencing is invented.
+
+Phase transition uses exclusive hierarchy -> fresh root -> run progress -> final
+job checkpoint. Standalone workers keep their original hierarchy/file/work/job
+order, with sealed participation also recognized at DELETE_FOLDERS. The folder
+path never locks a standalone job or requires its success. Preparation commits
+before renewal/DELETE; Garage I/O never spans a PostgreSQL transaction. Both jobs
+can repeat the same immutable DELETE and establish one monotonic shared receipt.
+See [Slice 5 tests and recovery](../folder-purge-design.md#slice-5-folder-led-file-byte-deletion).

@@ -62,7 +62,7 @@ public class FileStorageIdentityService {
         StorageTarget target = binding.target(key);
         int changed = entityManager.createNativeQuery("""
                 UPDATE file_storage_objects SET write_started = TRUE
-                WHERE storage_key = :key AND NOT write_started
+                WHERE storage_key = :key AND NOT write_started AND write_precluded_at IS NULL
                     AND storage_namespace = :namespace AND endpoint = :endpoint
                     AND region = :region AND bucket = :bucket
                 """).setParameter("key", key).setParameter("namespace", target.namespace())

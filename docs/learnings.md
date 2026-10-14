@@ -215,7 +215,24 @@ signal corruption/cycles rather than productive traversal.
 
 Standalone byte deletion can overlap discovery, but metadata finalization must
 retain an accepted file until sealed membership proves it was enumerated. Exclusive
-hierarchy discovery and shared finalization preserve both winner orders. Keeping
-this explicit adapter unregistered avoids claiming complete folder execution before
-byte deletion and bottom-up removal exist. Database deadlines bound scans/locks;
+hierarchy discovery and shared finalization preserve both winner orders. The explicit adapter originally stayed unregistered; Slice 5 now invokes it
+through the folder handler, which stops before bottom-up removal. Database deadlines bound scans/locks;
 very large seal checks may still time out safely and need measured tuning.
+
+## Shared byte proof separates execution ownership from job outcomes
+
+A standalone file job can fail while a later folder claim safely deletes the same
+verified allocation. Unique immutable per-file work lets either job contribute
+one monotonic byte receipt without resetting the other job or replacing its target.
+Attaching that receipt to sealed membership is new durable progress even when no
+new DELETE occurs. Repeated attachments are not progress and cannot justify empty
+CONTINUE. First blocked dispositions let traversal reach other eligible files;
+unchanged blockers eventually spend bounded failures rather than yielding forever.
+
+Never-admitted writes need a different proof from successful deletion. Under the
+same file/allocation locks as write admission, permanent write preclusion and the
+never-written receipt commit with member progress and the claim checkpoint. A
+rollback restores all of them. An admitted writer remains unsafe even when FAILED
+or old, because a timed-out PUT can finish later. Folder byte completion is thus a
+proof about all recorded members, while folder/root removal remains a separate
+phase and must not be claimed by the byte handler.

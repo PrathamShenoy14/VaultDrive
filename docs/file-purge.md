@@ -1,4 +1,4 @@
-# Physical file purge (Phase 2D.1 and Phase 2D.2 Slice 2)
+# Physical file purge (Phase 2D.1 and Phase 2D.2 Slices 2–5)
 
 ## Accepted storage contract
 
@@ -64,7 +64,8 @@ target. Requests predating the outbox also remain unbackfilled.
 ## Execution and outcomes
 
 The production `FilePurgeJobHandler` supports `FILE_PURGE_REQUESTED` notifications
-through the existing `FILE_PURGE` job type. There is no folder handler.
+through the existing `FILE_PURGE` job type. Slice 5 also registers
+`FolderPurgeJobHandler` for sealed folder membership.
 
 Preparation reads the immutable event-ID target, takes the shared owner hierarchy
 lock, then freshly locks the file row. Ownership, key, version and purge timestamp
@@ -118,9 +119,8 @@ its Slice 4 run is sealed and exact file membership matches the standalone work.
 The shared hierarchy lock makes this check atomic with exclusive folder purge
 requests. Unknown/unsealed runs or missing/mismatched membership still defer removal.
 Retained file rows preserve enumeration; sealed manifests survive standalone removal.
-Folder byte execution and
-never-written inherited-file proofs remain later slices. UPLOADING/FAILED writers
-and unknown legacy bindings are not newly executable.
+Slice 5 adds folder byte execution and coordinated never-written proofs.
+Admitted UPLOADING/FAILED writers and unknown legacy bindings remain blocked.
 
 Explicit handler success permits the worker's live-token/unexpired-lease fenced
 completion. A cancelled or stale result cannot record receipts or complete a newer
@@ -128,7 +128,7 @@ claim. No PostgreSQL transaction or hierarchy lock spans Garage I/O.
 
 **SUCCEEDED means the intended object's bytes were deleted or already absent.**
 It does not imply metadata finalization. Allocation, target, work, receipts and
-job identity remain after file metadata removal. Recursive folder purge,
+job identity remain after file metadata removal. Bottom-up folder removal,
 reconciliation, historical-intent backfill, retention and reset tooling remain
 unimplemented. The HTTP permanent-delete API still only records intent.
 
@@ -226,6 +226,32 @@ acceptance that wins preserves the row until discovery has sealed. This check
 and metadata removal occur under the same hierarchy coordination.
 
 Resume folder discovery from its committed cursors, not by recreating events or
-resetting jobs. Discovery stops at DELETE_FILES until Slice 5. Folder-led byte
-execution and bottom-up removal remain planned. See [the discovery recovery
+resetting jobs. Slice 5 resumes sealed DELETE_FILES using shared work; bottom-up
+folder removal remains planned. See [the discovery recovery
 contract](folder-purge-design.md#slice-4-durable-paginated-discovery).
+
+## Slice 5 shared folder work and blocked-file recovery
+
+The registered folder handler uses sealed V19 membership and the original V16
+allocation to prepare exact immutable V17 work. It validates standalone V16
+targets and reuses existing monotonic receipts; it never resets or waits for the
+standalone job. Folder receipt ownership can therefore name a FOLDER_PURGE job.
+Missing metadata with matching retained proof can participate; missing metadata
+without proof blocks. Existing metadata must match the captured lifecycle exactly.
+
+V20 adds a separate never-written proof for verified, unconsumed allocations.
+Under shared hierarchy/file/allocation locks, it permanently precludes beginWrite
+and commits proof/member completion with a live-token checkpoint. This is not a
+Garage deletion receipt. Admitted UPLOADING/FAILED allocations remain blocked,
+including old failures and uncertain PUT outcomes. Unknown bindings and legacy
+standalone intents missing original targets remain blocked. Folder work does not
+perform inherited-file metadata finalization in Slice 5.
+
+DELETE/receipt crashes replay the retained target. Existing proof skips DELETE.
+Blocked members retain controlled reasons; initial disposition is checkpointed,
+unchanged blocked retries consume ordinary failure budget, and fresh members are
+processed first. Keep the root barrier and inspect immutable membership/work/
+allocation identity during recovery. No automatic reconciliation, snapshot rewrite,
+terminal-job reset or unsafe-writer quiescence inference is provided. Folder byte
+completion transitions only to DELETE_FOLDERS; Slice 6 removal is pending.
+See [Slice 5 workflow and recovery](folder-purge-design.md#slice-5-folder-led-file-byte-deletion).

@@ -8,8 +8,9 @@ matching committed outbox intent. Phase 2C adds an opt-in [worker foundation](jo
 with scheduling, renewal and expired-claim recovery for registered handler types.
 No API directly creates jobs. Phase 2D.1 adds a [file byte-purge handler](file-purge.md)
 under the accepted trusted-writer assumption. Slice 2 adds conservative standalone
-metadata finalization; Slice 3 adds V18 bounded continuation. Folder execution
-and reconciliation remain unimplemented.
+metadata finalization; Slice 3 adds V18 bounded continuation. Slices 4–5 add
+folder discovery and file byte execution. Folder metadata removal and
+reconciliation remain unimplemented.
 Existing purge APIs and outbox publisher behavior are unchanged.
 
 ## Identity and creation

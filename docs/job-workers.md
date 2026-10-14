@@ -4,8 +4,9 @@ The opt-in worker schedules existing PostgreSQL jobs and dispatches registered
 `JobHandler` implementations. Phase 2D.1 now registers a real
 [file byte-purge handler](file-purge.md), with immutable targets and the accepted
 trusted-writer storage contract. Explicit enablement can execute eligible file jobs.
-Slice 2 adds conservative standalone finalization. Folder byte execution/removal, upload reconciliation and missed-notification
-backfill remain planned. Scheduling and consumers stay disabled by default.
+Slice 2 adds conservative standalone finalization. Slice 5 registers folder
+discovery and file byte execution. Folder metadata removal, upload reconciliation
+and missed-notification backfill remain planned. Scheduling and consumers stay disabled by default.
 
 ## Configuration and capacity
 
@@ -198,8 +199,9 @@ failover or physical purge validation is claimed by this foundation.
 ## Slice 4 explicit folder discovery
 
 `FolderPurgeDiscovery` is an explicit adapter, not a registered `JobHandler`.
-Folder jobs therefore remain untouched by autonomous scheduling, even with worker
-enablement. Slice 5 will register a handler that can safely continue beyond discovery.
+Slice 5 registers `FolderPurgeJobHandler`, which invokes this adapter for DISCOVER
+and processes DELETE_FILES after the seal commits. Explicit worker enablement
+therefore admits both file and folder jobs.
 The adapter requires no enclosing transaction and a live context with at least ten
 seconds remaining runtime. It executes one page of 1-100 members, checking context
 activity within the transaction and before/after it, then returns CONTINUE after
@@ -214,3 +216,28 @@ legitimate page already committed, cancellation suppresses the late result and
 lease abandonment preserves its progress for recovery. There is no cumulative
 successful-traversal failure charge, new RabbitMQ topology or autonomous enablement.
 See [folder discovery and recovery](folder-purge-design.md#slice-4-durable-paginated-discovery).
+
+## Slice 5 registered folder handler
+
+Explicit enablement now schedules FOLDER_PURGE as well as FILE_PURGE. The folder
+handler runs one discovery page or at most twenty file members per invocation.
+File units reserve thirty seconds of remaining local runtime for preparation,
+bounded DELETE and receipt transactions; renewal/cancellation checks occur between
+units. Useful member receipts, first blocked dispositions and the DELETE_FOLDERS
+transition commit with their final V18 checkpoint. CONTINUE yields through ordinary
+one-second-delayed polling and preserves the failure budget. Replayed receipts or
+unchanged blocked observations never authorize empty continuation.
+
+Garage failures and invocations with only unchanged blockers return RETRY using
+normal backoff/exhaustion. Durable successful units remain committed. Claim fencing
+uses PostgreSQL's clock after hierarchy/resource/work locks; no I/O holds those
+locks. Folder and standalone jobs coordinate through immutable V17 per-file work,
+without modifying each other's job rows. Workers, consumers and publisher retain
+disabled defaults; topology and v1 notifications are unchanged.
+
+Slice 5 stops at DELETE_FOLDERS and never returns folder SUCCEEDED. Subsequent
+invocations return RETRY, so explicit enablement before Slice 6 can exhaust that
+job while preserving the completed byte phase/root barrier. Do not enable a
+production recursive purge on the assumption that metadata removal exists.
+Recovery retains the same job/run/receipts, and terminal resets require separate
+approval. See [the implemented workflow and recovery](folder-purge-design.md#slice-5-folder-led-file-byte-deletion).

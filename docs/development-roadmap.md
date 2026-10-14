@@ -138,10 +138,12 @@ enforce conditional/version-specific deletion. Execution results belong in task 
   fencing/exhaustion, worker capacity/cancellation/shutdown and Garage regressions verified.
 - [x] Slice 4: V19 durable paged discovery, atomic fenced checkpoints, sealed
   membership and standalone-finalization coordination.
-- [ ] Slices 5–6: folder byte execution and bottom-up removal.
+- [x] Slice 5: registered folder handler, bounded shared byte deletion/never-written
+  proof, member checkpoints and DELETE_FOLDERS transition.
+- [ ] Slice 6: bottom-up folder metadata removal and root finalization.
 
-See [the approved folder purge slices](folder-purge-design.md). No folder handler
-or scheduled finalization recovery exists yet. Slice 4 manifests are implemented. CONTINUE and its required
+See [the approved folder purge slices](folder-purge-design.md). A folder handler
+is registered; scheduled finalization recovery remains absent. Slice 4 manifests are implemented. CONTINUE and its required
 PostgreSQL/Garage verification are complete; live broker tests remained environment-gated.
 
 ## Phase 3 — Refine concurrency without weakening correctness

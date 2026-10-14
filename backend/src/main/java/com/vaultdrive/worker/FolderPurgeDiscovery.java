@@ -3,7 +3,7 @@ package com.vaultdrive.worker;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-/** Explicit discovery adapter, deliberately NOT a registered JobHandler (Slice 5). */
+/** Explicit discovery adapter invoked by the registered Slice 5 folder handler. */
 @Service
 public class FolderPurgeDiscovery {
     private final FolderPurgeDiscoveryService discovery;
