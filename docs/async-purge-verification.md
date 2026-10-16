@@ -183,3 +183,13 @@ adds no default-topology activity or Garage user-object mutation; its single rea
 storage control uses only a fresh disposable upload and asserts its bytes survive
 job recovery. Missing-job creation is not evidence of physical deletion or general
 legacy repair.
+
+## Phase 2E.5A isolated process harness
+
+The [process-loss recovery runbook](async-process-recovery.md) adds a separate
+test application JVM, durable disposable-allocation journal, nine transaction
+boundaries plus isolated aged-PUBLISHED missing-job recovery, cooperative release
+checks, exact live-process approval permits and bounded inspection/stop/cleanup.
+Release-mode evidence does not establish abrupt process-loss recovery. Real
+process termination remains separately approval-gated and unverified until run.
+Normal application processing and reconciliation defaults remain disabled.

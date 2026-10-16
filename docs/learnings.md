@@ -319,3 +319,22 @@ restart safely retry retained records. Eligibility delay reduces delivery races
 but does not replace deduplication. Distinguish per-event failures from failed
 scans, retain evidence, and treat created-job counts as acceptance rather than
 deletion. See [the recovery rules](missing-job-reconciliation.md).
+
+## Durable boundary tests and actual process loss are different evidence
+
+A latch test proves a chosen interleaving, but only a separate application JVM can
+lose all its local state independently of the verifier. Phase 2E.5A keeps that JVM
+on the test classpath, reuses fresh schema/topology boundaries, and journals only
+absence-checked disposable allocation UUIDs before PUT. Receipts and checkpoints
+still come from production transactions. Test advice must wrap the transaction
+proxy: pausing before commit holds locks and does not test the intended window.
+
+Windows Java may omit process arguments. A PID alone is insufficient ownership
+proof. The harness combines the launched Process/start instant, executable,
+matching run-token journals and a fresh live child challenge. A one-use permit
+is tied to that exact identity and requires explicit user approval. Cooperative
+release verifies harness wiring and retained evidence; it cannot be reported as
+real crash verification. Recovery waits persisted leases/backoff and natural
+reconciliation age rather than rewriting clocks or progress. Native broker
+channel closure is required for the redelivery check: returning a cached Spring
+channel may leave the delivery unacknowledged without requeuing it.

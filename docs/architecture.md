@@ -306,3 +306,20 @@ scanFailed contain no payload/key/credential labels. All four autonomous flags
 remain false by default. PostgreSQL tests exercise both consumer winner orders,
 pagination, invalid/quarantined/terminal history and timeout rollback; the Garage
 control asserts retained bytes. See [eligibility, operation and limits](missing-job-reconciliation.md).
+
+## Phase 2E.5A isolated process recovery harness
+
+Test-classpath-only child JVMs now support deterministic pauses outside committed
+production transactions at intent, confirm, ingestion/ACK, claim, discovery,
+Garage DELETE, byte receipt, child removal and FINALIZED boundaries. Standalone
+and nested-folder scenarios retain their original event/job identity, immutable
+targets, receipts, fencing and durable checkpoints across restart. A separate
+consumer-disabled case waits the default five real minutes before missing-job
+reconciliation. Durable UUID allocation journals bound interrupted-run cleanup.
+No production code, migration, lock order, API, topology default or autonomous
+component default changes. See the [operational runbook](async-process-recovery.md).
+
+Cooperative release/restart tests are distinct from abrupt process-loss evidence.
+The real process-kill matrix requires exact live-process reporting and explicit
+approval; implementation and non-destructive checks do not prove it. Broker/VM
+restart, multi-node failure, load and uncertain PUT recovery remain outside scope.

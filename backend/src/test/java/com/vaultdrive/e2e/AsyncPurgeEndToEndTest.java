@@ -54,11 +54,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 @EnabledIfEnvironmentVariable(named = "ASYNC_E2E_TEST", matches = "true")
 class AsyncPurgeEndToEndTest {
     private static final byte[] CONTENT = "disposable continuous purge verification".getBytes(StandardCharsets.UTF_8);
-    private JdbcTemplate jdbc;
-    private ObjectMapper mapper;
-    private HttpClient http;
-    private String base;
-    private String token;
+    JdbcTemplate jdbc;
+    ObjectMapper mapper;
+    HttpClient http;
+    String base;
+    String token;
     private Probe probe;
 
     @Test
@@ -254,7 +254,7 @@ class AsyncPurgeEndToEndTest {
         }
     }
 
-    private void registerAndLogin() throws Exception {
+    void registerAndLogin() throws Exception {
         String email = UUID.randomUUID() + "@example.com";
         String password = UUID.randomUUID() + "aA1!";
         request("POST", "/auth/register", mapper.writeValueAsString(Map.of("email", email,
@@ -263,7 +263,7 @@ class AsyncPurgeEndToEndTest {
                 Map.of("email", email, "password", password)), 200)).get("accessToken").asText();
     }
 
-    private UUID folder(UUID parent, String name) throws Exception {
+    UUID folder(UUID parent, String name) throws Exception {
         var body = new HashMap<String, Object>();
         body.put("name", name);
         body.put("parentFolderId", parent);
@@ -271,7 +271,7 @@ class AsyncPurgeEndToEndTest {
                 .get("folderId").asText());
     }
 
-    private UUID upload(UUID folder, String name) throws Exception {
+    UUID upload(UUID folder, String name) throws Exception {
         String boundary = "e2e-" + UUID.randomUUID();
         String body = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"" + name
                 + "\"\r\nContent-Type: text/plain\r\n\r\n" + new String(CONTENT, StandardCharsets.UTF_8)
@@ -292,7 +292,7 @@ class AsyncPurgeEndToEndTest {
         return builder;
     }
 
-    private String request(String method, String path, String body, int status) throws Exception {
+    String request(String method, String path, String body, int status) throws Exception {
         var builder = builder(path);
         if (body != null) { builder.header("Content-Type", "application/json"); }
         var response = http.send(builder.method(method, body == null ? HttpRequest.BodyPublishers.noBody()
@@ -307,7 +307,7 @@ class AsyncPurgeEndToEndTest {
         assertThat(response.body()).isEqualTo(CONTENT);
     }
 
-    private UUID event(UUID resource) {
+    UUID event(UUID resource) {
         return jdbc.queryForObject("SELECT id FROM outbox_events WHERE aggregate_id = ? LIMIT 2", UUID.class, resource);
     }
 
@@ -415,9 +415,16 @@ class AsyncPurgeEndToEndTest {
     /** Owns only a newly CREATED schema and newly declared UUID topology in the approved test vhost. */
     static final class Isolation implements AutoCloseable {
         private static final String URL = "jdbc:postgresql://localhost:5432/vaultdrive_test";
-        final String schema = "async_e2e_" + UUID.randomUUID().toString().replace("-", "");
-        final String exchange = "vaultdrive.outbox.events.test." + schema;
-        final String queue = "vaultdrive.purge.requests.test." + schema;
+        final String schema;
+        Isolation() { this("async_e2e_" + UUID.randomUUID().toString().replace("-", "")); }
+        Isolation(String schema) {
+            if (!schema.matches("async_e2e_[0-9a-f]{32}")) { throw new IllegalArgumentException("Invalid isolated schema"); }
+            this.schema = schema;
+            this.exchange = "vaultdrive.outbox.events.test." + schema;
+            this.queue = "vaultdrive.purge.requests.test." + schema;
+        }
+        final String exchange;
+        final String queue;
         Connection database;
         com.rabbitmq.client.Connection broker;
         boolean schemaOwned, exchangeOwned, queueOwned, preserveSchema;
