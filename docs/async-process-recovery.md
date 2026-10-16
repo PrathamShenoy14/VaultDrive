@@ -18,7 +18,7 @@ Use only the existing `vaultdrive_outbox_test` vhost.
 Each scenario freshly CREATEs an `async_e2e_<32 hex UUID>` schema in
 `localhost:5432/vaultdrive_test`, and collision-checks a dedicated durable direct
 exchange/quorum queue named `vaultdrive.outbox.events.test.<schema>` /
-`vaultdrive.purge.requests.test.<schema>`. Flyway V1â€“V23 and Hibernate use only this
+`vaultdrive.purge.requests.test.<schema>`. Flyway V1-V23 and Hibernate use only this
 schema. Schema creation is disabled in Spring. Each enabled autonomous component
 checks the database and exact single-schema search path before initialization.
 Initial startup also requires empty business/outbox/job tables. Restart requires
@@ -114,8 +114,11 @@ their recovered jobs.
 
 ## Approval-gated real process loss
 
-Do not run kill mode as part of unattended verification. Select one scenario per
-approval session, for example:
+Do not run kill mode as part of unattended verification. Explicit approval may
+cover one scenario or the bounded seventeen-scenario matrix of newly launched
+test children. Matrix approval never waives the per-child identity report,
+ownership/isolation/cleanup checks or exact one-use permit. Stop a scenario
+without termination if any check fails. For one scenario:
 
 ```powershell
 . .\.env.local.ps1
@@ -134,14 +137,18 @@ normal development application, Docker services and other processes are unaffect
 Cleanup is limited to the recorded allocations, queue, exchange and schema after
 all test processes stop. A failure retains them for inspection.
 
-Obtain explicit user approval for that concrete report before writing a permit.
-In a second terminal, only after approval, copy the exact emitted identity:
+Obtain explicit user approval covering that test child before writing a permit.
+Under an explicitly authorized matrix, report and verify each fresh identity
+before issuing its permit; never permit directories from an earlier run. In a
+second terminal, only within that authorization, copy the exact emitted identity:
 
 ```powershell
 # Set these to the EXACT emitted values after explicit approval.
 $permitPath = '<journal directory>\permit-<run token>.txt'
 $identity = '<PID>|<UTC start instant>|<run token>|<schema>'
-[System.IO.File]::WriteAllText($permitPath, $identity)
+$permitTemporary = Join-Path (Split-Path $permitPath) ('.approval-' + [Guid]::NewGuid())
+[System.IO.File]::WriteAllText($permitTemporary, $identity)
+Move-Item -LiteralPath $permitTemporary -Destination $permitPath -ErrorAction Stop
 ```
 
 A stale/mismatched permit fails. The parent rechecks PID/start time, executable,
@@ -154,9 +161,23 @@ positively identified initial child, never a PID search result. If ownership
 cannot be established, nothing is killed. Restart uses the same schema/topology
 without editing durable work. No deadline is shortened to speed recovery.
 
-Successful release results do not authorize this step. Every real kill scenario
-remains pending until explicitly approved and successfully executed; seven FILE
-and ten FOLDER scenarios make up the approval-gated matrix.
+Successful release results do not authorize this step. Seven FILE and ten FOLDER
+scenarios make up the approval-gated matrix. To reproduce the entire matrix under
+explicit scoped authorization, omit the scenario filter:
+
+```powershell
+. .\.env.local.ps1
+$env:RABBITMQ_TEST_VHOST = 'vaultdrive_outbox_test'
+$env:ASYNC_PROCESS_TEST = 'true'
+.\mvnw.cmd '-Dtest=AsyncPurgeProcessRecoveryTest' '-DprocessRecovery.mode=kill' test
+if ($LASTEXITCODE -ne 0) { throw 'Inspect failed scenarios and retained journals' }
+Remove-Item Env:ASYNC_PROCESS_TEST
+```
+
+Each new process still waits for its own exact permit. Use the inspection and
+cooperative stop/cleanup commands below on interrupted or failed runs. Close only
+verification-owned temporary forwarding connections after all checks; leave
+existing development tunnels and SSH sessions untouched.
 
 ## Inspection, safe stop and interrupted-run cleanup
 
@@ -232,6 +253,72 @@ storage-binding assumptions remain those of ADR-0008. No throughput claim is mad
   schemas, topology and disposable allocations from harness runs were cleaned;
   the verification-only SSH tunnel was closed after explicit approval.
 
-No application process was force-terminated, no kill permit was supplied and no
-process-loss result is claimed. All seventeen real kill/restart scenarios remain
-pending exact live-process reporting and explicit per-process approval.
+At that milestone no application process was force-terminated and no kill permit
+was supplied. The separately authorized execution below provides later evidence.
+
+## Executed real process-loss verification (2026-10-17 IST / 2026-10-16 UTC)
+
+The user explicitly authorized only newly harness-launched test application
+children for this matrix. Before every permit, the exact PID/start/run-token/schema
+identity was reported, launcher/child/plan journals matched, a fresh live ownership
+challenge passed, and dedicated persistence/topology and disposable allocation
+journals were checked. The parent consumed each permit and repeated ownership
+verification immediately before its original Process object's destroyForcibly.
+No shell process-kill mechanism was used for application crashes.
+
+| Boundary | Standalone file | Nested folder |
+|---|---|---|
+| INTENT | Passed after hook correction | Passed |
+| CONFIRM | Passed | Passed |
+| ACK | Passed | Passed |
+| CLAIM | Passed | Passed |
+| DISCOVERY | Not applicable | Passed |
+| DELETE | Passed | Passed |
+| RECEIPT | Passed | Passed |
+| CHILD_REMOVAL | Not applicable | Passed |
+| FINALIZED | Not applicable | Passed |
+| MISSING_JOB | Passed | Passed |
+
+All seventeen authorized crashes recovered the original event/job identity,
+unchanged storage target, retained receipts/checkpoints, valid fencing and final
+metadata/storage state. Controls remained readable before owned cleanup. All
+fifteen broker-consumer cases also passed duplicate publication and real
+redelivery assertions with unchanged terminal proof. Both missing-job cases kept
+the consumer disabled and waited at least five real minutes after PUBLISHED;
+their original notifications remained until owned topology cleanup. Abandoned
+worker/publisher claims waited their persisted leases and retry deadlines; no
+attempt, lease, clock or progress was rewritten.
+
+The first matrix invocation passed sixteen crash cases and failed FILE_INTENT's
+durable-boundary assertion before permit issuance or termination. An empty-table
+observation could race the first commit into claimNext. Test-only advice now holds
+the first publication claim outside a transaction until the intent is committed,
+then pauses before claiming. That failed run stopped cooperatively and its owned
+resources were cleaned. The corrected FILE_INTENT kill/restart passed separately.
+Production code, configuration, migrations and disabled defaults were unchanged.
+
+Post-verification checks passed:
+
+- Focused protocol/isolation plus corrected file/folder INTENT release checks:
+  12 tests, zero failures/errors/skips (2 minutes 29 seconds).
+- Corrected FILE_INTENT kill/restart: one test, zero failures/errors/skips.
+- Full backend suite: 720 tests, 719 passed, zero failures/errors, one intentional
+  skip of the process harness with its opt-in removed. Live RabbitMQ,
+  PostgreSQL/Garage and continuous HTTP pipeline checks ran.
+- Independent read-only inspection of all twenty run journals from this session
+  confirmed no live owned children, schemas, queue/exchange pairs or remaining
+  allocations; all 62 journaled allocations returned HEAD 404. This includes the
+  safely stopped failure, two release checks and seventeen successful crashes.
+- Sanitized evidence remains under ignored target: process-recovery-results.log,
+  process-recovery-matrix-evidence.csv, the final inventory summary and durable
+  per-run journals. Full local Maven output is retained separately; review it
+  privately rather than sharing unfiltered framework output.
+- The verification-owned temporary AMQP forwarding connection was closed after
+  testing. Existing tunnels, development applications and VM services were left
+  running; no infrastructure, credentials or production configuration changed.
+
+No scenario in this matrix remains pending authorization. This is one application
+JVM's loss at the listed boundaries, not broker/VM/host restart, power loss,
+multi-node failure, production-load verification or uncertain PUT reconciliation.
+The trusted-writer/immutable-binding assumptions and interrupted partial-resource
+adoption limitations above remain unchanged.

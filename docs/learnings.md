@@ -338,3 +338,13 @@ real crash verification. Recovery waits persisted leases/backoff and natural
 reconciliation age rather than rewriting clocks or progress. Native broker
 channel closure is required for the redelivery check: returning a cached Spring
 channel may leave the delivery unacknowledged without requeuing it.
+
+The authorized real-process matrix later passed all seventeen file/folder crash
+boundaries. Its first INTENT attempt safely failed before permit issuance: observing an
+empty outbox does not prevent a commit between that SELECT and claimNext. The
+test must hold the first claim until the intent commits, then signal the boundary
+before invoking the claim transaction. This changes test synchronization only.
+Original receipts/checkpoints and fresh fencing tokens then proved recovery
+without editing leases, retries or progress. Independent absence checks after
+cleanup complement success markers. These results cover one application JVM;
+they do not imply broker/VM restart, multi-node or production-load resilience.

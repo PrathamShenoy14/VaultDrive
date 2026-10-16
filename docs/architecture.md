@@ -230,7 +230,7 @@ recovery](folder-purge-design.md#slice-6-bottom-up-metadata-removal-and-durable-
 
 ## Known gaps and pending decisions
 
-- Remaining ADR-0008 async implementation: automated historical finalization recovery, legacy/blocked historical-intent backfill, outbox/job/quarantine retention, replay/reset tooling and operational tuning. File byte purge and conservative standalone metadata finalization are implemented under the accepted trusted-writer assumption; production load, real process-kill/restart and multi-node failure experiments remain unverified.
+- Remaining ADR-0008 async implementation: automated historical finalization recovery, legacy/blocked historical-intent backfill, outbox/job/quarantine retention, replay/reset tooling and operational tuning. File byte purge and conservative standalone metadata finalization are implemented under the accepted trusted-writer assumption; single-application-JVM crash/restart boundaries are verified by Phase 2E.5A; production load, broker/VM restart and multi-node failure experiments remain unverified.
 - Remaining file-side coordination: reconciliation and future direct-upload writer fencing.
 - Reconciliation for stale `UPLOADING`, `FAILED`, orphaned objects, and uncertain finalization.
 - Audited legacy storage-identity recovery and verified quiescence for admitted
@@ -319,7 +319,12 @@ reconciliation. Durable UUID allocation journals bound interrupted-run cleanup.
 No production code, migration, lock order, API, topology default or autonomous
 component default changes. See the [operational runbook](async-process-recovery.md).
 
-Cooperative release/restart tests are distinct from abrupt process-loss evidence.
-The real process-kill matrix requires exact live-process reporting and explicit
-approval; implementation and non-destructive checks do not prove it. Broker/VM
-restart, multi-node failure, load and uncertain PUT recovery remain outside scope.
+The authorized real process-kill matrix passed all seven file and ten nested-folder
+scenarios, with exact live ownership/isolation checks and one-use permits before
+each termination. Original identities, targets, checkpoints, receipts, fencing,
+duplicate handling and readable controls survived; both missing-job cases waited
+the default five real minutes. A test-only pre-claim INTENT observation race found
+before any kill was corrected and verified. All owned resources were cleaned.
+See the runbook for per-boundary results, post-verification tests and limitations.
+Broker/VM restart, multi-node failure, load and uncertain PUT recovery remain
+outside this single-application-JVM evidence.

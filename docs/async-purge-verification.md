@@ -171,7 +171,8 @@ reported the AWS SDK global response-input-stream-timeout-scheduler thread at
 context shutdown. That warning's lifecycle/classloader impact is uninvestigated;
 the harness does not globally terminate SDK executors shared with other test
 contexts. Keep these observations separate from assertions that passed.
-Process-kill/failover/load and operational recovery gaps above remain open.
+That continuous-pipeline run did not establish process-loss recovery; see the
+Phase 2E.5A evidence below. Failover/load and other operational gaps remain open.
 
 ## Phase 2E.4 recovery verification
 
@@ -190,6 +191,14 @@ The [process-loss recovery runbook](async-process-recovery.md) adds a separate
 test application JVM, durable disposable-allocation journal, nine transaction
 boundaries plus isolated aged-PUBLISHED missing-job recovery, cooperative release
 checks, exact live-process approval permits and bounded inspection/stop/cleanup.
-Release-mode evidence does not establish abrupt process-loss recovery. Real
-process termination remains separately approval-gated and unverified until run.
+Release-mode evidence is separate from abrupt process-loss recovery. The explicitly
+authorized real matrix has now passed all seven file and ten nested-folder crash/
+restart cases, including naturally aged PUBLISHED missing-job recovery with the
+consumer disabled. Each child passed live identity/isolation/cleanup checks before
+its exact permit. The original identities, targets, retained proof, fencing and
+readable controls passed; duplicates were idempotent. All owned resources were
+independently confirmed cleaned. A test-only INTENT boundary race found before
+termination was corrected and verified. See the runbook's executed-results section
+for the initial safe failure, successful rerun and full post-verification counts.
 Normal application processing and reconciliation defaults remain disabled.
+Broker/VM restart, multi-node failure, load and uncertain PUT recovery are unverified.

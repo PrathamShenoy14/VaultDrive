@@ -135,8 +135,12 @@ public final class ProcessRecoveryApplication {
                     factory.addAdvice((MethodInterceptor) invocation -> {
                         String method = invocation.getMethod().getName();
                         if (name.equals("backgroundJobService") && method.equals("renew") && gate.held()) { gate.waitForRelease(); }
-                        if (name.equals("outboxClaimService") && method.equals("claimNext")
-                                && ctx.getBean(JdbcTemplate.class).queryForObject("SELECT count(*) FROM outbox_events", Long.class) == 1) {
+                        if (initial && point == Point.INTENT && name.equals("outboxClaimService") && method.equals("claimNext")) {
+                            // Do not let an empty observation race the first committed intent into claimNext.
+                            // Hold the first claim outside any transaction until the HTTP fixture commits.
+                            await("committed intent before first publication claim", Duration.ofSeconds(90),
+                                    () -> Files.exists(directory.resolve("stop")) || ctx.getBean(JdbcTemplate.class)
+                                            .queryForObject("SELECT count(*) FROM outbox_events", Long.class) == 1);
                             gate.hit(Point.INTENT);
                         }
                         Object result = invocation.proceed();
