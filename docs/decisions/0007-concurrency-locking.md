@@ -181,3 +181,77 @@ committed leaves or FINALIZED replay. Counts and retained proof fail closed on
 missing manifests/metadata; no automatic repair, reset, retention or inferred
 writer quiescence is added. APIs, disabled defaults, v1 events and topology remain.
 See [Slice 6 tests and recovery](../folder-purge-design.md#slice-6-bottom-up-metadata-removal-and-durable-finalization).
+
+
+## Phase 2E.2 HTTP transaction joining
+
+The confirmed failure was a Spring EntityManager wrapper reporting mismatch, not
+a missing service transaction. Reproduced with Spring Boot 4.1.1, Spring ORM
+7.0.9 and Hibernate 7.4.5.Final, using signed JWTs and an embedded HTTP server,
+real services, committed fixtures in an isolated PostgreSQL test schema, and no
+enclosing test transaction.
+
+The request path is security filters -> DispatcherServlet -> TrashController ->
+FolderService CGLIB proxy -> TransactionInterceptor -> JpaTransactionManager ->
+FolderService.restoreFolder -> PostgresHierarchyCoordinator. File mutations use
+the corresponding FileService/FileMetadataService proxies. There is no
+self-invocation or missing transaction advice on the failing folder path.
+
+With OSIV enabled, OpenEntityManagerInViewInterceptor creates and binds an
+application-managed EntityManager wrapper through the managed factory.
+JpaTransactionManager reuses that factory-bound holder and begins its underlying
+resource-local transaction. The injected shared EntityManager resolves to this
+same holder. However, ExtendedEntityManagerCreator's invocation handler answers
+non-JTA isJoinedToTransaction() by checking a resource keyed by the native
+EntityManager, rather than the factory-bound holder used by JpaTransactionManager.
+That wrapper reports false even though its Hibernate delegate reports joined and
+its native EntityTransaction is active. These branches were traced in the
+installed Spring ORM bytecode and checked against the request-time observations.
+The coordinator correctly fails closed on the wrapper's false result.
+
+| Request configuration | Spring transaction active | Injected/bound EM joined | Native Hibernate joined / transaction active | Restore HTTP |
+| --- | --- | --- | --- | --- |
+| OSIV true (previous implicit default) | true | false | true / true | 500 |
+| OSIV false | true | true | true / true | 200 |
+
+Both paths resolve the same native EntityManager as their factory-bound holder;
+OSIV true has the extended wrapper, while false has a native SessionImpl holder.
+Diagnostics record only booleans, never bearer tokens, credentials, SQL parameter
+values or resource contents. The retained OSIV-enabled diagnostic also reproduces
+500 on folder create/purge and file restore/rename, with unchanged database rows.
+
+Set spring.jpa.open-in-view=false explicitly in application.properties. This API
+returns DTOs and obtains download streams in its service path; it needs no view
+rendering persistence context. Without OSIV, JpaTransactionManager creates a
+native transaction-owned EntityManager via createNativeEntityManager. The
+coordinator's active-transaction AND joined-EntityManager guards remain unchanged.
+No propagation, connection acquisition, transaction atomicity, authorization,
+hierarchy key, lock order, or schema changes are introduced. No REQUIRES_NEW
+workaround or manual join is added. Explicitly overriding OSIV back to true remains
+unsupported on this dependency set; the diagnostic test intentionally preserves
+that failing control rather than claiming both configurations work.
+
+Real HTTP regression coverage uses the production default and separately checks
+explicit false. Folder restore returns 200, purge requests return 202 with one
+atomic event/run, and own-pending, active, missing, unauthorized, repeated and
+pending-ancestor requests retain 404 (unauthenticated requests retain 401).
+Rejected requests preserve full resource/intent/allocation rows, including
+versions and timestamps. Injected failure after real outbox flush rolls back
+both file and folder purge transitions and their retained intent. Folder/file
+mutations, DTO reads and actual Garage upload/download exercise the same boundary;
+reservation, write admission and finalization use joined short transactions
+with storage I/O outside them.
+
+Latch-controlled HTTP restore versus folder purge covers both commit winner
+orders; PostgreSQL pg_locks confirms the actual competing request waits for the
+owner advisory lock before re-reading eligibility. HTTP file move versus folder
+trash covers shared/exclusive blocking and both winner orders, including the
+unchanged file version on rejection after the folder commits first. Existing
+PostgreSQL coordinator, lifecycle and outbox race tests retain their wider
+coverage. See [architecture test evidence](../architecture.md#test-evidence) and
+[the learning note](../learnings.md#an-active-transaction-and-a-wrapper-joined-check-can-disagree).
+
+Publisher, consumer and worker processing stay disabled. No development database,
+VM configuration, broker production topology or Garage configuration is changed.
+This establishes the tested dependency/configuration behavior; dependency upgrades
+must recheck the wrapper control. No load or performance claim is made.

@@ -141,8 +141,9 @@ The direct regression is PostgreSQL service coverage plus the existing controlle
 not-found mapping coverage. An exploratory real-service MockMvc request with the
 default Open EntityManager in View setting failed earlier in hierarchy coordination
 (`Hierarchy coordination requires an active transaction`), before eligibility was
-checked. That transaction-joining issue remains outside this slice; these tests
-do not establish an end-to-end HTTP result under that configuration.
+checked. That slice did not establish an end-to-end HTTP result. Phase 2E.2 later
+confirmed the wrapper reporting mismatch and disabled OSIV explicitly; see
+[the HTTP transaction diagnosis](decisions/0007-concurrency-locking.md#phase-2e2-http-transaction-joining).
 
 ## Byte success and metadata finalization need separate receipts
 
@@ -253,3 +254,33 @@ normally. Successful incomplete pages CONTINUE without consuming failure budget.
 Standalone jobs share monotonic receipts but retain their own terminal accounting.
 This provides deterministic transaction/crash-boundary recovery, not storage-side
 writer fencing, operator-proof evidence, measured load limits or process-kill proof.
+
+
+## An active transaction and a wrapper joined check can disagree
+
+Phase 2E.2 reproduced the real HTTP failure before changing production code.
+The service was reached through its CGLIB transaction proxy and Spring reported
+an actual active transaction. With OSIV true, the injected and factory-bound
+EntityManager reported unjoined while their identical native Hibernate delegate
+reported joined and transaction-active. With OSIV false, all checks were true.
+Spring ORM 7.0.9's ExtendedEntityManagerCreator checks a native-EntityManager-keyed
+synchronization for the wrapper's non-JTA joined answer; JpaTransactionManager
+owns the already-bound resource through its factory key instead. The failed guard
+was a wrapper reporting mismatch, not proof that @Transactional was bypassed.
+
+The smallest API fix is explicit spring.jpa.open-in-view=false. DTO responses
+need no persistence context during view rendering, and the transaction manager
+then creates the native EntityManager for each service transaction. Keep both
+coordinator guards: weakening the joined check or adding REQUIRES_NEW would hide
+the observed integration problem or change business atomicity. The explicit-true
+diagnostic remains a failing-behavior control on this dependency set, so enabling
+OSIV again requires revisiting the decision rather than assuming compatibility.
+
+Mocked controller services and enclosing test transactions missed this request
+lifecycle. Embedded HTTP requests with committed disposable fixtures exercise
+security, controllers, transaction interceptors, EntityManager selection and
+PostgreSQL locks together. Assert full persisted rows after rejected requests and
+failure after outbox flush, then force both concurrency winner orders with latches
+and inspect the waiting request's pg_locks entry. A successful response alone
+does not establish rollback atomicity or lock-before-read behavior. See
+[ADR-0007](decisions/0007-concurrency-locking.md#phase-2e2-http-transaction-joining).
