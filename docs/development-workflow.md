@@ -112,3 +112,12 @@ Constraints:
 - Do not invent benchmarks.
 - Commit only after all required checks pass; do not push.
 ```
+
+## Continuous asynchronous deletion verification
+
+For Phase 2E.3, follow [the isolated HTTP-to-Garage runbook](async-purge-verification.md).
+It gives the exact localhost tunnel, private-environment, focused and full-suite
+commands, startup isolation gates, sanitized evidence, cleanup ownership and failure
+limits. Enable ASYNC_E2E_TEST only for that procedure. Normal publisher, consumer
+and worker flags remain disabled; never enable a development API to run this check.
+A skipped harness or unavailable dependency is not continuous verification.

@@ -284,3 +284,22 @@ failure after outbox flush, then force both concurrency winner orders with latch
 and inspect the waiting request's pg_locks entry. A successful response alone
 does not establish rollback atomicity or lock-before-read behavior. See
 [ADR-0007](decisions/0007-concurrency-locking.md#phase-2e2-http-transaction-joining).
+
+## Component success does not establish a continuous purge pipeline
+
+Phase 2E.3 joins real HTTP upload/trash/purge, scheduled outbox publication, RabbitMQ
+ingestion, durable job execution and Garage absence in one bounded test. Event UUIDs
+link each durable boundary; ACK observation checks job visibility from an independent
+connection, while immutable byte/removal receipts establish completed effects.
+Folder continuations retain one job across discovery, file deletion, leaf removal
+and root finalization. Child-before-parent timestamps and unchanged control bytes
+make the resulting state stronger evidence than a successful HTTP response alone.
+
+Isolation must precede autonomous components: freshly CREATE a schema in the dedicated
+test database, reject existing topology names, declare the queue before its consumer,
+and verify empty eligible state before any poller/worker starts. Test-only absence-
+checked key allocation preserves the real storage adapter and admission contract.
+Failure cleanup owns exact resource identities, never a shared schema or bucket scan.
+Closing an unacknowledged test channel produces actual redelivery; repeated production
+transport sends verify duplicate ingestion without rearming authoritative events.
+See [the executable verification and limitations](async-purge-verification.md).

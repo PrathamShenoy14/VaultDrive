@@ -250,3 +250,41 @@ No benchmark, scale limit, or production-readiness claim has been established.
 - [ADR-0006: Durable pending-purge deletion](decisions/0006-pending-purge-async-deletion.md)
 - [ADR-0007: Current namespace lock and granular successor](decisions/0007-concurrency-locking.md)
 - [ADR-0008: Transactional outbox and durable asynchronous jobs](decisions/0008-transactional-outbox-rabbitmq.md)
+
+## Phase 2E.3 continuous isolated purge verification
+
+[The continuous verification runbook](async-purge-verification.md) describes the
+opt-in [HTTP-to-Garage harness](../backend/src/test/java/com/vaultdrive/e2e/AsyncPurgeEndToEndTest.java).
+It establishes a newly owned UUID schema inside `vaultdrive_test` and UUID exchange/
+quorum queue inside the existing `vaultdrive_outbox_test` vhost before starting the
+application. Each asynchronous component has a pre-initialization gate checking
+current database/schema/search path and empty outbox/job/resource tables. Queue
+creation precedes consumer startup. Disposable Garage allocations are run-prefixed,
+absence-checked and registered individually; no existing user object is eligible.
+
+Real HTTP registration/login, upload/download, trash and permanent-delete requests
+feed the scheduled production publisher, production consumer/ingestor and autonomous
+worker with both real handlers. One event UUID ties confirmed publication, committed
+job-before-ACK, byte receipts and successful execution together. The nested case
+observes DISCOVER -> DELETE_FILES -> DELETE_FOLDERS -> FINALIZED, includes separately
+trashed descendants, and verifies retained counts/proof, child-before-parent removal
+and root-last finalization. An unrelated control subtree remains HTTP-readable.
+
+Duplicate publication uses retained test events and the production transport;
+closing a temporary unacknowledged receive channel forces actual broker redelivery.
+Six successful ACKs, a drained isolated queue, exactly two unchanged terminal jobs
+and unchanged receipts establish idempotent ingestion. PostgreSQL rejects attempted
+receipt replacement in rolled-back test transactions. The ACK observer delegates
+the real listener and observes basicAck after verifying independent job visibility;
+it replaces no service behavior. Only the test key allocator changes object names.
+
+Polling selects bounded scalar/proof fields and has query/deadline limits; shared
+output excludes keys, payloads, tokens and credentials. Finally blocks stop async
+work and clean only owned objects/topology/schema. Failed owned-object cleanup
+retains the isolated schema and allocation identities for bounded recovery. Retained
+proofs are asserted
+before disposing of the test schema. Forced JVM termination can bypass cleanup and
+requires bounded review of that exact run; no global cleanup facility is supplied.
+Production flags, migrations, lock order, fencing, receipts and trusted-writer
+assumptions are unchanged. This single-node happy-path/replay evidence adds no
+process-kill, load, failover, unsafe-writer reconciliation or deployment claim.
