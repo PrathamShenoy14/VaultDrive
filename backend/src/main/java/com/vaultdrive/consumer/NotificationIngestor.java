@@ -23,8 +23,24 @@ public class NotificationIngestor {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void accept(PurgeNotification notification) {
-        // Immutable outbox read, then job identity insertion. No hierarchy/resource
-        // locks, metadata mutations, or broker/storage I/O in this transaction.
+        validate(notification);
+        try {
+            jobs.create(notification.eventId(), notification.jobType(), notification.aggregateId());
+        } catch (IllegalArgumentException exception) {
+            throw new InvalidNotification(InvalidNotification.Reason.IDENTITY_CONFLICT, notification.eventId());
+        }
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean acceptReconciled(PurgeNotification notification) {
+        validate(notification);
+        return jobs.createIfAbsent(notification.eventId(), notification.jobType(), notification.aggregateId());
+    }
+
+    private void validate(PurgeNotification notification) {
+        // This shared validation only reads immutable source identity. Ordinary
+        // consumer ingestion takes no resource locks; reconciliation coordinates
+        // its additional intent checks before entering here. No external I/O.
         OutboxEvent source = outbox.findById(notification.eventId()).orElseThrow(() ->
                 new InvalidNotification(InvalidNotification.Reason.UNKNOWN_EVENT, notification.eventId()));
         String resourceField = notification.jobType() == JobType.FILE_PURGE ? "fileId" : "folderId";
@@ -37,11 +53,6 @@ public class NotificationIngestor {
             throw new InvalidNotification(InvalidNotification.Reason.EVENT_MISMATCH, notification.eventId());
         }
         // Do not require PUBLISHED: delivery can precede publisher outcome commit.
-        try {
-            jobs.create(notification.eventId(), notification.jobType(), notification.aggregateId());
-        } catch (IllegalArgumentException exception) {
-            throw new InvalidNotification(InvalidNotification.Reason.IDENTITY_CONFLICT, notification.eventId());
-        }
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

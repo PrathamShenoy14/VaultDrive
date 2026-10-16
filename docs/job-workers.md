@@ -6,7 +6,7 @@ The opt-in worker schedules existing PostgreSQL jobs and dispatches registered
 trusted-writer storage contract. Explicit enablement can execute eligible file jobs.
 Slice 2 adds conservative standalone finalization. Slice 5 registers folder
 discovery and file byte execution; Slice 6 adds metadata removal and FINALIZED replay.
-Upload reconciliation and missed-notification backfill remain planned. Scheduling and consumers stay disabled by default.
+Upload reconciliation and broad legacy backfill remain planned; [Phase 2E.4](missing-job-reconciliation.md) supplies bounded aged-PUBLISHED missing-job creation. Scheduling and consumers stay disabled by default.
 
 ## Configuration and capacity
 
@@ -160,8 +160,9 @@ No replacement handler threads are created to bypass stuck capacity.
 | abandoned final attempt | later due scan records durable `FAILED`, with no automatic reset |
 | no registered handler | no claim, attempt, renewal or success; wait for a real implementation |
 
-Jobs missing because notifications never created them still need future outbox-to-job
-recovery/backfill. Consumer outage restart policy, quarantine disposition and job
+Jobs missing because notifications never created them can use the independently
+opt-in [missing-job reconciler](missing-job-reconciliation.md) for eligible aged
+PUBLISHED sources. Broad legacy backfill remains absent. Consumer outage restart policy, quarantine disposition and job
 identity/state machine remain as documented in [consumer recovery](purge-consumer.md)
 and [background jobs](background-jobs.md). Retention/reset tooling remains absent.
 

@@ -23,7 +23,7 @@ credentials described in [the publisher runbook](outbox-publishing.md).
 Each instance uses one consumer with prefetch one and manual acknowledgements.
 Additional instances are safe through PostgreSQL job identity uniqueness. Automatic
 dispatch and recovery scheduling are supplied separately by the opt-in
-[Phase 2C worker foundation](job-workers.md). No production purge handler exists yet.
+[Phase 2C worker foundation](job-workers.md). Production file and folder purge handlers are registered; worker enablement permits execution.
 
 ## Validation and acknowledgement order
 
@@ -54,7 +54,7 @@ Future workers must still revalidate ownership, ancestry, lifecycle and claims.
 A rollback or commit failure produces no ACK. A crash after commit but before ACK
 leaves a durable job; RabbitMQ redelivery finds that same job. An uncertain ACK
 stops the consumer rather than repeating database work on the same delivery.
-Notification delivery is at least once, not exactly once; physical purge execution remains unimplemented.
+Notification delivery is at least once, not exactly once; physical execution belongs to the independently enabled workers.
 
 ## Retries and quarantine
 
@@ -105,9 +105,10 @@ or credential-bearing connection details. Never log parser/database exceptions.
   from their fingerprint. Retain outbox records for inbound validation/replay;
   premature outbox deletion causes even a duplicate notification to quarantine as
   `UNKNOWN_EVENT`. Outbox/job/quarantine retention policy remains undecided.
-- Missing notifications/jobs and historical pre-outbox purge intents still need
-  future database recovery/backfill. Jobs already created survive broker loss and
-  remain eligible for future PostgreSQL-backed execution/recovery scans.
+- Missing jobs for aged PUBLISHED sources can use [bounded Phase 2E.4 recovery](missing-job-reconciliation.md).
+  Quarantined or invalid sources and historical pre-outbox intents remain blocked;
+  this does not change valid consumer replay or automatically clear quarantine.
+  Existing jobs survive broker loss and remain eligible for PostgreSQL execution/recovery.
 
 ## Verification
 

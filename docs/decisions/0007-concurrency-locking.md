@@ -255,3 +255,20 @@ Publisher, consumer and worker processing stay disabled. No development database
 VM configuration, broker production topology or Garage configuration is changed.
 This establishes the tested dependency/configuration behavior; dependency upgrades
 must recheck the wrapper control. No load or performance claim is made.
+
+## Phase 2E.4 missing-job ingestion
+
+The reconciliation scan reads bounded committed scalar outbox identities without
+resource locks. Ingestion rechecks age/quarantine and parses immutable source
+identity before taking shared owner hierarchy -> fresh file/folder FOR SHARE ->
+job identity insertion. Resource intent/target/run validation occurs after the
+hierarchy and resource locks. There is no namespace/resource/proof mutation and
+no resource lock after job insertion. Consumer ingestion remains job-only, so
+there is no inverse resource/job lock order. Existing worker lifecycle, checkpoint,
+lease and storage fences are unchanged; no lock spans broker or Garage I/O.
+
+Each transaction retains five-second statement and two-second lock-wait bounds.
+Real PostgreSQL tests force both consumer/reconciler insert winner orders and
+assert one unchanged-identity job. Exclusive-hierarchy contention and scan table
+locks time out without advancing business state; statement timeout rolls back
+ingestion. See [reconciliation recovery](../missing-job-reconciliation.md).

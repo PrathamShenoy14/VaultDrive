@@ -92,3 +92,12 @@ Without the test-vhost opt-in, live RabbitMQ tests are skipped; that is not full
 Verification on 2026-10-10: the focused database/transport/configuration/purge run passed 51 tests; the isolated live RabbitMQ run passed all three tests. The final full backend suite passed 383 tests with no failures, errors, or skips, including the additional claim-state constraint cases and existing PostgreSQL/S3 suites. V13 was exercised in the configured test database; the running development API and its database were not deployed or migrated by this slice. PostgreSQL/Garage identities, start times, restart counts, mounts, network endpoints, and port mappings matched the earlier complete baseline. RabbitMQ retained its original container identity, zero restart count, expected volume, captured network/address, and loopback port mappings. Test queues/exchanges were removed, the approved test vhost was retained, and verification-only SSH tunnels were closed.
 
 Outbound-I/O hardening verification on 2026-10-10: final focused verification passed 66 tests; the final full backend suite passed 392 tests with zero failures, errors, or skips, including PostgreSQL/S3 and all three isolated live RabbitMQ tests. The context-close test interrupts an in-flight real client enqueue and asserts scheduler termination within three seconds; socket closure is separately tested against the saturated queue. Initial broker/full attempts failed because the Windows environment lacked broker credentials; reruns passed after loading existing VM credentials privately into the Maven process environment, without writing an environment file or printing credentials. No containers, broker configuration, production database data, or Garage configuration changed. Test topology was cleaned up and the temporary verification tunnel closed. Default application polling remains disabled; this fix was not deployed to a running API.
+
+## Phase 2E.4 published-without-job recovery
+
+PUBLISHED still means broker acceptance. If notification ingestion never committed,
+the independently disabled [missing-job reconciler](missing-job-reconciliation.md)
+can create the original event-ID job after the default five-minute eligibility delay
+and strict retained-intent validation. It does not rearm publication, change counters
+or topology, reset jobs, call Garage or infer pre-outbox intents. Quarantined and
+inconsistent historical sources remain visible for reviewed recovery.

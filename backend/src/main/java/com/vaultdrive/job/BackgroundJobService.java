@@ -28,10 +28,17 @@ public class BackgroundJobService {
     /** Joins a caller transaction so future notification acknowledgement can follow commit. */
     @Transactional
     public UUID create(UUID eventId, JobType type, UUID aggregateId) {
+        createIfAbsent(eventId, type, aggregateId);
+        return eventId;
+    }
+
+    /** Same insert/identity guard; the caller reports creation only after transaction commit. */
+    @Transactional
+    public boolean createIfAbsent(UUID eventId, JobType type, UUID aggregateId) {
         Objects.requireNonNull(eventId);
         Objects.requireNonNull(type);
         Objects.requireNonNull(aggregateId);
-        entityManager.createNativeQuery("""
+        int inserted = entityManager.createNativeQuery("""
                 INSERT INTO background_jobs (id, job_type, aggregate_type, aggregate_id, max_attempts)
                 VALUES (:id, :type, :aggregateType, :aggregateId, :maxAttempts)
                 ON CONFLICT (id) DO NOTHING
@@ -42,7 +49,7 @@ public class BackgroundJobService {
         if (existing.getJobType() != type || !existing.getAggregateId().equals(aggregateId)) {
             throw new IllegalArgumentException("Job identity already belongs to different work");
         }
-        return existing.getId();
+        return inserted == 1;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

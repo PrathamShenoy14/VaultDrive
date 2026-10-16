@@ -11,5 +11,8 @@ $env:RABBITMQ_VHOST="/"
 $env:OUTBOX_PUBLISHER_ENABLED="false"
 $env:PURGE_CONSUMER_ENABLED="false"
 $env:JOB_WORKER_ENABLED="false"
+$env:MISSING_JOB_RECONCILIATION_ENABLED="false"
+# Conservative published-event age before missing-job recovery (minimum 1m).
+$env:MISSING_JOB_RECONCILIATION_DELAY="5m"
 # Enable live tests only after isolated test-vhost setup is explicitly approved.
 # $env:RABBITMQ_TEST_VHOST="vaultdrive_outbox_test"

@@ -17,7 +17,7 @@ or permissions, vhosts, buckets or service credentials.
 
 - PostgreSQL is fixed to localhost port 5432, database `vaultdrive_test`. Each run
   creates `async_e2e_<32 hex UUID characters>` using CREATE SCHEMA without
-  IF NOT EXISTS. It never adopts an existing schema. Flyway V1-V22 and Hibernate
+  IF NOT EXISTS. It never adopts an existing schema. Flyway V1-V23 and Hibernate
   use only that schema; schema auto-creation is disabled. Before initializing each
   mutation-capable async component, a gate verifies the database, current schema,
   search path and absence of all outbox events, jobs, users, files and folders.
@@ -172,3 +172,14 @@ context shutdown. That warning's lifecycle/classloader impact is uninvestigated;
 the harness does not globally terminate SDK executors shared with other test
 contexts. Keep these observations separate from assertions that passed.
 Process-kill/failover/load and operational recovery gaps above remain open.
+
+## Phase 2E.4 recovery verification
+
+The continuous harness retains reconciliation disabled, so ordinary notification
+delivery remains the path it verifies. [Missing-job reconciliation tests](missing-job-reconciliation.md#verification)
+separately verify recovery with publisher, consumer and worker startup disabled.
+Use the same full-suite isolated-vhost/ASYNC_E2E_TEST opt-ins above. The new suite
+adds no default-topology activity or Garage user-object mutation; its single real
+storage control uses only a fresh disposable upload and asserts its bytes survive
+job recovery. Missing-job creation is not evidence of physical deletion or general
+legacy repair.

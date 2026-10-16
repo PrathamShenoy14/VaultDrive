@@ -1,6 +1,6 @@
 # VaultDrive architecture
 
-Last reconciled with the repository on 2026-10-13.
+Last reconciled with the repository on 2026-10-16.
 
 ## Status legend
 
@@ -76,11 +76,11 @@ The file endpoint accepts only an owned, trashed `READY` file whose purge has no
 
 A pending-purge folder makes every descendant ineligible for restore, move, upload reservation/finalization, file purge request, or other metadata mutation. Folder restore rejects its own pending purge with `404 Not Found` after the exclusive owner hierarchy lock and fresh pessimistic Trash-row read, before any mutation or root fallback. Folder and file restore explicitly check pending-purge ancestry before ordinary inaccessible-parent root fallback. V11's `chk_folders_purge_requires_deleted` remains the final database guard against restoring pending-purge metadata.
 
-Accepted file and folder requests append a version-1 purge-intent event to `outbox_events` in the same JPA transaction through a mandatory-transaction writer. Business state and event commit or roll back together, including after flush. Ownership/eligibility rejection and repeated requests append no event. A folder request emits one root intent, not a subtree event list. Phase 2A supplies durable jobs, Phase 2B ingestion and Phase 2C bounded scheduling/renewal. Phase 2D.1 adds immutable event-ID targets and a real file byte-purge handler under the accepted trusted-writer assumption. Phase 2D.2 Slice 2 adds shared byte receipts and conservative standalone metadata finalization. Legacy unknown bindings fail closed. Slices 4 and 5 add folder discovery/file byte execution. Slice 6 adds bottom-up folder metadata removal and durable FINALIZED proof; missing-job backfill and operational metrics remain planned. See [file purge](file-purge.md).
+Accepted file and folder requests append a version-1 purge-intent event to `outbox_events` in the same JPA transaction through a mandatory-transaction writer. Business state and event commit or roll back together, including after flush. Ownership/eligibility rejection and repeated requests append no event. A folder request emits one root intent, not a subtree event list. Phase 2A supplies durable jobs, Phase 2B ingestion and Phase 2C bounded scheduling/renewal. Phase 2D.1 adds immutable event-ID targets and a real file byte-purge handler under the accepted trusted-writer assumption. Phase 2D.2 Slice 2 adds shared byte receipts and conservative standalone metadata finalization. Legacy unknown bindings fail closed. Slices 4 and 5 add folder discovery/file byte execution. Slice 6 adds bottom-up folder metadata removal and durable FINALIZED proof; Phase 2E.4 adds bounded missing-job recovery and per-page counters; broad historical backfill and general metrics remain planned. See [file purge](file-purge.md).
 
 ### Asynchronous processing — Partially implemented
 
-ADR-0008 selects a PostgreSQL transactional outbox, RabbitMQ work notifications, PostgreSQL-backed durable job state, idempotent workers, and scheduler-driven recovery. Purge-request API transactions atomically persist business changes and outbox events; the opt-in publisher delivers committed notifications and recovers expired publication claims through database polling. Phase 2A adds job claiming/recovery primitives; Phase 2C schedules these for registered handler types. Phase 2D.1 supplies file byte purge; Phase 2D.2 Slices 4 and 5 supply folder discovery and file byte execution. Slice 6 adds folder metadata removal; missed-notification/job backfill remains planned. Database polling is a recovery and publishing mechanism within this design, not an alternative to RabbitMQ.
+ADR-0008 selects a PostgreSQL transactional outbox, RabbitMQ work notifications, PostgreSQL-backed durable job state, idempotent workers, and scheduler-driven recovery. Purge-request API transactions atomically persist business changes and outbox events; the opt-in publisher delivers committed notifications and recovers expired publication claims through database polling. Phase 2A adds job claiming/recovery primitives; Phase 2C schedules these for registered handler types. Phase 2D.1 supplies file byte purge; Phase 2D.2 Slices 4 and 5 supply folder discovery and file byte execution. Slice 6 adds folder metadata removal; Phase 2E.4 adds opt-in aged-PUBLISHED missing-job reconciliation; broad historical backfill remains planned. Database polling is a recovery and publishing mechanism within this design, not an alternative to RabbitMQ.
 
 RabbitMQ development infrastructure is deployed on the Ubuntu VM as recorded in [Phase 1A setup instructions](rabbitmq-development.md). AMQP and management bind to VM loopback and Windows accesses them through SSH forwarding. Phase 1B adds outbox persistence and atomic purge-request insertion. Phase 1C adds opt-in scheduled publication: PostgreSQL due-row locking and durable token/lease claims, persistent RabbitMQ messages to a durable direct exchange/quorum queue, correlated confirms with mandatory-return checks, bounded exponential retries, and expired-claim recovery. Claims commit before broker I/O; only an unexpired matching token can record completion. [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md) records the at-least-once contract and [publisher instructions](outbox-publishing.md) describe configuration/recovery. Phase 2D.1 adds file byte deletion only; historical-intent backfill remains absent. Publisher polling, consumer startup and worker scheduling are independently disabled by default.
 
@@ -230,7 +230,7 @@ recovery](folder-purge-design.md#slice-6-bottom-up-metadata-removal-and-durable-
 
 ## Known gaps and pending decisions
 
-- Remaining ADR-0008 async implementation: automated historical finalization recovery, missed-job/historical-intent backfill, outbox/job/quarantine retention, replay/reset tooling and operational tuning. File byte purge and conservative standalone metadata finalization are implemented under the accepted trusted-writer assumption; production load, real process-kill/restart and multi-node failure experiments remain unverified.
+- Remaining ADR-0008 async implementation: automated historical finalization recovery, legacy/blocked historical-intent backfill, outbox/job/quarantine retention, replay/reset tooling and operational tuning. File byte purge and conservative standalone metadata finalization are implemented under the accepted trusted-writer assumption; production load, real process-kill/restart and multi-node failure experiments remain unverified.
 - Remaining file-side coordination: reconciliation and future direct-upload writer fencing.
 - Reconciliation for stale `UPLOADING`, `FAILED`, orphaned objects, and uncertain finalization.
 - Audited legacy storage-identity recovery and verified quiescence for admitted
@@ -288,3 +288,21 @@ requires bounded review of that exact run; no global cleanup facility is supplie
 Production flags, migrations, lock order, fencing, receipts and trusted-writer
 assumptions are unchanged. This single-node happy-path/replay evidence adds no
 process-kill, load, failover, unsafe-writer reconciliation or deployment claim.
+
+## Phase 2E.4 bounded missing-job recovery
+
+An independently opt-in poller recovers aged PUBLISHED outbox events with no
+same-UUID job. It reuses strict consumer source validation and durable job
+deduplication, then additionally requires retained V16 file target/allocation or
+V19 folder run plus matching fresh committed resource intent. Quarantined,
+unsupported and inconsistent sources remain blocked. V23 indexes bounded
+published_at/id keyset pages; five-second statements/two-second lock waits bound
+each independent transaction. Shared hierarchy -> fresh resource FOR SHARE ->
+job identity insertion preserves existing worker fencing and changes no resource,
+receipt or existing job. No broker/storage I/O occurs. Five-minute eligibility,
+one-minute polls and twenty-event pages are conservative defaults, not measured
+tuning. Per-page scanned/created/alreadyPresent/skipped/failed counters and
+scanFailed contain no payload/key/credential labels. All four autonomous flags
+remain false by default. PostgreSQL tests exercise both consumer winner orders,
+pagination, invalid/quarantined/terminal history and timeout rollback; the Garage
+control asserts retained bytes. See [eligibility, operation and limits](missing-job-reconciliation.md).

@@ -10,7 +10,7 @@ No API directly creates jobs. Phase 2D.1 adds a [file byte-purge handler](file-p
 under the accepted trusted-writer assumption. Slice 2 adds conservative standalone
 metadata finalization; Slice 3 adds V18 bounded continuation. Slices 4–5 add
 folder discovery and file byte execution; Slice 6 adds metadata removal and
-durable FINALIZED proof. Reconciliation remains unimplemented.
+durable FINALIZED proof. Phase 2E.4 adds [bounded missing-job reconciliation](missing-job-reconciliation.md); broad legacy recovery remains unimplemented.
 Existing purge APIs and outbox publisher behavior are unchanged.
 
 ## Identity and creation
@@ -90,7 +90,7 @@ return empty after clearing 20 exhausted rows even when work remains; future
 pollers must scan again. The opt-in Phase 2C scheduler drives these scans only for
 registered handler types; Phase 2D.1 registers the file handler only. Due pending
 jobs can be found without notifications; abandoned jobs can be reclaimed after restart. A missed
-notification that never created a job needs future outbox-to-job recovery/backfill.
+notification that never created a job can use [Phase 2E.4 recovery](missing-job-reconciliation.md) when its PUBLISHED source and retained intent are eligible. Pre-outbox or blocked historical intent still needs separate recovery.
 
 A crash before claim commit leaves no attempt. A crash after commit leaves a
 recoverable lease. A crash after external I/O but before outcome commit can repeat
@@ -179,3 +179,11 @@ returning SUCCEEDED. Replay advances no revision. Earlier committed incomplete
 batches resume and require new progress for CONTINUE. Standalone FILE_PURGE success
 remains byte-only; folder finalization never resets standalone jobs. See [the
 folder recovery contract](folder-purge-design.md#slice-6-bottom-up-metadata-removal-and-durable-finalization).
+
+## Phase 2E.4 missing-job creation
+
+createIfAbsent shares create's event-ID insert and identity guard and returns the
+actual insert outcome. Reconciliation calls it in the bounded ingestion transaction;
+ordinary consumer create and ACK ordering remain unchanged. An identical concurrent
+winner preserves every existing job column. Reconciliation never invokes claim,
+retry, renewal, checkpoint or reset operations. See [recovery eligibility and counters](missing-job-reconciliation.md).

@@ -26,7 +26,7 @@ Garage/S3 calls will remain outside metadata database transactions. Workers will
 - Publishers and consumers must assume at-least-once effects and be idempotent; exactly-once delivery is not required.
 - Purge and reconciliation workers must preserve the lifecycle, hierarchy, ownership, and lock-order invariants in ADRs 0005–0007.
 - The earlier polling-first possibility in ADR-0006 is superseded by this decision.
-- Phase 1A provides development RabbitMQ infrastructure; Phase 1B provides atomic purge-request outbox persistence; Phase 1C provides leased publication, confirms, bounded retries, and expired-claim recovery; Phase 2A provides job persistence and fenced lifecycle/recovery primitives; Phase 2B provides validated notification ingestion with commit-before-ACK and sanitized quarantine; Phase 2C provides bounded worker dispatch, lease renewal and scheduled recovery for registered handler types. Phase 2D.1 adds trusted-writer file byte purge; Phase 2D.2 Slice 2 adds shared file receipts and standalone metadata finalization. Slice 6 adds folder metadata removal; missed-job backfill remains unimplemented.
+- Phase 1A provides development RabbitMQ infrastructure; Phase 1B provides atomic purge-request outbox persistence; Phase 1C provides leased publication, confirms, bounded retries, and expired-claim recovery; Phase 2A provides job persistence and fenced lifecycle/recovery primitives; Phase 2B provides validated notification ingestion with commit-before-ACK and sanitized quarantine; Phase 2C provides bounded worker dispatch, lease renewal and scheduled recovery for registered handler types. Phase 2D.1 adds trusted-writer file byte purge; Phase 2D.2 Slice 2 adds shared file receipts and standalone metadata finalization. Slice 6 adds folder metadata removal; Phase 2E.4 below adds bounded missing-job reconciliation; broad legacy backfill remains unimplemented.
 
 ## Phase 1B schema and transaction decision
 
@@ -55,7 +55,7 @@ Existing pending-purge requests predating V12 are not backfilled by this migrati
 
 ## Deferred decisions
 
-Missed-notification/job backfill, outbox/job/quarantine retention, ordering guarantees and operational tuning remain open. Standalone metadata finalization is supplied by Phase 2D.2 Slice 2 below. The Phase 1B event contract remains unchanged. Publisher, job, consumer, worker foundation and file-purge choices are recorded separately below.
+Broad legacy-intent backfill, outbox/job/quarantine retention, ordering guarantees and operational tuning remain open. Phase 2E.4 below resolves only aged-PUBLISHED missing-job recovery. Standalone metadata finalization is supplied by Phase 2D.2 Slice 2 below. The Phase 1B event contract remains unchanged. Publisher, job, consumer, worker foundation and file-purge choices are recorded separately below.
 
 ## Phase 1C publisher protocol
 
@@ -329,3 +329,36 @@ committed leaves or FINALIZED replay. Counts and retained proof fail closed on
 missing manifests/metadata; no automatic repair, reset, retention or inferred
 writer quiescence is added. APIs, disabled defaults, v1 events and topology remain.
 See [Slice 6 tests and recovery](../folder-purge-design.md#slice-6-bottom-up-metadata-removal-and-durable-finalization).
+
+## Phase 2E.4 bounded missing-job reconciliation
+
+Recover only committed PUBLISHED sources aged at least five minutes by default,
+with no event-ID job and no identifiable quarantine entry. Reuse the strict v1
+consumer parser, immutable source comparison and BackgroundJobService insertion.
+Additionally require matching V16 target/allocation and pending READY file intent,
+or matching retained V19 run and pending root intent. Missing historical proof is
+blocked, never synthesized from current storage configuration. No v1 contract,
+RabbitMQ topology or storage operation changes are made.
+
+V23 adds only a partial published_at/id index. Scan bounded keyset pages (20 by
+default, 1..100), then independently ingest each candidate with ten-second Spring,
+five-second statement and two-second lock-wait bounds. Duplicate insert outcomes
+are exact through ON CONFLICT DO NOTHING and the existing identity guard; existing
+pending/running/terminal work, attempts, leases, checkpoints and receipts never reset.
+Consumer/reconciler races converge transactionally on the original event UUID.
+
+An independently disabled poller waits one minute initially and after each page.
+An in-memory cursor advances across blocked/failing rows and wraps after empty
+pages; restart/repeated sweeps are safe without durable cursor state. Failed scans
+retain their cursor. Per-page scanned/created/alreadyPresent/skipped/failed and
+scanFailed expose bounded sanitized operational evidence without payload labels.
+Quarantine is checked at ingestion read, not fenced against later insertion; valid
+consumer replay policy is unchanged. No automatic quarantine disposition, legacy
+pre-outbox backfill, job reset, retention or storage proof repair is authorized.
+
+This conservative eligibility trades recovery latency for fewer ordinary-delivery
+races. It may leave valid legacy events blocked when retained targets/runs or
+current resource intent are absent. Operators retain evidence and make a separate
+recovery decision. Component timeouts are not an absolute whole-page deadline,
+and sustained growth can delay cursor wraparound; no performance/fairness claim
+is measured. See [the operational contract](../missing-job-reconciliation.md).

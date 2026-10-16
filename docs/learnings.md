@@ -303,3 +303,19 @@ Failure cleanup owns exact resource identities, never a shared schema or bucket 
 Closing an unacknowledged test channel produces actual redelivery; repeated production
 transport sends verify duplicate ingestion without rearming authoritative events.
 See [the executable verification and limitations](async-purge-verification.md).
+
+## A published notification can still need durable-job recovery
+
+Broker confirmation proves acceptance, not consumer transaction commit. Recovery
+must start from the original committed event identity and retained purge intent,
+never reconstruct a target from today's storage configuration. Reusing the same
+event-ID insert and database uniqueness guard makes consumer/reconciler races
+safe without resetting any existing job state. The insert outcome, rather than a
+pre-insert existence check, distinguishes actual creation from a concurrent winner.
+
+Bound both selection and each ingestion transaction. A keyset cursor must advance
+over blocked records so malformed history cannot pin later work; wraparound and
+restart safely retry retained records. Eligibility delay reduces delivery races
+but does not replace deduplication. Distinguish per-event failures from failed
+scans, retain evidence, and treat created-job counts as acceptance rather than
+deletion. See [the recovery rules](missing-job-reconciliation.md).

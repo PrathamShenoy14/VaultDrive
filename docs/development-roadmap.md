@@ -56,7 +56,7 @@ See [publisher development/recovery instructions](outbox-publishing.md) and ADR-
 
 Goal: remove Garage objects asynchronously and finalize metadata without pretending PostgreSQL and S3 share a transaction.
 
-- Partially implemented ADR-0008 architecture: development RabbitMQ, atomic purge-request outbox persistence, leased publication, durable jobs, consumer ingestion, opt-in scheduling/renewal and trusted-writer file byte purge are present; folder purge and metadata finalization are now implemented by Phase 2D.2; missed-job backfill remains planned.
+- Partially implemented ADR-0008 architecture: development RabbitMQ, atomic purge-request outbox persistence, leased publication, durable jobs, consumer ingestion, opt-in scheduling/renewal and trusted-writer file byte purge are present; folder purge and metadata finalization are now implemented by Phase 2D.2; Phase 2E.4 adds bounded aged-PUBLISHED missing-job reconciliation; broad legacy backfill remains planned.
 - Consume at-least-once notifications idempotently; extend atomic outbox persistence to future business transitions where required.
 - Have idempotent workers claim durable jobs in PostgreSQL; use scheduled database scans to recover missed notifications, retries, and interrupted work. Database polling is a recovery and publishing mechanism, not an alternative execution topology.
 - Define safe job claiming for multiple worker instances, retry/backoff, attempt metadata, and terminal-failure handling.
@@ -76,8 +76,8 @@ Exit criteria: a committed deletion request survives restart, is retried safely,
 - [x] Document the [state machine and crash behavior](background-jobs.md) in ADR-0008 and architecture notes.
 
 Phase 2A supplies persistence primitives; Phase 2B connects notification delivery to
-job creation and Phase 2C adds scheduling/renewal. Phase 2D.1 adds file byte purge; folder handlers,
-stale-upload reconciliation and notification backfill remain planned. The overall Phase 2
+job creation and Phase 2C adds scheduling/renewal. Phase 2D implements file/folder
+purge handlers and metadata finalization. Stale-upload reconciliation and broad legacy backfill remain planned; Phase 2E.4 recovers eligible aged-PUBLISHED missing jobs. The overall Phase 2
 exit criteria remain pending. Execution results belong in task reports.
 
 ### Phase 2B — RabbitMQ consumer integration (completed)
@@ -91,7 +91,7 @@ exit criteria remain pending. Execution results belong in task reports.
 - [x] Document [consumer configuration, acknowledgement and recovery](purge-consumer.md).
 
 Phase 2B itself adds no job execution or Garage deletion. Phase 2D.1 supplies file
-byte purge; upload reconciliation and backfill remain unimplemented.
+byte purge; upload reconciliation and broad legacy backfill remain unimplemented. Phase 2E.4 supplies bounded missing-job recovery.
 Runtime startup remains disabled until explicitly enabled; verification does not
 deploy the development API. Raw invalid-message recovery and outbox/job/quarantine
 retention remain open; Phase 2C below adds supported-type scheduling and renewal.
@@ -108,9 +108,8 @@ retention remain open; Phase 2C below adds supported-type scheduling and renewal
 - [x] Document [worker configuration and recovery](job-workers.md).
 
 All scheduling stays disabled by default. Phase 2C added no storage handler;
-Phase 2D.1 below supplies file byte purge. Folder execution, stale-upload
-reconciliation, missed-notification/job backfill, retention/reset tooling and tuning
-remain open.
+Phase 2D below supplies file/folder execution and metadata finalization. Stale-upload
+reconciliation, broad legacy backfill, retention/reset tooling and tuning remain open.
 
 ### Phase 2D.1 — File byte purge under trusted writers
 
@@ -191,8 +190,21 @@ Exit criteria: correctness tests remain green and measured contention improves f
 
 ## Explicitly undecided
 
-- Physical purge execution/ownership, missed-job backfill, operational tuning and event/job/quarantine retention within ADR-0008. Publisher policy is decided in Phase 1C; job identity/states/fencing/retries in Phase 2A; consumer disposition in Phase 2B; bounded scheduling/renewal/shutdown in Phase 2C.
+- Broad legacy/blocked-intent recovery, operational tuning and event/job/quarantine retention within ADR-0008. Phase 2E.4 resolves bounded aged-PUBLISHED missing-job creation; file/folder purge execution is implemented. Publisher policy is decided in Phase 1C; job identity/states/fencing/retries in Phase 2A; consumer disposition in Phase 2B; bounded scheduling/renewal/shutdown in Phase 2C.
 - Granular lock mechanism and namespace key.
 - Hard-delete retention delay and user-visible cancellation policy.
 - Refresh-token/logout design and JWT key evolution.
 - Sharing schema, quota model, deployment platform, and performance targets.
+
+## Phase 2E.4 bounded missing-job reconciliation
+
+- [x] Independently opt-in, disabled-by-default aged-PUBLISHED event/job gap recovery.
+- [x] Strict consumer identity validation plus conservative retained file/folder intent checks.
+- [x] Bounded keyset pages, statement/lock timeouts, delayed eligibility and exact insert deduplication.
+- [x] Preserve all existing jobs/progress/proofs; retain blocked records with sanitized counters.
+- [x] PostgreSQL race/history/pagination/timeout and disabled-startup coverage; disposable Garage preservation control.
+- [x] [Operational recovery contract](missing-job-reconciliation.md) and ADR updates.
+
+Broad pre-outbox/blocked-history repair, quarantine disposition, retention, resets,
+stale uploads/orphans and measured tuning remain separate work. Execution results
+are reported with verification; no deployment or autonomous default is enabled.
