@@ -4,8 +4,9 @@ B2 adds an explicit PostgreSQL-only operation under the
 [recovery audit](stale-upload-recovery-audit.md). It releases stale upload names
 only after permanently excluding application write admission. It performs no
 Garage PUT, HEAD or DELETE and adds no scheduler, endpoint, job or outbox event.
-B1's [inventory](stale-upload-inventory.md) remains read-only. B3 success evidence,
-admitted-write recovery and B4 cleanup remain unimplemented.
+B1's [inventory](stale-upload-inventory.md) remains read-only. B3 now adds
+[success evidence and conservative metadata recovery](upload-success-recovery.md);
+B4 cleanup remains unimplemented.
 
 ## Invocation and bounds
 
@@ -184,7 +185,8 @@ Executed on 2026-10-17 against PostgreSQL 17.11 and the existing test infrastruc
   forward was used for the live broker checks.
 
 Admitted UPLOADING and FAILED writers remain retained regardless of age, timeout,
-process death or HEAD absence. There is no durable PUT-success receipt, admitted
+process death or HEAD absence. B2 itself adds no PUT-success receipt, admitted
 recovery, orphan scan, Garage cleanup, autonomous expiry, user-facing operation or
-process-loss experiment in B2. Independent external writers and namespace/endpoint
-reassignment remain outside the trusted-writer guarantee. B3 requires separate work.
+process-loss experiment. Independent external writers and namespace/endpoint
+reassignment remain outside the trusted-writer guarantee. B3 is documented
+separately in the [success recovery contract](upload-success-recovery.md).

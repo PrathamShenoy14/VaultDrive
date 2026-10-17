@@ -25,3 +25,14 @@ Use `UPLOADING`, `READY`, and `FAILED` for storage readiness. Reserve metadata a
 - Upload object first, then create metadata: avoids `UPLOADING` rows but creates untracked objects on database failure.
 - Store object state and user lifecycle in one enum: fewer columns, but conflates independent state machines.
 - Copy/delete objects on rename or move: unnecessary because storage keys are intentionally independent of display paths.
+
+## Phase 2E.5B3 superseding upload completion contract
+
+The foreground now commits durable success evidence after PUT and input closure,
+then uses conservative receipt-based READY finalization. Inaccessible destinations
+remain blocked UPLOADING with retained bytes; the previous foreground FAILED plus
+best-effort DELETE behavior is superseded. Ordinary PUT/close failure still attempts
+FAILED. Explicit recovery revalidates receipts and eligibility, never resurrects
+FAILED and never repeats PUT, HEAD or DELETE. A crash before the receipt commit
+remains uncertain; historical admissions are not backfilled. See
+[the exact identity, boundaries and remaining gap](../upload-success-recovery.md).

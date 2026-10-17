@@ -293,3 +293,18 @@ No lock spans Garage I/O; expiry has no storage dependency or job/outbox writes.
 Real PostgreSQL tests observe blocking and cover both winner orders, folder races,
 rollback, timeouts, immutable evidence and cursor progress. See
 [the precise contract and verification](../stale-upload-expiry.md).
+
+## Phase 2E.5B3 PUT-success evidence and metadata recovery
+
+Admission additionally captures the immutable current UPLOADING version and folder
+on the original allocation. Receipt recording and recovery each acquire shared
+owner hierarchy -> fresh scalar file FOR UPDATE -> retained allocation FOR UPDATE.
+Only immutable owner identity precedes coordination. No resource locks follow job
+locks; B3 takes no job/work locks and issues no storage calls. Independent receipt
+commit follows successful PUT/close and precedes READY. Recovery checks the full
+retained identity, admission, version, lifecycle, bounded accessible ancestry,
+expiry and conflicting purge evidence before reusing the existing READY CAS.
+Matching READY resolves replay; FAILED, inaccessible ancestry and pending purge
+block unchanged. Existing folder coordination and unsafe-writer purge rules remain.
+Receipt identity/timestamp cannot be rewritten, and historical admissions cannot
+acquire a new admission snapshot. See [the B3 contract](../upload-success-recovery.md).

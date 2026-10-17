@@ -3,8 +3,9 @@
 B1 implements bounded, read-only PostgreSQL reporting under the
 [recovery audit](stale-upload-recovery-audit.md). The separate
 [B2 expiry operation](stale-upload-expiry.md) now handles freshly validated
-never-admitted reservations. B3 success receipts/retry and B4 cleanup remain
-unimplemented. B1 itself never expires, recovers or deletes an upload.
+never-admitted reservations. B3 now provides
+[success receipts and metadata retry](upload-success-recovery.md); B4 cleanup
+remains unimplemented. B1 itself never expires, recovers or deletes an upload.
 
 ## Explicit invocation and configuration
 
@@ -65,9 +66,9 @@ This is an observation, not a locked recovery decision. Apply these rules in ord
    preclude competing admission after fresh locked validation. Ordinary trashed
    ancestors do not change this admission evidence.
 5. **ADMITTED_UNCERTAIN:** remaining allocations have `write_started=true`.
-   There is currently no durable upload terminal/success evidence for these
-   unfinished uploads. Admission may precede an unstarted, active, failed or
-   successful PUT. FAILED proves neither absent bytes nor a stopped writer.
+   This B1 category does not inspect B3 success receipts and grants no recovery
+   authority; historical admissions still lack success evidence. Admission may
+   precede an unstarted, active, failed or successful PUT. FAILED proves neither absent bytes nor a stopped writer.
 
 Retained full bindings are historical evidence: B1 neither compares them with nor
 reconstructs them from current configuration. A complete historical binding can
@@ -167,4 +168,13 @@ revalidates identity, version, database age, lifecycle and accessible ancestry,
 then commits permanent preclusion, conditional FAILED transition and evidence
 atomically. Pending folder purge remains deferred. B1 classifications cannot
 authorize expiry. Historical admitted uncertain writers remain blocked;
-B3/B4 require separately accepted durable evidence and cleanup protocols.
+B3 now separately validates durable success receipts; B4 cleanup still requires
+an independently accepted protocol.
+
+## B3 evidence boundary
+
+[Receipt-based recovery](upload-success-recovery.md) now independently validates
+retained PUT-success evidence. B1's conservative ADMITTED_UNCERTAIN label remains
+an admission classification, including for receipt-bearing uploads; it is neither
+a claim that a receipt is absent nor authorization to recover. No inventory query
+or classification has been repurposed as a recovery decision.

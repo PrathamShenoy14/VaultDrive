@@ -265,7 +265,7 @@ class HierarchyHttpTransactionTest extends HierarchyHttpTestSupport {
     }
 
     @Test
-    void realUploadReservationAdmissionAndFinalizationUseSeparateJoinedTransactions() throws Exception {
+    void realUploadReservationAdmissionReceiptAndFinalizationUseSeparateJoinedTransactions() throws Exception {
         String boundary = "vaultdrive-http-test";
         String body = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"http-upload.txt\""
                 + "\r\nContent-Type: text/plain\r\n\r\ndisposable HTTP bytes\r\n--" + boundary + "--\r\n";
@@ -278,7 +278,13 @@ class HierarchyHttpTransactionTest extends HierarchyHttpTestSupport {
             assertThat(response.statusCode()).as(response.body()).isEqualTo(201);
             var id = UUID.fromString(mapper.readTree(response.body()).get("fileId").asText());
             assertThat(files.findById(id).orElseThrow().getStatus()).isEqualTo(FileStatus.READY);
-            assertThat(states).hasSize(3); // reservation, write admission, finalization
+            assertThat(states).hasSize(4); // reservation, admission, success receipt, finalization
+            assertThat(jdbc.queryForObject("""
+                    SELECT a.write_started AND a.put_succeeded_at IS NOT NULL
+                        AND a.admitted_file_version + 1 = f.version
+                        AND a.admitted_folder_id IS NOT DISTINCT FROM f.folder_id
+                    FROM file_storage_objects a JOIN files f ON f.id = a.file_id WHERE f.id = ?
+                    """, Boolean.class, id)).isTrue();
             assertJoinedRequests();
             var download = request("GET", "/files/" + id + "/download", null, 200);
             assertThat(download.body()).isEqualTo("disposable HTTP bytes");

@@ -5,7 +5,6 @@ import com.vaultdrive.file.dto.FileResponse;
 import com.vaultdrive.file.dto.UploadFileResponse;
 import com.vaultdrive.file.dto.FileDownload;
 import com.vaultdrive.file.exception.FileUploadException;
-import com.vaultdrive.file.exception.UploadFinalizationRejectedException;
 import com.vaultdrive.file.exception.InvalidFilePaginationException;
 import com.vaultdrive.file.exception.FileNotFoundException;
 import com.vaultdrive.folder.FolderAccessValidator;
@@ -40,6 +39,7 @@ public class FileService {
     private final StoredFileRepository storedFileRepository;
     private final FileNameExtensionResolver fileNameExtensionResolver;
     private final HierarchyCoordinator hierarchyCoordinator;
+    private final UploadFinalizationRecovery uploadFinalization;
 
     public FileService(
             FolderAccessValidator folderAccessValidator,
@@ -49,7 +49,8 @@ public class FileService {
             StorageKeyGenerator storageKeyGenerator,
             StoredFileRepository storedFileRepository,
             FileNameExtensionResolver fileNameExtensionResolver,
-            HierarchyCoordinator hierarchyCoordinator
+            HierarchyCoordinator hierarchyCoordinator,
+            UploadFinalizationRecovery uploadFinalization
     ) {
         this.folderAccessValidator = folderAccessValidator;
         this.fileNameValidator = fileNameValidator;
@@ -59,6 +60,7 @@ public class FileService {
         this.storedFileRepository = storedFileRepository;
         this.fileNameExtensionResolver = fileNameExtensionResolver;
         this.hierarchyCoordinator = hierarchyCoordinator;
+        this.uploadFinalization = uploadFinalization;
     }
 
     public UploadFileResponse uploadFile(
@@ -112,26 +114,15 @@ public class FileService {
         }
 
         try {
-            fileMetadataService.markReady(savedFile);
-
-        } catch (UploadFinalizationRejectedException exception) {
-
-            deleteRejectedUploadObjectSafely(savedFile, exception);
-
-            throw new FileUploadException(
-                    "File was uploaded but its destination is no longer accessible",
-                    exception
-            );
+            uploadFinalization.complete(savedFile);
 
         } catch (RuntimeException exception) {
 
             /*
-             * The object already exists in storage, but PostgreSQL could not
-             * transition the metadata to READY.
-             *
-             * We deliberately do not blindly delete the object here because
-             * the database outcome may be uncertain. A reconciliation process
-             * can handle stale UPLOADING records later.
+             * PUT and close succeeded. Receipt persistence or READY may have an
+             * uncertain database outcome, or eligibility may now be blocked.
+             * Retain the original allocation and bytes. Explicit recovery can
+             * retry metadata only when authoritative success evidence exists.
              */
             throw new FileUploadException(
                     "File was uploaded but metadata could not be finalized",
@@ -475,14 +466,4 @@ public class FileService {
         }
     }
 
-    private void deleteRejectedUploadObjectSafely(
-            StoredFile storedFile,
-            RuntimeException finalizationFailure
-    ) {
-        try {
-            objectStorageService.delete(storedFile.getStorageKey());
-        } catch (RuntimeException cleanupFailure) {
-            finalizationFailure.addSuppressed(cleanupFailure);
-        }
-    }
 }

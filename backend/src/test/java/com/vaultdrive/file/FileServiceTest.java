@@ -70,6 +70,9 @@ class FileServiceTest {
     @Mock
     private HierarchyCoordinator hierarchyCoordinator;
 
+    @Mock
+    private UploadFinalizationRecovery uploadFinalization;
+
     private FileService fileService;
     private FileNameExtensionResolver fileNameExtensionResolver;
 
@@ -86,8 +89,50 @@ class FileServiceTest {
                 storageKeyGenerator,
                 storedFileRepository,
                 fileNameExtensionResolver,
-                hierarchyCoordinator
+                hierarchyCoordinator,
+                uploadFinalization
         );
+    }
+
+    @Test
+    void successEvidenceIsRequestedOnlyAfterStreamClosure() {
+        var closed = new java.util.concurrent.atomic.AtomicBoolean();
+        var multipart = new MockMultipartFile("file", "test.txt", "text/plain", new byte[]{1}) {
+            @Override public InputStream getInputStream() {
+                return new ByteArrayInputStream(new byte[]{1}) {
+                    @Override public void close() { closed.set(true); }
+                };
+            }
+        };
+        when(fileNameValidator.validateAndNormalize(any())).thenReturn("test.txt");
+        when(storageKeyGenerator.generateFileKey(any(), any())).thenReturn("disposable");
+        when(fileMetadataService.createUploading(any())).thenAnswer(i -> i.getArgument(0));
+        doAnswer(i -> { assertFalse(closed.get()); return null; }).when(objectStorageService)
+                .upload(anyString(), any(), anyLong(), any());
+        doAnswer(i -> { assertTrue(closed.get()); return null; }).when(uploadFinalization).complete(any());
+        fileService.uploadFile(UUID.randomUUID(), null, multipart);
+        var order = inOrder(objectStorageService, uploadFinalization);
+        order.verify(objectStorageService).upload(anyString(), any(), anyLong(), any());
+        order.verify(uploadFinalization).complete(any());
+    }
+
+    @Test
+    void successfulPutWithFailedCloseNeverRequestsSuccessEvidence() {
+        var multipart = new MockMultipartFile("file", "test.txt", "text/plain", new byte[]{1}) {
+            @Override public InputStream getInputStream() {
+                return new ByteArrayInputStream(new byte[]{1}) {
+                    @Override public void close() throws java.io.IOException { throw new java.io.IOException("close failed"); }
+                };
+            }
+        };
+        when(fileNameValidator.validateAndNormalize(any())).thenReturn("test.txt");
+        when(storageKeyGenerator.generateFileKey(any(), any())).thenReturn("disposable");
+        when(fileMetadataService.createUploading(any())).thenAnswer(i -> i.getArgument(0));
+        assertThrows(FileUploadException.class, () -> fileService.uploadFile(UUID.randomUUID(), null, multipart));
+        verify(objectStorageService).upload(anyString(), any(), anyLong(), any());
+        verify(fileMetadataService).markFailed(any());
+        verifyNoInteractions(uploadFinalization);
+        verify(objectStorageService, never()).delete(anyString());
     }
 
     @Test
@@ -134,8 +179,7 @@ class FileServiceTest {
         assertEquals(multipartFile.getSize(), storedFile.getSizeBytes());
 
         // File begins as UPLOADING.
-        // FileMetadataService is mocked, so markReady() does not actually
-        // mutate the entity in this unit test.
+        // Completion is mocked, so it does not mutate the entity here.
         assertEquals(FileStatus.UPLOADING, storedFile.getStatus());
 
         assertEquals(
@@ -150,7 +194,7 @@ class FileServiceTest {
                 eq("application/pdf")
         );
 
-        verify(fileMetadataService).markReady(storedFile);
+        verify(uploadFinalization).complete(storedFile);
         verify(fileMetadataService, never()).markFailed(any());
 
         assertEquals(storedFile.getId(), response.fileId());
@@ -196,7 +240,7 @@ class FileServiceTest {
                 eq("text/plain")
         );
 
-        verify(fileMetadataService).markReady(any(StoredFile.class));
+        verify(uploadFinalization).complete(any(StoredFile.class));
         verify(fileMetadataService, never()).markFailed(any());
     }
 
@@ -333,7 +377,7 @@ class FileServiceTest {
 
         assertEquals("photo.png", failedFile.getName());
 
-        verify(fileMetadataService, never()).markReady(any());
+        verify(uploadFinalization, never()).complete(any());
     }
 
     @Test
@@ -387,7 +431,7 @@ class FileServiceTest {
         assertSame(storageFailure, exception.getCause());
 
         verify(fileMetadataService).markFailed(any(StoredFile.class));
-        verify(fileMetadataService, never()).markReady(any());
+        verify(uploadFinalization, never()).complete(any());
     }
 
     @Test
@@ -416,8 +460,8 @@ class FileServiceTest {
                 new RuntimeException("Database unavailable");
 
         doThrow(databaseFailure)
-                .when(fileMetadataService)
-                .markReady(any(StoredFile.class));
+                .when(uploadFinalization)
+                .complete(any(StoredFile.class));
 
         FileUploadException exception = assertThrows(
                 FileUploadException.class,
@@ -453,7 +497,7 @@ class FileServiceTest {
     }
 
     @Test
-    void shouldDeleteObjectWhenDestinationWasRejectedDuringFinalization() {
+    void shouldPreserveObjectWhenDestinationWasRejectedDuringFinalization() {
         UUID ownerId = UUID.randomUUID();
 
         MockMultipartFile multipartFile = new MockMultipartFile(
@@ -478,8 +522,8 @@ class FileServiceTest {
                         new FolderNotFoundException("Folder not found")
                 );
         doThrow(rejection)
-                .when(fileMetadataService)
-                .markReady(any(StoredFile.class));
+                .when(uploadFinalization)
+                .complete(any(StoredFile.class));
 
         FileUploadException exception = assertThrows(
                 FileUploadException.class,
@@ -491,13 +535,12 @@ class FileServiceTest {
         );
 
         assertSame(rejection, exception.getCause());
-        verify(objectStorageService)
-                .delete("users/" + ownerId + "/files/generated-id");
+        verify(objectStorageService, never()).delete(anyString());
         verify(fileMetadataService, never()).markFailed(any());
     }
 
     @Test
-    void shouldKeepFailedMetadataTrackingWhenRejectedObjectCleanupFails() {
+    void shouldNeverAttemptCleanupWhenFinalizationIsBlocked() {
         UUID ownerId = UUID.randomUUID();
 
         MockMultipartFile multipartFile = new MockMultipartFile(
@@ -521,15 +564,9 @@ class FileServiceTest {
                         "Upload destination is no longer accessible",
                         new FolderNotFoundException("Folder not found")
                 );
-        RuntimeException cleanupFailure =
-                new RuntimeException("Garage delete failed");
-
         doThrow(rejection)
-                .when(fileMetadataService)
-                .markReady(any(StoredFile.class));
-        doThrow(cleanupFailure)
-                .when(objectStorageService)
-                .delete(anyString());
+                .when(uploadFinalization)
+                .complete(any(StoredFile.class));
 
         assertThrows(
                 FileUploadException.class,
@@ -541,10 +578,10 @@ class FileServiceTest {
         );
 
         assertArrayEquals(
-                new Throwable[]{cleanupFailure},
+                new Throwable[]{},
                 rejection.getSuppressed()
         );
-        verify(objectStorageService).delete(anyString());
+        verify(objectStorageService, never()).delete(anyString());
         verify(fileMetadataService, never()).markFailed(any());
     }
 

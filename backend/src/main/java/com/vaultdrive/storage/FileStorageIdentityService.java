@@ -61,11 +61,15 @@ public class FileStorageIdentityService {
         if (file.getFolderId() != null) { folders.requireAccessibleFolder(owner, file.getFolderId()); }
         StorageTarget target = binding.target(key);
         int changed = entityManager.createNativeQuery("""
-                UPDATE file_storage_objects SET write_started = TRUE
+                UPDATE file_storage_objects SET write_started = TRUE,
+                    admitted_file_version = :version, admitted_folder_id = :folder
                 WHERE storage_key = :key AND NOT write_started AND write_precluded_at IS NULL
+                    AND file_id = :file AND owner_id = :owner
                     AND storage_namespace = :namespace AND endpoint = :endpoint
                     AND region = :region AND bucket = :bucket
-                """).setParameter("key", key).setParameter("namespace", target.namespace())
+                """).setParameter("key", key).setParameter("file", file.getId()).setParameter("owner", owner)
+                .setParameter("version", file.getVersion()).setParameter("folder", file.getFolderId())
+                .setParameter("namespace", target.namespace())
                 .setParameter("endpoint", target.endpoint()).setParameter("region", target.region())
                 .setParameter("bucket", target.bucket()).executeUpdate();
         if (changed != 1) { throw new IllegalStateException("Storage key cannot be written again"); }

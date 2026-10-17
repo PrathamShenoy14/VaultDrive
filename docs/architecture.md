@@ -1,6 +1,6 @@
 # VaultDrive architecture
 
-Last reconciled with the repository on 2026-10-16.
+Last reconciled with the repository on 2026-10-17.
 
 ## Status legend
 
@@ -34,8 +34,8 @@ pending purge and admission evidence determine conservative classifications;
 admitted uncertain writes remain retained. There is no scheduler, HTTP endpoint,
 Garage call or business-state mutation. See [invocation, precedence, bounds and
 verification](stale-upload-inventory.md). The separate B2 operation below mutates
-only freshly validated never-admitted reservations. B3/B4 evidence/cleanup remain
-planned under the [recovery audit](stale-upload-recovery-audit.md).
+only freshly validated never-admitted reservations. B3 below adds receipt-based
+finalization; B4 cleanup remains planned under the [recovery audit](stale-upload-recovery-audit.md).
 
 ### Never-admitted reservation expiry — Phase 2E.5B2
 
@@ -49,10 +49,26 @@ expiry; expiry first rejects delayed admission before PUT. Allocation tombstones
 and keys remain retained; no scheduler, API, job/outbox or Garage operation is added.
 See [invocation, eligibility, races and verification](stale-upload-expiry.md).
 
+### Durable PUT success and metadata recovery - Phase 2E.5B3
+
+After the single admitted Garage PUT and successful stream closure, foreground
+uploads independently commit V25 success evidence on the retained allocation,
+then invoke the same PostgreSQL-only READY transaction as explicit recovery.
+Immutable admission version/destination plus the original file/owner/full binding
+identify the receipt; PostgreSQL generates its immutable timestamp. Historical
+admissions receive no backfill. Hierarchy -> fresh file -> allocation locks protect
+eligibility, ancestry, purge barriers and the existing status/version CAS.
+Inaccessible destinations remain UPLOADING with a reported blocked disposition;
+foreground compensating deletion is removed. FAILED is never resurrected.
+Explicit UUID pages default to 20, cap at 100, advance past blockers and use
+independent bounded transactions. No scheduler, HTTP endpoint or Garage recovery
+call is added. The gap after PUT/close but before receipt commit remains uncertain.
+See [design, invocation, crash windows and verification](upload-success-recovery.md).
+
 ### Platform and persistence — Committed
 
 - Java 21, Spring Boot 4.1.1, Maven wrapper, Spring MVC, Spring Data JPA, validation, and Spring Security.
-- PostgreSQL schema managed by Flyway migrations V1-V15. Hibernate validates the schema (`ddl-auto=validate`) rather than creating it.
+- PostgreSQL schema managed by append-only Flyway migrations V1-V25. Hibernate validates the schema (`ddl-auto=validate`) rather than creating it.
 - Configuration comes from properties and environment variables. Secrets are not intended for source control.
 
 ### Authentication and security — Committed
@@ -79,8 +95,8 @@ Not implemented: refresh tokens, logout/revocation, account-state checks, rate l
 
 - PostgreSQL stores ownership, folder, display name, storage key, content type, byte count, upload status, and deletion timestamps.
 - Garage stores bytes under an opaque key of the form `users/{ownerId}/files/{fileId}`. User-facing names are metadata, so rename and move do not copy objects.
-- Upload reserves an `UPLOADING` metadata row in a short shared hierarchy transaction, streams bytes to S3 without a database transaction or hierarchy lock, then finalizes in a second short shared hierarchy transaction.
-- Finalization reloads the owned `UPLOADING` row, checks its expected version, and revalidates the current destination ancestry. An inaccessible destination is conditionally changed to `FAILED`; the uploaded object is then deleted best-effort outside the transaction. A failed delete leaves the `FAILED` row as the durable object record. If the database finalization outcome itself is uncertain, the object is not blindly deleted and reconciliation of stale `UPLOADING` rows remains planned.
+- Upload reserves `UPLOADING` metadata and its permanent allocation, commits write admission, then streams bytes to S3 without a database transaction or hierarchy lock. After successful stream closure, an independent receipt commit precedes the short READY transaction.
+- Finalization freshly locks the owned file and original allocation after shared hierarchy coordination. It validates the retained receipt/admission identity, expected UPLOADING version, lifecycle, destination ancestry and conflicting purge evidence before the existing CAS. Matching READY resolves replay. An inaccessible destination stays blocked with unchanged metadata and retained bytes. Receipt or finalization uncertainty never causes a repeated PUT or compensating DELETE. Historical admitted uploads without receipts remain unrecoverable in B3.
 - Only active `READY` files can be listed, downloaded, renamed, moved, or trashed. Listings are paginated with a maximum page size of 100.
 - Rename preserves the existing extension when the request omits it and rejects extension changes.
 - Trash is metadata-only: `deleted_at` is set, the object remains in Garage, and the active name is released.
@@ -256,7 +272,7 @@ recovery](folder-purge-design.md#slice-6-bottom-up-metadata-removal-and-durable-
 
 - Remaining ADR-0008 async implementation: automated historical finalization recovery, legacy/blocked historical-intent backfill, outbox/job/quarantine retention, replay/reset tooling and operational tuning. File byte purge and conservative standalone metadata finalization are implemented under the accepted trusted-writer assumption; single-application-JVM crash/restart boundaries are verified by Phase 2E.5A; production load, broker/VM restart and multi-node failure experiments remain unverified.
 - Remaining file-side coordination: reconciliation and future direct-upload writer fencing.
-- Recovery for admitted stale `UPLOADING`, `FAILED`, orphaned objects, and uncertain finalization. Explicit never-admitted UPLOADING expiry is implemented by B2.
+- Historical admitted stale `UPLOADING`, `FAILED` and orphan cleanup remain unresolved. B2 implements never-admitted expiry; B3 recovers only freshly eligible UPLOADING with durable success receipts. PUT success before receipt commit remains unknown after a crash.
 - Audited legacy storage-identity recovery and verified quiescence for admitted
   uncertain upload writers; these files still block automatic folder finalization.
 - Sharing/permissions, versioning, presigned or resumable transfers, quotas, malware scanning, audit logs, observability, and client applications.

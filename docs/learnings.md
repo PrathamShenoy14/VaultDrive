@@ -39,6 +39,23 @@ No database lock or recovery transaction spans Garage I/O. Accessible ancestry i
 required conservatively; pending purge owns its unchanged lifecycle snapshots.
 See [the exact expiry contract and evidence](stale-upload-expiry.md).
 
+## PUT success and READY need independent commits
+
+B3 records a database-generated receipt only after synchronous PUT and stream
+closure both succeed. The immutable allocation binding and one consumed admission,
+including expected metadata version/destination, give the receipt its identity;
+ETag, HEAD, age and process death cannot supply that provenance. Historical
+admissions cannot be retroactively assigned a receipt snapshot.
+
+A separate receipt commit makes a crash before READY recoverable while preserving
+the unavoidable PUT-to-receipt gap. Lost receipt acknowledgement requires a fresh
+PostgreSQL read. Lost READY acknowledgement resolves from matching authoritative
+READY. Recovery never repeats storage I/O or compensates with deletion. A trashed
+or pending-purge destination blocks unchanged; later restore may make an
+UPLOADING receipt eligible, but FAILED never becomes READY. This deliberately
+retains bytes and sometimes names until a separately accepted decision exists.
+See [the receipt contract and tests](upload-success-recovery.md).
+
 ## Database migrations own the schema
 
 Flyway provides an ordered, reviewable history while Hibernate validates mappings against it. This prevents accidental schema generation from hiding migration mistakes. Once shared/applied, a migration should remain immutable; corrections use a new migration.
@@ -79,7 +96,7 @@ Reading a file or its ancestor chain before acquiring the hierarchy lock permits
 
 ## Failure handling should preserve the most useful truth
 
-If an S3 upload fails, best-effort marking as `FAILED` keeps diagnostic state. If upload succeeds but finalization deterministically rejects an inaccessible destination, committing `FAILED` first creates a durable object record before best-effort cleanup; a failed cleanup therefore leaves tracked, not orphaned, bytes. If the database outcome is uncertain, blindly deleting the object may create a READY row with missing bytes, so the object remains and reconciliation is still required.
+If PUT or input closure fails, best-effort marking as `FAILED` keeps diagnostic state without claiming absent bytes. B3 records successful PUT/close independently before finalization. Inaccessible destinations now remain blocked with retained UPLOADING metadata and bytes. An uncertain database outcome can already contain a committed receipt or READY row, so reload/replay replaces compensation; the foreground no longer deletes rejected upload objects.
 
 ## Tests should live at the layer that owns the guarantee
 

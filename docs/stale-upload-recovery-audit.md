@@ -5,11 +5,12 @@ Phase: **2E.5B — audit and design only**
 Implementation follow-up: **B1 inventory and B2 never-admitted UPLOADING expiry
 are now implemented separately**. See [inventory](stale-upload-inventory.md) and
 [expiry eligibility, evidence, invocation and verification](stale-upload-expiry.md).
+B3 is now implemented under the [receipt and finalization contract](upload-success-recovery.md).
 The original audit below remains the historical design record. B2 accepts the
 one-hour configurable policy, explicit bounded pages and V24 retained allocation
 expiry timestamp/resulting-version evidence. It conservatively requires active
-ancestry and defers pending purge. B3 PUT-success receipts, admitted-write recovery
-and B4 Garage cleanup remain proposals; no autonomous expiry is introduced.
+ancestry and defers pending purge. B3 adds durable receipts and conservative
+metadata finalization only; B4 Garage cleanup remains a proposal. No autonomous recovery is introduced.
 
 Audit date: 2026-10-17
 
@@ -73,7 +74,7 @@ result. No live deployment state or infrastructure health was inferred.
 Some historical skill/ADR status text predates later purge slices. Current code
 and the later implementation records determine this audit's confirmed boundary.
 
-## Confirmed current upload lifecycle
+## Confirmed upload lifecycle at the audited baseline
 
 1. An authenticated HTTP multipart request supplies the file and optional
    destination. Ownership comes from the JWT subject.
@@ -244,7 +245,10 @@ Permanent nonreuse makes repeated DELETE address the same old allocation under
 trusted writers. It does not make independent overwrites or namespace/alias
 reassignment safe. Those remain accepted operational risks, not solved fencing.
 
-## Proposed recovery decisions
+## Proposed recovery decisions at the audited baseline
+
+B3 supersedes the proposed inaccessible-destination cleanup branch: it reports
+blocked and preserves metadata/bytes. No B4 cleanup intent is implemented.
 
 | State | Proposed action |
 |---|---|
