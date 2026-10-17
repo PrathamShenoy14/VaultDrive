@@ -326,9 +326,13 @@ class OutboxPublisherIntegrationTest {
     }
 
     private UUID event() {
-        OutboxEvent event = transaction().execute(status -> writer.append(
-                OutboxEvent.filePurgeRequested(UUID.randomUUID(), UUID.randomUUID(), Instant.now().minusSeconds(60))
-        ));
+        OutboxEvent event = transaction().execute(status -> {
+            // Claim eligibility uses PostgreSQL time; the JVM and VM clocks may differ.
+            Instant databaseNow = (Instant) entityManager.createNativeQuery("SELECT clock_timestamp()", Instant.class)
+                    .getSingleResult();
+            Instant due = databaseNow.minusSeconds(60);
+            return writer.append(OutboxEvent.filePurgeRequested(UUID.randomUUID(), UUID.randomUUID(), due));
+        });
         eventIds.add(event.getId());
         return event.getId();
     }

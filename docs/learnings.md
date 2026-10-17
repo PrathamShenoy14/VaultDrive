@@ -402,3 +402,22 @@ Original receipts/checkpoints and fresh fencing tokens then proved recovery
 without editing leases, retries or progress. Independent absence checks after
 cleanup complement success markers. These results cover one application JVM;
 they do not imply broker/VM restart, multi-node or production-load resilience.
+
+## One database admission is not a physical-request counter
+
+Phase 2E.5B4A joins real PostgreSQL admission and receipt transactions to the
+production SDK/Apache client and a controlled HTTP receiver. The receiver counts
+parsed PUT requests separately from completed bodies and accepted effects. A
+single adapter method call could otherwise conceal a retry or redirect. The
+contract needs all three pieces: one committed admission, one production PUT call
+after it, and a client/transport that does not replay that call. A concurrent loser
+must fail admission while the winning PUT is held at the receiver.
+
+A timeout or missing response can coexist with accepted bytes and no committed
+receipt. Successful stream closure must precede receipt persistence; failed close
+deliberately leaves the same conservative uncertainty. Receipt rollback and lost
+commit acknowledgement also differ: throw inside the real transaction to test
+rollback, and outside its returned commit to test authoritative reload. Neither
+case permits re-PUT or compensating deletion. Finite direct-connection tests do
+not certify independent proxies, external writers or storage fencing. See the
+[request counts and evidence boundary](single-put-dispatch-verification.md).

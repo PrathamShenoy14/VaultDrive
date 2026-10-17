@@ -65,6 +65,18 @@ independent bounded transactions. No scheduler, HTTP endpoint or Garage recovery
 call is added. The gap after PUT/close but before receipt commit remains uncertain.
 See [design, invocation, crash windows and verification](upload-success-recovery.md).
 
+### Single-PUT dispatch verification - Phase 2E.5B4A
+
+Controlled loopback HTTP tests use the production SDK/Apache configuration and
+real PostgreSQL admission/receipt transactions to count received PUT requests.
+Success, 5xx, reset, read timeout, redirects and response loss exercise the
+single-dispatch contract; concurrent admission and repeated HTTP uploads verify
+one-time allocations and distinct retry keys. Receipt checks follow PUT return
+and successful stream closure. This verifies an application protocol under trusted
+writers, not storage-side fencing or proxy/external-writer behavior. B4 cleanup
+remains unimplemented. See [request counts, verification and limits](single-put-dispatch-verification.md)
+and the [preserved B4 design audit](known-success-cleanup-design-audit.md).
+
 ### Platform and persistence — Committed
 
 - Java 21, Spring Boot 4.1.1, Maven wrapper, Spring MVC, Spring Data JPA, validation, and Spring Security.
