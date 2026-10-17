@@ -35,7 +35,8 @@ admitted uncertain writes remain retained. There is no scheduler, HTTP endpoint,
 Garage call or business-state mutation. See [invocation, precedence, bounds and
 verification](stale-upload-inventory.md). The separate B2 operation below mutates
 only freshly validated never-admitted reservations. B3 below adds receipt-based
-finalization; B4 cleanup remains planned under the [recovery audit](stale-upload-recovery-audit.md).
+finalization; restricted B4B cleanup is described below. General stale-upload
+cleanup remains blocked under the [recovery audit](stale-upload-recovery-audit.md).
 
 ### Never-admitted reservation expiry — Phase 2E.5B2
 
@@ -73,14 +74,31 @@ Success, 5xx, reset, read timeout, redirects and response loss exercise the
 single-dispatch contract; concurrent admission and repeated HTTP uploads verify
 one-time allocations and distinct retry keys. Receipt checks follow PUT return
 and successful stream closure. This verifies an application protocol under trusted
-writers, not storage-side fencing or proxy/external-writer behavior. B4 cleanup
-remains unimplemented. See [request counts, verification and limits](single-put-dispatch-verification.md)
+writers, not storage-side fencing or proxy/external-writer behavior. See
+[request counts, verification and limits](single-put-dispatch-verification.md)
 and the [preserved B4 design audit](known-success-cleanup-design-audit.md).
+
+### Restricted known-success cleanup - Phase 2E.5B4B
+
+Explicit bounded UUID pages clean only receipt-backed FAILED uploads matching the
+original V25 admission destination and exactly one FAILED version transition.
+Fresh hierarchy/file/allocation validation rejects identity/binding drift,
+inaccessible ancestry and all purge-owned candidates. V26 commits an immutable
+accepted metadata snapshot and abandonment intent before any DELETE; a database
+trigger permanently fences every READY path and preserves that snapshot. Retained
+allocation identity, recoverable 30-second token/revision claims and immutable
+deletion/absence receipts support explicit crash/retry replay. Claims fence database
+outcomes, not delayed DELETE; safety depends on the B4A trusted sole-writer contract,
+permanent abandonment and key nonreuse. No transaction or hierarchy lock spans
+Garage I/O. UPLOADING, READY, historical and admitted-uncertain writes stay excluded;
+later folder manifests remain unchanged and cannot consume this separate proof.
+No scheduler, endpoint, metadata deletion, general garbage collection or autonomous
+enablement is added. See [eligibility, state machine, invocation and limits](known-success-upload-cleanup.md).
 
 ### Platform and persistence — Committed
 
 - Java 21, Spring Boot 4.1.1, Maven wrapper, Spring MVC, Spring Data JPA, validation, and Spring Security.
-- PostgreSQL schema managed by append-only Flyway migrations V1-V25. Hibernate validates the schema (`ddl-auto=validate`) rather than creating it.
+- PostgreSQL schema managed by append-only Flyway migrations V1-V26. Hibernate validates the schema (`ddl-auto=validate`) rather than creating it.
 - Configuration comes from properties and environment variables. Secrets are not intended for source control.
 
 ### Authentication and security — Committed

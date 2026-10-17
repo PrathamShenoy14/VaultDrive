@@ -251,9 +251,14 @@ class RabbitPurgeConsumerIntegrationTest {
     }
     private void send(Message message) { template.send(properties.exchange(), properties.routingKey(), message); }
     private OutboxEvent event(boolean folder) {
-        UUID id = new TransactionTemplate(transactionManager).execute(status -> writer.append(folder
-                ? OutboxEvent.folderPurgeRequested(UUID.randomUUID(), UUID.randomUUID(), Instant.now().minusSeconds(60))
-                : OutboxEvent.filePurgeRequested(UUID.randomUUID(), UUID.randomUUID(), Instant.now().minusSeconds(60))).getId());
+        UUID id = new TransactionTemplate(transactionManager).execute(status -> {
+            // Due selection uses PostgreSQL time, independently of the Windows/VM clock offset.
+            Instant due = ((Instant) entityManager.createNativeQuery("SELECT clock_timestamp()", Instant.class)
+                    .getSingleResult()).minusSeconds(60);
+            return writer.append(folder
+                    ? OutboxEvent.folderPurgeRequested(UUID.randomUUID(), UUID.randomUUID(), due)
+                    : OutboxEvent.filePurgeRequested(UUID.randomUUID(), UUID.randomUUID(), due)).getId();
+        });
         ids.add(id);
         return outbox.findById(id).orElseThrow();
     }

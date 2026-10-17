@@ -1,5 +1,8 @@
 # Trusted single-PUT dispatch verification (Phase 2E.5B4A)
 
+Follow-up: [restricted B4B cleanup](known-success-upload-cleanup.md) now relies on
+this verified contract. The B4A scope and execution record below remain historical.
+
 The [original B4 audit](known-success-cleanup-design-audit.md) is preserved verbatim.
 B4A verifies its application dispatch premise; it does not implement or authorize
 Garage cleanup. Production code, migrations, storage configuration and autonomous

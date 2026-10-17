@@ -126,6 +126,7 @@ public class UploadFinalizationTransactions {
                         OR EXISTS (SELECT 1 FROM file_purge_targets WHERE file_id = f.id)
                         OR EXISTS (SELECT 1 FROM file_purge_work WHERE file_id = f.id)
                         OR EXISTS (SELECT 1 FROM folder_purge_files WHERE file_id = f.id)
+                        OR EXISTS (SELECT 1 FROM upload_cleanup_intents WHERE file_id = f.id)
                         THEN 'BLOCKED'
                     ELSE 'ELIGIBLE' END
                 FROM file_storage_objects a LEFT JOIN f ON true WHERE a.file_id = :id

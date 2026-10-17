@@ -10,7 +10,9 @@ The original audit below remains the historical design record. B2 accepts the
 one-hour configurable policy, explicit bounded pages and V24 retained allocation
 expiry timestamp/resulting-version evidence. It conservatively requires active
 ancestry and defers pending purge. B3 adds durable receipts and conservative
-metadata finalization only; B4 Garage cleanup remains a proposal. No autonomous recovery is introduced.
+metadata finalization only. [Restricted B4B cleanup](known-success-upload-cleanup.md)
+is now implemented separately; the original general proposal below is historical.
+No autonomous recovery is introduced.
 
 Audit date: 2026-10-17
 

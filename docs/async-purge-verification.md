@@ -74,6 +74,28 @@ JOB_WORKER_ENABLED in a development API for this procedure.
 
 ## Evidence and assertions
 
+### Clock-skew opt-in for isolated verification
+
+The initial outbox due time comes from the HTTP request's JVM timestamp, while
+claim selection uses PostgreSQL time. B4B verification observed the Windows clock
+ahead of the VM database clock by about 103 minutes. No clock or infrastructure
+change was authorized. The standalone live broker fixtures now choose their due
+timestamps from PostgreSQL, matching the existing publisher test pattern.
+
+For the continuous harness only, explicitly set
+`$env:ASYNC_E2E_ALIGN_INITIAL_DUE = 'true'` when this skew prevents initial claims.
+After each real HTTP purge request commits, the harness may align only that exact
+new event's `next_attempt_at` to PostgreSQL time, guarded by its fresh private
+schema, PENDING status, zero attempts and a due time more than five seconds ahead.
+It prints `initialDueAligned` evidence. Immutable intent/payload/created-at,
+metadata, receipt identity, claims, retries, job creation and worker dispatch are
+unchanged. Without the opt-in the original scheduling check remains intact.
+
+This verifies the continuous pipeline conditional on initial eligibility, not
+unmodified production scheduling under skew. Production clock synchronization and
+initial due-time policy remain operational concerns outside B4B. Remove the
+test-only environment variable after verification; production ignores it.
+
 Registration/login, multipart upload, download, trash and permanent deletion use
 actual HTTP requests and JWT security. Every upload must reach READY and return
 the original bytes before trash. One standalone file produces one outbox event,

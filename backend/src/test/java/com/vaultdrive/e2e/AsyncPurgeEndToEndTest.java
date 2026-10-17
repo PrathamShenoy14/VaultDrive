@@ -308,7 +308,18 @@ class AsyncPurgeEndToEndTest {
     }
 
     UUID event(UUID resource) {
-        return jdbc.queryForObject("SELECT id FROM outbox_events WHERE aggregate_id = ? LIMIT 2", UUID.class, resource);
+        UUID id = jdbc.queryForObject("SELECT id FROM outbox_events WHERE aggregate_id = ? LIMIT 2", UUID.class, resource);
+        if ("true".equals(System.getenv("ASYNC_E2E_ALIGN_INITIAL_DUE"))) {
+            // Opt-in fixture scheduling only, after the fresh-schema gates and real HTTP intent commit.
+            // Keep original intent/payload/time and every claim/retry/worker transition unchanged.
+            int aligned = jdbc.update("""
+                    UPDATE outbox_events SET next_attempt_at = clock_timestamp() - interval '1 second'
+                    WHERE id = ? AND current_schema() = ? AND delivery_status = 'PENDING' AND attempt_count = 0
+                        AND next_attempt_at > clock_timestamp() + interval '5 seconds'
+                    """, id, probe.schema);
+            System.out.println("ASYNC_E2E scheduling initialDueAligned=" + (aligned == 1));
+        }
+        return id;
     }
 
     private long count(String table, String column, UUID id) {

@@ -155,9 +155,11 @@ class RabbitOutboxIntegrationTest {
     }
 
     private UUID event() {
-        UUID id = new TransactionTemplate(transactionManager).execute(status -> writer.append(
-                OutboxEvent.filePurgeRequested(UUID.randomUUID(), UUID.randomUUID(), Instant.now().minusSeconds(60))
-        ).getId());
+        UUID id = new TransactionTemplate(transactionManager).execute(status -> {
+            Instant due = ((Instant) entityManager.createNativeQuery("SELECT clock_timestamp()", Instant.class)
+                    .getSingleResult()).minusSeconds(60);
+            return writer.append(OutboxEvent.filePurgeRequested(UUID.randomUUID(), UUID.randomUUID(), due)).getId();
+        });
         eventIds.add(id);
         return id;
     }

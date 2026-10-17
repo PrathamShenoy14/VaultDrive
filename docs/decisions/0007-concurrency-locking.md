@@ -308,3 +308,21 @@ Matching READY resolves replay; FAILED, inaccessible ancestry and pending purge
 block unchanged. Existing folder coordination and unsafe-writer purge rules remain.
 Receipt identity/timestamp cannot be rewritten, and historical admissions cannot
 acquire a new admission snapshot. See [the B3 contract](../upload-success-recovery.md).
+
+## Phase 2E.5B4B permanent cleanup authority
+
+Use shared owner hierarchy -> fresh scalar file FOR UPDATE -> allocation FOR UPDATE
+-> immutable intent/progress -> claim row lock and token/revision/lease fence LAST.
+New intents require the exact receipt-backed FAILED history, accessible bounded
+ancestry and no purge evidence. The immutable accepted snapshot is also a database
+fence against every subsequent READY path. No resource lock follows the claim
+fence. Claims commit before Garage DELETE; outcome transactions reacquire the same
+order and check PostgreSQL time after lock waits. Expired claims cannot persist
+new outcomes, but cannot cancel DELETE. Permanent abandonment, trusted-writer
+termination and key retention make that delayed effect safe.
+
+Exclusive folder mutations serialize new authority acceptance. Cleanup accepted
+before a later folder intent may finish its already abandoned target, preserving
+FAILED metadata and any later membership snapshot. Separate cleanup receipts do
+not satisfy folder-purge proof. No scheduler or storage-side fencing is added.
+See [the restricted protocol and race evidence](../known-success-upload-cleanup.md).

@@ -1,5 +1,9 @@
 # Upload success receipts and finalization recovery (Phase 2E.5B3)
 
+Follow-up: [B4B](known-success-upload-cleanup.md) now adds explicit cleanup only for
+matching receipt-backed FAILED uploads. UPLOADING recovery and its restore behavior
+remain unchanged. The original B3 implementation/evidence record below is historical.
+
 ## Design recorded before implementation
 
 The traced foreground boundary is reservation transaction -> stream acquisition ->

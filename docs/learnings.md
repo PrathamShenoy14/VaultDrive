@@ -56,6 +56,24 @@ UPLOADING receipt eligible, but FAILED never becomes READY. This deliberately
 retains bytes and sometimes names until a separately accepted decision exists.
 See [the receipt contract and tests](upload-success-recovery.md).
 
+## Receipt evidence needs a separate permanent abandonment decision
+
+B4B uses the verified single-dispatch protocol to establish that the receipt's sole
+trusted writer finished. The receipt does not authorize DELETE by itself. Fresh
+FAILED identity/version/ancestry validation and an immutable V26 intent establish
+permanent abandonment; a file-row trigger keeps all READY paths behind that fence.
+Retaining the allocation through a non-cascading FK makes every replay address the
+same old key and original binding. Metadata stays FAILED and its accepted snapshot
+cannot drift, so later sealed folder membership remains valid.
+
+A token/revision lease protects database outcomes after short transactions release
+their locks. It cannot stop an expired worker's DELETE. Safety therefore comes
+from the permanent decision and writer proof, while lease recovery supplies liveness.
+DELETE-before-receipt crashes repeat the same abandoned target; a committed receipt
+with lost acknowledgement skips the external effect on replay. Separate cleanup
+receipts deliberately supply no folder-purge completion proof. Unknown writers
+remain blocked regardless of age or HEAD. See [the restricted protocol and tests](known-success-upload-cleanup.md).
+
 ## Database migrations own the schema
 
 Flyway provides an ordered, reviewable history while Hibernate validates mappings against it. This prevents accidental schema generation from hiding migration mistakes. Once shared/applied, a migration should remain immutable; corrections use a new migration.
