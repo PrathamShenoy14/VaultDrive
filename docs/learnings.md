@@ -15,8 +15,29 @@ state changes cannot shift offsets. Independent read-only transactions, statemen
 and lock-wait timeouts, bounded ancestry and a page admission budget limit one
 explicit call. Repeated all-table snapshots and database-enforced rejection of
 writes establish reporting isolation; zero storage-boundary/SDK interactions
-establish no Garage operations in this slice. B2 still needs atomic preclusion
-and durable evidence. See [classification and verification](stale-upload-inventory.md).
+establish no Garage operations in this slice. B2 now separately supplies atomic
+preclusion and durable evidence. See [classification and verification](stale-upload-inventory.md).
+
+## Expiry policy is safe only behind permanent admission preclusion
+
+B2 uses age to decide when to reject a delayed reservation, never to infer absent
+bytes. Shared hierarchy coordination stabilizes ancestry against folder mutation;
+fresh file and allocation locks serialize expiry with admission. Admission first
+leaves expiry blocked forever for that allocation. Preclusion first makes delayed
+beginWrite fail before PUT. The expected-status/version CAS also preserves a
+competing READY winner and rejects stale finalization after expiry.
+
+FAILED and a preclusion timestamp alone cannot distinguish ordinary failure from
+folder purge or intentional expiry. Two V24 fields on the retained immutable
+allocation record expiry time and resulting FAILED version without inventing
+storage-success or purge evidence. Preclusion, FAILED and evidence share one short
+transaction; injected failures after preclusion and after metadata mutation must
+restore all three. Replays preserve evidence and a new same-name reservation uses
+a new key. Deterministic tests observe real PostgreSQL blockers before releasing
+each winner, while zero SDK interactions establish the delayed-admission boundary.
+No database lock or recovery transaction spans Garage I/O. Accessible ancestry is
+required conservatively; pending purge owns its unchanged lifecycle snapshots.
+See [the exact expiry contract and evidence](stale-upload-expiry.md).
 
 ## Database migrations own the schema
 

@@ -272,3 +272,24 @@ Real PostgreSQL tests force both consumer/reconciler insert winner orders and
 assert one unchanged-identity job. Exclusive-hierarchy contention and scan table
 locks time out without advancing business state; statement timeout rolls back
 ingestion. See [reconciliation recovery](../missing-job-reconciliation.md).
+
+## Phase 2E.5B2 never-admitted reservation expiry
+
+Expiry takes shared owner hierarchy -> fresh scalar file FOR UPDATE -> retained
+allocation FOR UPDATE, matching beginWrite's order. Only owner identity is read
+before coordination; current owner, version, lifecycle, retained full storage
+identity, PostgreSQL age and bounded active ancestry are revalidated afterward.
+Pending purge defers unchanged, preserving sealed membership snapshots. Existing
+coordinator guards, key derivation, namespace constraints and foreground CAS remain.
+
+V20 permanent preclusion, expected-owner/status/version FAILED transition and V24
+immutable allocation expiry time/resulting-version evidence commit in one short
+transaction. Admission first leaves write_started=true and blocks expiry; expiry
+first rejects future admission before PUT. Duplicate expiry resolves once; rollback
+or timeout restores every write. Normal finalization's CAS preserves READY first
+and rejects stale finalization after expiry. Exclusive folder mutations serialize
+with this shared transaction and expiry freshly checks their committed ancestry.
+No lock spans Garage I/O; expiry has no storage dependency or job/outbox writes.
+Real PostgreSQL tests observe blocking and cover both winner orders, folder races,
+rollback, timeouts, immutable evidence and cursor progress. See
+[the precise contract and verification](../stale-upload-expiry.md).

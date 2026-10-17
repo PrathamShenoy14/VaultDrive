@@ -1,8 +1,10 @@
 # Stale-upload inventory (Phase 2E.5B1)
 
 B1 implements bounded, read-only PostgreSQL reporting under the
-[recovery audit](stale-upload-recovery-audit.md). B2 expiry, B3 success receipts/retry
-and B4 cleanup remain unimplemented. No upload is expired, recovered or deleted.
+[recovery audit](stale-upload-recovery-audit.md). The separate
+[B2 expiry operation](stale-upload-expiry.md) now handles freshly validated
+never-admitted reservations. B3 success receipts/retry and B4 cleanup remain
+unimplemented. B1 itself never expires, recovers or deletes an upload.
 
 ## Explicit invocation and configuration
 
@@ -157,13 +159,12 @@ focused command, then the two opt-in variables above and `.\mvnw.cmd test`.
 Normal publisher/consumer/worker/reconciliation defaults remain disabled. The
 temporary local AMQP tunnel changes no VM infrastructure.
 
-## Prerequisites for B2
+## B2 implementation boundary
 
-B2 needs an accepted expiry policy and durable recovery evidence design. It must
-coordinate hierarchy -> fresh file -> allocation, revalidate exact identity,
-version, age eligibility, lifecycle and ancestry, permanently preclude admission and commit the
-conditional transition/evidence atomically. Tests must establish both admission
-and preclusion winner orders, rollback and delayed-request rejection. Pending
-folder purge remains deferred. B1 classifications cannot authorize expiry without
-that new validation. Historical admitted uncertain writers remain blocked;
+[B2](stale-upload-expiry.md) uses a one-hour configurable policy and V24 retained
+allocation evidence, coordinating hierarchy -> fresh file -> allocation. It
+revalidates identity, version, database age, lifecycle and accessible ancestry,
+then commits permanent preclusion, conditional FAILED transition and evidence
+atomically. Pending folder purge remains deferred. B1 classifications cannot
+authorize expiry. Historical admitted uncertain writers remain blocked;
 B3/B4 require separately accepted durable evidence and cleanup protocols.

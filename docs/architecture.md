@@ -33,8 +33,21 @@ statement snapshots and bounded ancestry/transaction/page work. Identity issues,
 pending purge and admission evidence determine conservative classifications;
 admitted uncertain writes remain retained. There is no scheduler, HTTP endpoint,
 Garage call or business-state mutation. See [invocation, precedence, bounds and
-verification](stale-upload-inventory.md). B2 expiry and B3/B4 evidence/cleanup remain
+verification](stale-upload-inventory.md). The separate B2 operation below mutates
+only freshly validated never-admitted reservations. B3/B4 evidence/cleanup remain
 planned under the [recovery audit](stale-upload-recovery-audit.md).
+
+### Never-admitted reservation expiry — Phase 2E.5B2
+
+Explicit bounded UUID pages expire aged UPLOADING reservations only after shared
+hierarchy -> fresh file FOR UPDATE -> allocation FOR UPDATE coordination. Current
+ownership, exact retained identity/full binding, version, database age and active
+ancestry are revalidated; pending purge defers unchanged. V20 permanent admission
+preclusion, status/version-conditional FAILED transition and V24 immutable expiry
+timestamp/resulting-version evidence commit atomically. Admission first blocks
+expiry; expiry first rejects delayed admission before PUT. Allocation tombstones
+and keys remain retained; no scheduler, API, job/outbox or Garage operation is added.
+See [invocation, eligibility, races and verification](stale-upload-expiry.md).
 
 ### Platform and persistence — Committed
 
@@ -243,7 +256,7 @@ recovery](folder-purge-design.md#slice-6-bottom-up-metadata-removal-and-durable-
 
 - Remaining ADR-0008 async implementation: automated historical finalization recovery, legacy/blocked historical-intent backfill, outbox/job/quarantine retention, replay/reset tooling and operational tuning. File byte purge and conservative standalone metadata finalization are implemented under the accepted trusted-writer assumption; single-application-JVM crash/restart boundaries are verified by Phase 2E.5A; production load, broker/VM restart and multi-node failure experiments remain unverified.
 - Remaining file-side coordination: reconciliation and future direct-upload writer fencing.
-- Reconciliation for stale `UPLOADING`, `FAILED`, orphaned objects, and uncertain finalization.
+- Recovery for admitted stale `UPLOADING`, `FAILED`, orphaned objects, and uncertain finalization. Explicit never-admitted UPLOADING expiry is implemented by B2.
 - Audited legacy storage-identity recovery and verified quiescence for admitted
   uncertain upload writers; these files still block automatic folder finalization.
 - Sharing/permissions, versioning, presigned or resumable transfers, quotas, malware scanning, audit logs, observability, and client applications.

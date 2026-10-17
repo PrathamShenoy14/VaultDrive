@@ -2,6 +2,15 @@
 
 Phase: **2E.5B — audit and design only**
 
+Implementation follow-up: **B1 inventory and B2 never-admitted UPLOADING expiry
+are now implemented separately**. See [inventory](stale-upload-inventory.md) and
+[expiry eligibility, evidence, invocation and verification](stale-upload-expiry.md).
+The original audit below remains the historical design record. B2 accepts the
+one-hour configurable policy, explicit bounded pages and V24 retained allocation
+expiry timestamp/resulting-version evidence. It conservatively requires active
+ancestry and defers pending purge. B3 PUT-success receipts, admitted-write recovery
+and B4 Garage cleanup remain proposals; no autonomous expiry is introduced.
+
 Audit date: 2026-10-17
 
 Audited code baseline: `7f37cdd`
@@ -17,10 +26,11 @@ The smallest useful implementation should recover never-admitted reservations
 first, then add durable PUT-success evidence for future uploads. Uncertain admitted
 writes should remain blocked.
 
-This document records a read-only code/design audit. No recovery code, tests,
+The original audit recorded a read-only code/design review. No recovery code, tests,
 migrations, database changes, infrastructure changes, object operations, or
-background enablement were performed. Saving this audit is a documentation-only
-follow-up; all implementation described below remains proposed.
+background enablement were performed in that review. Saving the original audit
+was a documentation-only follow-up; implementation described below was proposed
+at that audited baseline.
 
 Presigned URLs, S3 multipart support, broad orphan cleanup, and storage redesign
 are outside this phase. The existing HTTP multipart form request is distinct from
