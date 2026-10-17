@@ -2,6 +2,22 @@
 
 This is a living explanation of lessons demonstrated by committed VaultDrive code. It is not a claim that every production concern is solved.
 
+## Inventory evidence has a shorter lifetime than recovery authority
+
+Phase 2E.5B1 reads allocation admission and metadata/ancestry in one PostgreSQL
+statement snapshot. A competing admission can commit immediately afterward, so
+NEVER_ADMITTED proves an observation, not permission to expire. FAILED and age
+provide no writer-terminal evidence. Historical bindings must remain historical;
+current client configuration cannot fill unknown fields.
+
+UUID keyset cursors advance over uncertain, inconsistent and failed observations;
+state changes cannot shift offsets. Independent read-only transactions, statement
+and lock-wait timeouts, bounded ancestry and a page admission budget limit one
+explicit call. Repeated all-table snapshots and database-enforced rejection of
+writes establish reporting isolation; zero storage-boundary/SDK interactions
+establish no Garage operations in this slice. B2 still needs atomic preclusion
+and durable evidence. See [classification and verification](stale-upload-inventory.md).
+
 ## Database migrations own the schema
 
 Flyway provides an ordered, reviewable history while Hibernate validates mappings against it. This prevents accidental schema generation from hiding migration mistakes. Once shared/applied, a migration should remain immutable; corrections use a new migration.

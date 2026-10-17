@@ -25,6 +25,17 @@ PostgreSQL and Garage do not share a transaction. Code must make cross-system fa
 
 ## Implemented components
 
+### Stale-upload inventory — Phase 2E.5B1
+
+An explicitly called internal service reports bounded PostgreSQL-only pages of aged
+UPLOADING/FAILED reservations. It uses immutable UUID keysets, fresh read-only
+statement snapshots and bounded ancestry/transaction/page work. Identity issues,
+pending purge and admission evidence determine conservative classifications;
+admitted uncertain writes remain retained. There is no scheduler, HTTP endpoint,
+Garage call or business-state mutation. See [invocation, precedence, bounds and
+verification](stale-upload-inventory.md). B2 expiry and B3/B4 evidence/cleanup remain
+planned under the [recovery audit](stale-upload-recovery-audit.md).
+
 ### Platform and persistence — Committed
 
 - Java 21, Spring Boot 4.1.1, Maven wrapper, Spring MVC, Spring Data JPA, validation, and Spring Security.
