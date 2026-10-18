@@ -1,6 +1,6 @@
 # VaultDrive architecture
 
-Last reconciled with the repository on 2026-10-17.
+Last reconciled with the repository on 2026-10-18.
 
 ## Status legend
 
@@ -24,6 +24,17 @@ Spring Boot API
 PostgreSQL and Garage do not share a transaction. Code must make cross-system failure states explicit and recoverable.
 
 ## Implemented components
+
+### Garage multipart characterization — Phase 3B / M0
+
+Test-only Garage 2.3.0 experiments now characterize presigned UploadPart,
+checksum/signed-length enforcement, replay/replacement, concurrency, late requests,
+completion response loss and paginated resume evidence. They introduce no direct
+upload feature, session schema, endpoint or production behavior. Arbitrary
+different-content same-part competition exposed a content/ETag mismatch; future
+capabilities must bind immutable part SHA-256 and length. Browser CORS/TLS/clock
+prerequisites remain unresolved. See the [capability matrix and evidence limits](garage-multipart-capabilities.md),
+[Phase 3A proposal](direct-upload-architecture.md) and [ADR-0009](decisions/0009-direct-upload-capability-boundary.md).
 
 ### Stale-upload inventory — Phase 2E.5B1
 

@@ -2,6 +2,23 @@
 
 This is a living explanation of lessons demonstrated by committed VaultDrive code. It is not a claim that every production concern is solved.
 
+## Multipart capability identity is separate from request termination
+
+M0 observed accepted UploadPart requests returning 200 after complete, abort and
+URL expiry. The tested late requests left completed bytes unchanged, but neither
+acknowledgements nor subsequent absence establish physical part reclamation.
+Completion response loss also left correct bytes while the caller had only an
+SDK exception; duplicate completion returned NoSuchUpload. Outcome evidence and
+authorization decisions must remain separate from client/network errors.
+
+Concurrent different-content writes to one part exposed an intermittent selected
+ETag versus downloaded-content mismatch. Immutable signed SHA-256 and length are
+therefore required for the proposed protocol; ten same-content checksum-bound
+races verified expected bytes. Unsigned length did not constrain the submitted
+size. These are bounded single-deployment experiments, not a general S3 proof.
+Missing CORS, unverified HTTPS/browser access and substantial clock skew separately
+block browser enablement. See [M0 evidence and limitations](garage-multipart-capabilities.md).
+
 ## Inventory evidence has a shorter lifetime than recovery authority
 
 Phase 2E.5B1 reads allocation admission and metadata/ancestry in one PostgreSQL

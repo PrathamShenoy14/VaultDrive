@@ -176,6 +176,12 @@ Exit criteria: correctness tests remain green and measured contention improves f
 
 ## Phase 6 — Transfer scalability
 
+- [x] Phase 3B / M0: bounded live Garage 2.3.0 multipart capability characterization;
+  [matrix, unsupported races and browser prerequisites](garage-multipart-capabilities.md).
+- [ ] M1–M3 direct-upload sessions, resumable transfer and receipt-based completion;
+  [proposed boundaries](direct-upload-architecture.md). M0 does not implement them
+  or authorize automatic progression. Browser release remains gated.
+
 - Evaluate presigned transfers so application servers do not proxy all bytes.
 - Define multipart/resumable upload state, checksum verification, expiry, and cleanup.
 - Add versioning only after its retention and quota semantics are decided.
