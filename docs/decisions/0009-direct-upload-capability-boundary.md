@@ -1,6 +1,6 @@
 # ADR-0009: Multipart capability boundary before direct-upload implementation
 
-- Status: M0 constraints accepted; M1 database foundation implemented, transfer remains planned
+- Status: M0 constraints accepted; M1 foundation and M2A backend part transfers implemented
 - Date: 2026-10-18
 - Evidence: [version-pinned M0 matrix](../garage-multipart-capabilities.md)
 - Proposal: [Phase 3A architecture](../direct-upload-architecture.md)
@@ -28,14 +28,20 @@ guards. It introduces no multipart storage calls or dispatch authority and rejec
 multipart READY/removal until protocol-specific evidence is implemented. All M0
 constraints below remain mandatory for later milestones.
 
+Phase 3D adds [M2A backend part transfers](../multipart-part-transfers.md): V28
+non-reassignable initiation dispatch permission, exact durable upload-ID binding,
+immutable part length/SHA-256 registration, bounded presigning/refresh and
+authoritative resume pages. Only UploadPart is presigned. Unknown initiation
+remains INITIATING without retry; completion/abort/READY and cleanup remain absent.
+
 Accepted part requests can return 200 after complete, abort or URL expiry. The
 tested late requests did not change completed bytes, supporting bounded multipart
 identity isolation without proving request quiescence or physical reclamation.
 Duplicate completion can return NoSuchUpload after success; it is not an outcome
 oracle. Signed length/checksum are mandatory capability restrictions, not quotas.
 
-M1 may next establish database identity/idempotency/decision guards. M2–M3 remain
-bounded by the matrix and must not introduce blind completion retry or uncertain
+The remaining M2/M3 work remains bounded by the matrix and must not introduce
+blind completion retry or uncertain
 cleanup. Browser enablement additionally requires approved HTTPS reachability,
 working real-origin CORS and bounded signer/storage clock skew. Current live
 configuration does not establish those prerequisites. Multi-node, GC and browser

@@ -163,7 +163,7 @@ class StaleUploadExpiryIntegrationTest {
             race(() -> raw().expire(file.getId()), () -> {
                 assertThatThrownBy(() -> identity.beginWrite(file.getStorageKey())).isInstanceOf(RuntimeException.class);
                 // Real adapter must reject before reaching the SDK PUT, even for a delayed request.
-                var adapter = new S3ObjectStorageService(s3, s3Properties, identity, binding);
+                var adapter = new S3ObjectStorageService(s3, s3Properties, identity, binding, org.mockito.Mockito.mock(software.amazon.awssdk.services.s3.presigner.S3Presigner.class));
                 assertThatThrownBy(() -> adapter.upload(file.getStorageKey(), new ByteArrayInputStream(new byte[]{1}), 1, "text/plain"))
                         .isInstanceOf(RuntimeException.class);
                 return null;

@@ -180,9 +180,11 @@ Exit criteria: correctness tests remain green and measured contention improves f
   [matrix, unsupported races and browser prerequisites](garage-multipart-capabilities.md).
 - [x] Phase 3C / M1: durable session/allocation identity, idempotent reservation and
   permanent decision guards; [implemented contract](multipart-upload-sessions.md).
-- [ ] M2–M3 resumable transfer and receipt-based completion;
-  [proposed boundaries](direct-upload-architecture.md). M0 does not implement them
-  or authorize automatic progression. Browser release remains gated.
+- [x] Phase 3D / M2A: backend initiation, immutable signed part authorization,
+  URL refresh and bounded resume APIs; [implemented contract](multipart-part-transfers.md).
+- [ ] Remaining M2/M3 recovery and receipt-based completion;
+  [proposed boundaries](direct-upload-architecture.md). M2A supplies no completion,
+  abort, READY or autonomous cleanup. Browser release remains gated.
 
 - Evaluate presigned transfers so application servers do not proxy all bytes.
 - Define multipart/resumable upload state, checksum verification, expiry, and cleanup.

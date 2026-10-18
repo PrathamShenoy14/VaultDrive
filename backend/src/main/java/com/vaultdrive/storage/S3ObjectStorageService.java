@@ -16,6 +16,11 @@ import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 
 import java.io.InputStream;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.Map;
+import java.util.UUID;
+import software.amazon.awssdk.services.s3.model.*;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
 @Service
 public class S3ObjectStorageService implements ObjectStorageService {
@@ -24,6 +29,7 @@ public class S3ObjectStorageService implements ObjectStorageService {
     private final S3StorageProperties properties;
     private final FileStorageIdentityService identity;
     private final StorageBinding binding;
+    private final S3Presigner presigner;
 
     public static final Duration DELETE_TIMEOUT = Duration.ofSeconds(10);
     public static final Duration DELETE_ATTEMPT_TIMEOUT = Duration.ofSeconds(5);
@@ -32,12 +38,75 @@ public class S3ObjectStorageService implements ObjectStorageService {
             S3Client s3Client,
             S3StorageProperties properties,
             FileStorageIdentityService identity,
-            StorageBinding binding
+            StorageBinding binding,
+            S3Presigner presigner
     ) {
         this.s3Client = s3Client;
         this.properties = properties;
         this.identity = identity;
         this.binding = binding;
+        this.presigner = presigner;
+    }
+
+    @Override
+    public String initiateMultipart(StorageTarget target, UUID sessionId, UUID initiationId, String contentType) {
+        requireMultipartTarget(target);
+        try {
+            String uploadId = s3Client.createMultipartUpload(CreateMultipartUploadRequest.builder()
+                    .bucket(target.bucket()).key(target.key()).contentType(contentType)
+                    .checksumAlgorithm(ChecksumAlgorithm.SHA256)
+                    .metadata(Map.of("vaultdrive-session", sessionId.toString(), "vaultdrive-initiation", initiationId.toString()))
+                    .overrideConfiguration(c -> c.apiCallTimeout(DELETE_TIMEOUT).apiCallAttemptTimeout(DELETE_ATTEMPT_TIMEOUT))
+                    .build()).uploadId();
+            if (uploadId == null || uploadId.isBlank() || uploadId.length() > 2048) { throw new IllegalStateException(); }
+            return uploadId;
+        } catch (RuntimeException failure) {
+            // Deliberately omit the SDK cause, provider body, request and URL from public/loggable errors.
+            throw new MultipartStorageException();
+        }
+    }
+
+    @Override
+    public MultipartStorage.SignedPart signPart(StorageTarget target, String uploadId, int number,
+            long length, String sha256, Instant deadline) {
+        requireMultipartTarget(target);
+        Duration lifetime = Duration.ofSeconds(Duration.between(Instant.now(), deadline).toSeconds() - 1);
+        if (lifetime.isNegative() || lifetime.toSeconds() < 1 || lifetime.compareTo(Duration.ofMinutes(5)) > 0
+                || number < 1 || number > 640 || length < 1 || length > 8388608 || uploadId == null) {
+            throw new IllegalArgumentException("Invalid multipart signing bounds");
+        }
+        try {
+            var request = UploadPartRequest.builder().bucket(target.bucket()).key(target.key()).uploadId(uploadId)
+                    .partNumber(number).contentLength(length).checksumSHA256(sha256).build();
+            var signed = presigner.presignUploadPart(b -> b.signatureDuration(lifetime).uploadPartRequest(request));
+            var headers = signed.signedHeaders();
+            if (!headers.getOrDefault("content-length", java.util.List.of()).equals(java.util.List.of(Long.toString(length)))
+                    || !headers.getOrDefault("x-amz-checksum-sha256", java.util.List.of()).equals(java.util.List.of(sha256))
+                    || !headers.containsKey("host") || signed.expiration().isAfter(deadline)) {
+                throw new IllegalStateException(); // Fail closed on SDK signature behavior drift.
+            }
+            return new MultipartStorage.SignedPart(signed.url().toExternalForm(), headers, signed.expiration());
+        } catch (RuntimeException failure) { throw new MultipartStorageException(); }
+    }
+
+    @Override
+    public MultipartStorage.Page listParts(StorageTarget target, String uploadId, int marker, int limit) {
+        requireMultipartTarget(target);
+        if (marker < 0 || marker > 640 || limit < 1 || limit > 100) { throw new IllegalArgumentException("Invalid listing bounds"); }
+        try {
+            var result = s3Client.listParts(ListPartsRequest.builder().bucket(target.bucket()).key(target.key())
+                    .uploadId(uploadId).partNumberMarker(marker).maxParts(limit)
+                    .overrideConfiguration(c -> c.apiCallTimeout(DELETE_TIMEOUT).apiCallAttemptTimeout(DELETE_ATTEMPT_TIMEOUT)).build());
+            Integer next = Boolean.TRUE.equals(result.isTruncated()) ? result.nextPartNumberMarker() : null;
+            if (result.parts().size() > limit || (next != null && (next <= marker || next > 640))) { throw new IllegalStateException(); }
+            return new MultipartStorage.Page(result.parts().stream().map(p ->
+                    new MultipartStorage.Part(p.partNumber(), p.size(), p.eTag(), p.checksumSHA256())).toList(), next);
+        } catch (RuntimeException failure) { throw new MultipartStorageException(); }
+    }
+
+    private void requireMultipartTarget(StorageTarget target) {
+        requireNoTransaction();
+        if (!binding.matches(target)) { throw new MultipartStorageException(); }
     }
 
     @Override

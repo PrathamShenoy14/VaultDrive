@@ -6,6 +6,10 @@ the mandatory [M0 capability constraints](garage-multipart-capabilities.md) and
 [direct-upload proposal](direct-upload-architecture.md) remains a future design
 outside the boundaries described here.
 
+This document records the M1 foundation. Phase 3D subsequently adds
+[M2A initiation, immutable part URLs and resume endpoints](multipart-part-transfers.md).
+Statements below about absent endpoints/storage dispatch describe M1 alone.
+
 ## Schema and compatibility
 
 [V27](../backend/src/main/resources/db/migration/V27__multipart_session_identity.sql)
@@ -177,7 +181,7 @@ setup and connection failures were corrected before the passing final runs.
 Both verification copies' 24 fixed/default schemas were removed afterward, with
 zero remaining under their task prefixes; the temporary tunnel was stopped.
 
-No Garage multipart calls, presigning, parts/checksums, transfer, completion/abort
+At the M1 boundary, no Garage multipart calls, presigning, parts/checksums, transfer, completion/abort
 dispatch, multipart success receipt, READY, autonomous expiry, worker, API or browser
 feature is implemented. Browser TLS/CORS/clock prerequisites remain unresolved.
-M1 stops here; M2 requires a separate task.
+M1 stopped here; the separately implemented M2A extension is linked above.

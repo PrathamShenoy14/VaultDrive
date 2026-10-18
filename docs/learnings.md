@@ -2,6 +2,20 @@
 
 This is a living explanation of lessons demonstrated by committed VaultDrive code. It is not a claim that every production concern is solved.
 
+## Dispatch permission and part authorization must survive retries
+
+M2A commits a permanent initiation dispatch record before Garage I/O. A crash
+before sending and a lost successful response both leave INITIATING; neither
+permits a replacement dispatcher. This sacrifices availability rather than
+creating untracked multipart identities. A known ID must commit before any URL.
+
+Part expectations commit before signing and survive signing failures. Refresh
+reuses their registration UUID, exact geometry and canonical SHA-256. Database
+immutability plus signed length/checksum excludes M0's arbitrary same-part
+replacement race. A short encoded signature lifetime still depends on bounded
+storage/signer clock skew, and expiry never proves accepted writers have ended.
+See [M2A contracts and evidence](multipart-part-transfers.md).
+
 ## Protocol identity must precede new evidence
 
 M1 permanently labels allocations before multipart storage work exists. A reserved

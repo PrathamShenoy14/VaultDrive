@@ -32,7 +32,7 @@ class S3DeletionTimeoutTest {
                 "garage", "local-fixture", "dummy-access", "dummy-secret");
         var binding = new StorageBinding(properties, "local-fixture");
         try (var client = new S3StorageConfig().s3Client(properties)) {
-            var storage = new S3ObjectStorageService(client, properties, mock(FileStorageIdentityService.class), binding);
+            var storage = new S3ObjectStorageService(client, properties, mock(FileStorageIdentityService.class), binding, org.mockito.Mockito.mock(software.amazon.awssdk.services.s3.presigner.S3Presigner.class));
             long started = System.nanoTime();
             assertThatThrownBy(() -> storage.delete(binding.target("disposable")))
                     .isInstanceOf(StorageDeletionException.class).hasMessage("TRANSIENT");

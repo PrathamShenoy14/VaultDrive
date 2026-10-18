@@ -6,6 +6,8 @@ import com.vaultdrive.folder.FolderAccessValidator;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
 import com.vaultdrive.storage.FileStorageIdentityService;
 import com.vaultdrive.storage.StorageKeyGenerator;
+import com.vaultdrive.storage.StorageBinding;
+import com.vaultdrive.storage.StorageTarget;
 import com.vaultdrive.user.UserRepository;
 import jakarta.persistence.EntityManager;
 import org.springframework.http.MediaType;
@@ -22,8 +24,12 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Comparator;
+import java.util.HashSet;
 
-/** M1 PostgreSQL-only boundary. Decision identities confer no storage dispatch authority. */
+/** Short PostgreSQL decisions only; storage I/O belongs to MultipartTransferService. */
 @Service
 @Transactional(timeout = 10)
 public class MultipartSessionService {
@@ -37,10 +43,11 @@ public class MultipartSessionService {
     private final StoredFileRepository files;
     private final FileStorageIdentityService allocations;
     private final StorageKeyGenerator keys;
+    private final StorageBinding binding;
 
     public MultipartSessionService(EntityManager em, HierarchyCoordinator hierarchy, UserRepository users,
             FolderAccessValidator folders, FileNameValidator names, StoredFileRepository files,
-            FileStorageIdentityService allocations, StorageKeyGenerator keys) {
+            FileStorageIdentityService allocations, StorageKeyGenerator keys, StorageBinding binding) {
         this.em = em;
         this.hierarchy = hierarchy;
         this.users = users;
@@ -49,12 +56,110 @@ public class MultipartSessionService {
         this.files = files;
         this.allocations = allocations;
         this.keys = keys;
+        this.binding = binding;
     }
 
     public record Request(UUID folderId, String name, long size, String contentType) { }
     public record Session(UUID id, UUID fileId, String state, long revision, UUID initiationId,
-            String uploadId, UUID decisionId, Instant createdAt, Instant expiresAt) { }
+            String uploadId, UUID decisionId, Instant createdAt, Instant expiresAt,
+            long declaredSize, int partSize, int partCount) { }
     public enum Decision { COMPLETE, ABANDON }
+    public record PartExpectation(int partNumber, long length, String sha256) { }
+    public record RegisteredPart(int partNumber, long length, String sha256, UUID registrationId) { }
+    public record Transfer(Session session, StorageTarget target, String contentType, Instant authorizationDeadline,
+            List<RegisteredPart> parts) { }
+    public record Dispatch(Transfer transfer, boolean permitted) { }
+
+    public Session get(UUID owner, UUID id) { return lock(owner, id); }
+
+    /** Only the caller that commits this new record receives an ephemeral dispatch permit. */
+    public Dispatch claimInitiation(UUID owner, UUID id) {
+        Session session = lock(owner, id);
+        Transfer transfer = transfer(session, List.of()); // Also reject binding drift before consuming permission.
+        if (!session.state().equals("RESERVED")) { return new Dispatch(transfer, false); }
+        requireLive(session);
+        UUID initiation = UUID.randomUUID();
+        session = beginInitiation(owner, id, session.revision(), initiation);
+        em.createNativeQuery("INSERT INTO multipart_initiation_dispatches(session_id, initiation_id) VALUES (:id, :init)")
+                .setParameter("id", id).setParameter("init", initiation).executeUpdate();
+        return new Dispatch(transfer(session, List.of()), true);
+    }
+
+    public Transfer authorizeParts(UUID owner, UUID id, List<PartExpectation> requested) {
+        Session session = lock(owner, id);
+        requireOpen(session);
+        if (requested == null || requested.isEmpty() || requested.size() > 100) {
+            throw new IllegalArgumentException("Part batch must contain 1 through 100 parts");
+        }
+        var numbers = new HashSet<Integer>();
+        for (PartExpectation part : requested) {
+            if (part == null || part.partNumber() < 1 || part.partNumber() > session.partCount()
+                    || !numbers.add(part.partNumber())
+                    || !validSha256(part.sha256())) {
+                throw new IllegalArgumentException("Invalid part geometry, duplicate number or SHA-256 (canonical base64 required)");
+            }
+        }
+        var registered = new ArrayList<RegisteredPart>();
+        for (PartExpectation part : requested.stream().sorted(Comparator.comparingInt(PartExpectation::partNumber)).toList()) {
+            List<?> rows = em.createNativeQuery("SELECT expected_length, expected_sha256, registration_id FROM upload_session_parts "
+                    + "WHERE session_id = :id AND part_number = :number FOR UPDATE")
+                    .setParameter("id", id).setParameter("number", part.partNumber()).getResultList();
+            UUID registration;
+            if (rows.isEmpty()) {
+                if (part.length() != Math.min(PART_SIZE, session.declaredSize() - (part.partNumber() - 1L) * PART_SIZE)) {
+                    throw new IllegalArgumentException("Invalid fixed part geometry");
+                }
+                registration = UUID.randomUUID();
+                em.createNativeQuery("INSERT INTO upload_session_parts(session_id,part_number,expected_length,expected_sha256,registration_id) "
+                        + "VALUES (:id,:number,:length,:sha,:registration)")
+                        .setParameter("id", id).setParameter("number", part.partNumber()).setParameter("length", part.length())
+                        .setParameter("sha", part.sha256()).setParameter("registration", registration).executeUpdate();
+            } else {
+                Object[] row = (Object[]) rows.getFirst();
+                require(((Number) row[0]).longValue() == part.length() && row[1].equals(part.sha256()));
+                registration = (UUID) row[2];
+            }
+            registered.add(new RegisteredPart(part.partNumber(), part.length(), part.sha256(), registration));
+        }
+        return transfer(session, List.copyOf(registered));
+    }
+
+    public Transfer authorizeListing(UUID owner, UUID id, int marker, int limit) {
+        Session session = lock(owner, id);
+        requireOpen(session);
+        if (marker < 0 || marker > session.partCount() || limit < 1 || limit > 100) {
+            throw new IllegalArgumentException("Invalid part marker or page size (1 through 100)");
+        }
+        return transfer(session, List.of());
+    }
+
+    private Transfer transfer(Session session, List<RegisteredPart> parts) {
+        Object[] r = (Object[]) em.createNativeQuery("SELECT storage_namespace, endpoint, region, bucket, storage_key, declared_type, "
+                + "extract(epoch from expires_at - clock_timestamp()) FROM upload_sessions WHERE id = :id")
+                .setParameter("id", session.id()).getSingleResult();
+        var target = new StorageTarget((String) r[0], (String) r[1], (String) r[2], (String) r[3], (String) r[4]);
+        require(binding.matches(target));
+        Instant deadline = Instant.now().plusMillis(Math.max(0, Math.min(300_000,
+                (long) (((Number) r[6]).doubleValue() * 1000))));
+        if (session.expiresAt().isBefore(deadline)) { deadline = session.expiresAt(); }
+        return new Transfer(session, target, (String) r[5], deadline, parts);
+    }
+
+    private void requireOpen(Session session) {
+        require(session.state().equals("OPEN") && session.uploadId() != null);
+        requireLive(session);
+    }
+    private void requireLive(Session session) {
+        require((Boolean) em.createNativeQuery("SELECT expires_at > clock_timestamp() FROM upload_sessions WHERE id = :id")
+                .setParameter("id", session.id()).getSingleResult());
+    }
+    private static boolean validSha256(String value) {
+        if (value == null || value.length() != 44) { return false; }
+        try {
+            byte[] decoded = Base64.getDecoder().decode(value);
+            return decoded.length == 32 && Base64.getEncoder().encodeToString(decoded).equals(value);
+        } catch (IllegalArgumentException invalid) { return false; }
+    }
 
     public Session reserve(UUID owner, String idempotencyKey, Request request) {
         Objects.requireNonNull(owner);
@@ -131,7 +236,7 @@ public class MultipartSessionService {
         return read(id);
     }
 
-    /** Future storage adapter may record a known Create result; M1 never invokes that adapter. */
+    /** Independently records a known Create result; a failed commit never permits another Create. */
     public Session recordUploadId(UUID owner, UUID id, long revision, UUID initiationId, String uploadId) {
         if (uploadId == null || uploadId.isBlank() || uploadId.length() > 2048) {
             throw new IllegalArgumentException("Invalid upload identity");
@@ -179,11 +284,13 @@ public class MultipartSessionService {
 
     private Session read(UUID id) {
         Object[] r = (Object[]) em.createNativeQuery("""
-                SELECT id, file_id, state, revision, initiation_id, garage_upload_id, decision_id, created_at, expires_at
+                SELECT id, file_id, state, revision, initiation_id, garage_upload_id, decision_id, created_at, expires_at,
+                    declared_size, part_size, part_count
                 FROM upload_sessions WHERE id = :id
                 """).setParameter("id", id).getSingleResult();
         return new Session((UUID) r[0], (UUID) r[1], (String) r[2], ((Number) r[3]).longValue(),
-                (UUID) r[4], (String) r[5], (UUID) r[6], instant(r[7]), instant(r[8]));
+                (UUID) r[4], (String) r[5], (UUID) r[6], instant(r[7]), instant(r[8]),
+                ((Number) r[9]).longValue(), ((Number) r[10]).intValue(), ((Number) r[11]).intValue());
     }
 
     private static Instant instant(Object value) {
@@ -206,7 +313,7 @@ public class MultipartSessionService {
     }
 
     private static void require(boolean valid) { if (!valid) { throw conflict(); } }
-    private static IllegalStateException conflict() { return new IllegalStateException("Multipart request conflicts with retained identity or decision"); }
+    private static MultipartConflictException conflict() { return new MultipartConflictException(); }
     private static FileNotFoundException absent() { return new FileNotFoundException("Upload session not found"); }
     private void bounds() {
         em.createNativeQuery("SET LOCAL statement_timeout = '5s'").executeUpdate();

@@ -28,7 +28,7 @@ class S3ObjectStorageServiceTest {
     private final StorageBinding binding = new StorageBinding(properties, "fixture-cluster");
     private S3ObjectStorageService storage;
 
-    @BeforeEach void setup() { storage = new S3ObjectStorageService(client, properties, identity, binding); }
+    @BeforeEach void setup() { storage = new S3ObjectStorageService(client, properties, identity, binding, org.mockito.Mockito.mock(software.amazon.awssdk.services.s3.presigner.S3Presigner.class)); }
 
     @Test void deleteUsesExactTargetWithBoundedRequestTimeouts() {
         StorageTarget target = binding.target("fixture-key");

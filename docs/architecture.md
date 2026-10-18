@@ -25,6 +25,20 @@ PostgreSQL and Garage do not share a transaction. Code must make cross-system fa
 
 ## Implemented components
 
+### Multipart part transfers — Phase 3D / M2A
+
+V28 adds append-only initiation dispatch permission and immutable per-part exact
+length/SHA-256 registration. Owner-authenticated session APIs reserve, initiate,
+presign bounded UploadPart batches, refresh identical expectations, list bounded
+Garage resume pages and read durable state. Only a newly committed dispatch
+permission can initiate; INITIATING after uncertainty never grants another Create.
+Exact upload ID binding commits before OPEN/URLs. Garage I/O and signing run outside
+database transactions and hierarchy locks. Fixed M1 geometry, signed length/checksum,
+fresh ancestry checks and all legacy/purge/READY fences remain mandatory.
+Completion, abort, READY, browser and autonomous cleanup remain planned. Nominal
+five-minute URL lifetimes do not resolve the measured deployment clock skew.
+See [endpoint, transaction and evidence contracts](multipart-part-transfers.md).
+
 ### Multipart session foundation — Phase 3C / M1
 
 V27 adds immutable SERVER_PUT/DIRECT_MULTIPART allocation identity and retained
@@ -34,8 +48,8 @@ expiry. Hierarchy → file → allocation → session coordination protects perm
 initiation and mutually exclusive completion/abandonment decisions and monotonic
 revision. OPEN requires a durable upload ID; M1 performs no Garage operation.
 Database guards exclude multipart from V25/V26/B2 and all existing READY/removal
-proofs; unfinished sessions block purge even before initiation. No endpoint,
-dispatcher, part table or browser feature is added. See the
+proofs; unfinished sessions block purge even before initiation. M1 itself added no
+endpoint, dispatcher, part table or browser feature; M2A extends it above. See the
 [M1 contract and limitations](multipart-upload-sessions.md).
 
 ### Garage multipart characterization — Phase 3B / M0
