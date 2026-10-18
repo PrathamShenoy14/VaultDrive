@@ -356,3 +356,17 @@ before a later folder intent may finish its already abandoned target, preserving
 FAILED metadata and any later membership snapshot. Separate cleanup receipts do
 not satisfy folder-purge proof. No scheduler or storage-side fencing is added.
 See [the restricted protocol and race evidence](../known-success-upload-cleanup.md).
+
+## M5 multipart name release and logical purge
+
+Name release updates the freshly locked file after abandonment/intent, retaining
+shared hierarchy → file → allocation → session → cancellation order. The file
+version advances exactly once. Folder purge retains hierarchy → fresh root/file →
+allocation → work/progress → job fence, and exclusive hierarchy for metadata removal.
+Multipart evidence reads acquire no session lock after work: session mutations
+already require that same file/allocation first. Completion winning before the
+folder barrier yields READY byte deletion; the barrier winning leaves non-READY
+logical disposal. Facts permitted earlier may commit after removal without file
+resurrection. PostgreSQL race tests observe actual blocking in both orders; live
+Garage tests exercise late parts/completion outside every database transaction.
+See [M5 proof and recovery semantics](../multipart-purge-compatibility.md).

@@ -46,3 +46,13 @@ object evidence or the retained receipt, never another uncertain Complete. V25
 PUT receipts, V26 cleanup and existing physical purge proofs do not adopt multipart,
 including READY multipart files. The synchronous contract above is unchanged.
 See [completion and recovery conditions](../multipart-completion-recovery.md).
+
+## M5 multipart namespace and purge extension
+
+[M5](../multipart-purge-compatibility.md) supersedes the M3 blanket multipart removal
+fence. Eligible cancel/expiry atomically transitions UPLOADING to FAILED once,
+releasing its active name while retaining storage uncertainty. READY files use
+protocol-specific completion receipts with existing physical deletion/folder
+barriers. Unfinished folder members use a separate logical-discard receipt, never
+legacy PUT, byte or never-written proof. File/session reads after folder removal
+remain inaccessible; already permitted storage facts cannot resurrect metadata.

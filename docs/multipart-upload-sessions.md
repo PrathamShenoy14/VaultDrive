@@ -1,5 +1,10 @@
 # Multipart upload-session foundation — Phase 3C / M1
 
+Current lifecycle extension: [M5 purge compatibility](multipart-purge-compatibility.md)
+supersedes the historical blanket multipart purge fence and retained active-name
+reservation described in this milestone record. It separates logical disposal
+from completed-object deletion and unresolved physical reclamation.
+
 M1 implements PostgreSQL identity, reservation and decision guards only. It follows
 the mandatory [M0 capability constraints](garage-multipart-capabilities.md) and
 [ADR-0009](decisions/0009-direct-upload-capability-boundary.md). The broader

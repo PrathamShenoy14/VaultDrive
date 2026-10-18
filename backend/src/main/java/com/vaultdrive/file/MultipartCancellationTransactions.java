@@ -66,14 +66,23 @@ public class MultipartCancellationTransactions {
     }
 
     private Cancellation decide(UUID owner, Session s, String cause) {
-        if (hasIntent(s.id())) { return read(s); }
+        if (hasIntent(s.id())) { releaseName(s); return read(s); }
         if (s.decisionId() == null) { s = sessions.decide(owner, s.id(), s.revision(), Decision.ABANDON, UUID.randomUUID()); }
         require(s.state().equals("ABANDONMENT_DECIDED"));
         em.createNativeQuery("INSERT INTO multipart_cancellations(session_id,decision_id,initiation_id,garage_upload_id,storage_identity,cause) "
                 + "SELECT id,decision_id,initiation_id,garage_upload_id,multipart_storage_identity(s),:cause FROM upload_sessions s WHERE id = :id")
                 .setParameter("id", s.id()).setParameter("cause", cause).executeUpdate();
         if (s.initiationId() == null) { transition(s.id(), "CANCELLED", null, "NEVER_INITIATED"); }
+        releaseName(s);
         return read(s);
+    }
+
+    /** Abandonment releases a namespace reservation, never a storage allocation or physical proof. */
+    private void releaseName(Session s) {
+        em.createNativeQuery("UPDATE files SET status = 'FAILED', version = version + 1, updated_at = clock_timestamp() "
+                + "WHERE id = :file AND status = 'UPLOADING' AND EXISTS (SELECT 1 FROM upload_sessions s "
+                + "WHERE s.id = :id AND s.state = 'ABANDONMENT_DECIDED' AND multipart_session_eligible(s))")
+                .setParameter("file", s.fileId()).setParameter("id", s.id()).executeUpdate();
     }
 
     /** Only a new, independently committed dispatch UUID grants an ephemeral abort permit. */

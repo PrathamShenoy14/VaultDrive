@@ -1,5 +1,10 @@
 # Multipart completion and explicit recovery — Phase 3E / M3
 
+Current lifecycle extension: [M5 purge compatibility](multipart-purge-compatibility.md)
+supersedes the historical blanket multipart purge fence and retained active-name
+reservation described in this milestone record. It separates logical disposal
+from completed-object deletion and unresolved physical reclamation.
+
 M3 extends [M1 identity](multipart-upload-sessions.md) and
 [M2A part transfers](multipart-part-transfers.md) with frozen completion,
 multipart-specific evidence and READY. It preserves the

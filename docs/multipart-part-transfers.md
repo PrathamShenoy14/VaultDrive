@@ -1,5 +1,10 @@
 # Multipart part transfers — Phase 3D / M2A
 
+Current lifecycle extension: [M5 purge compatibility](multipart-purge-compatibility.md)
+supersedes the historical blanket multipart purge fence and retained active-name
+reservation described in this milestone record. It separates logical disposal
+from completed-object deletion and unresolved physical reclamation.
+
 M2A adds the backend control plane for initiation, immutable part authorization and
 resume. It builds on [M1 identity/decision guards](multipart-upload-sessions.md)
 and the [M0 verified Garage contract](garage-multipart-capabilities.md). Synchronous

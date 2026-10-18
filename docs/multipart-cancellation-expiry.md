@@ -1,5 +1,10 @@
 # Multipart cancellation and expiry — M4
 
+Current lifecycle extension: [M5 purge compatibility](multipart-purge-compatibility.md)
+supersedes the historical blanket multipart purge fence and retained active-name
+reservation described in this milestone record. It separates logical disposal
+from completed-object deletion and unresolved physical reclamation.
+
 M4 extends [M1 identity](multipart-upload-sessions.md), [M2A transfers](multipart-part-transfers.md)
 and [M3 completion](multipart-completion-recovery.md). Cancellation and expiry are
 permanent authorization decisions. An abort acknowledgement supplies no proof of

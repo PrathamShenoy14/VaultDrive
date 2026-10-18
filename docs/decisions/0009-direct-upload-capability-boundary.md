@@ -1,6 +1,6 @@
 # ADR-0009: Multipart capability boundary before direct-upload implementation
 
-- Status: M0 constraints accepted; M1–M4 backend lifecycle implemented; removal/browser work deferred
+- Status: M0 constraints accepted; M1–M5 backend lifecycle implemented; physical reclamation/browser work deferred
 - Date: 2026-10-18
 - Evidence: [version-pinned M0 matrix](../garage-multipart-capabilities.md)
 - Proposal: [Phase 3A architecture](../direct-upload-architecture.md)
@@ -64,3 +64,22 @@ working real-origin CORS and bounded signer/storage clock skew. Current live
 configuration does not establish those prerequisites. Multi-node, GC and browser
 portability remain unverified. No provider migration or new infrastructure is
 selected to compensate for these findings.
+
+## M5 lifecycle extension
+
+Accept [the separate logical and physical guarantees](../multipart-purge-compatibility.md).
+Abandonment releases the filename through FAILED without authorizing storage cleanup.
+A sealed permanent folder intent can dispose of unfinished multipart file metadata
+while preserving all storage identities and outstanding dispatch/outcome evidence.
+Its immutable logical receipt permits folder finalization but cannot become a byte
+or never-written proof. This avoids permanent user-facing folder blockage caused
+solely by unavailable writer-quiescence evidence. READY multipart deletion requires
+its own completion receipt and uses the existing immutable-key purge path. Late
+UploadPart success cannot authorize a new completion or a different final object
+under the accepted sole-control-plane protocol; no generation fence is invented.
+
+A late permitted Complete may create an object after logical folder removal. Retain
+that allocation and receipt with unresolved reclamation; never repeat Complete or
+Abort, infer safety from age/absence/abort acknowledgement, or automatically upgrade
+logical proof. Garage block GC, quiescence, multi-node behavior and cleanup repair
+remain outside the established guarantee. No autonomous defaults change.

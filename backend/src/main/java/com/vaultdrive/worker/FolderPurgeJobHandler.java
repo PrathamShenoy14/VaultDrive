@@ -69,7 +69,7 @@ public class FolderPurgeJobHandler implements JobHandler {
                 if (!jobs.renew(context.claim())) { throw new InterruptedException("Folder purge claim is stale"); }
                 context.renewed(renewalStarted);
                 context.checkActive();
-                if (!prepared.proven() && !prepared.neverWritten()) {
+                if (!prepared.proven() && !prepared.neverWritten() && !prepared.logicalOnly()) {
                     storage.delete(prepared.target()); // Bounded adapter, after preparation commit.
                     context.checkActive();
                 }

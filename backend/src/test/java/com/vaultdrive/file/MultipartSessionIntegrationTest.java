@@ -358,7 +358,7 @@ class MultipartSessionIntegrationTest {
     }
 
     @ParameterizedTest @ValueSource(booleans = {true, false})
-    void unfinishedMultipartBlocksSealedFolderPurgeEvenBeforeInitiation(boolean admitted) throws Exception {
+    void unfinishedMultipartAllowsOnlyLogicalSealedFolderDisposal(boolean admitted) throws Exception {
         UUID root = folders.createFolder(owner, null, "root");
         var r = sessions.reserve(owner, "key", request(root, "a"));
         if (admitted) { sessions.beginInitiation(owner, r.id(), 0, UUID.randomUUID()); }
@@ -376,17 +376,8 @@ class MultipartSessionIntegrationTest {
         assertThat(sealed).isTrue();
         var context = mock(com.vaultdrive.worker.JobExecutionContext.class);
         when(context.claim()).thenReturn(claim);
-        assertThatThrownBy(() -> purgeFiles.prepare(context, r.fileId()))
-                .isInstanceOfSatisfying(com.vaultdrive.worker.FolderPurgeFileService.BlockedFile.class,
-                        e -> assertThat(e.reason()).isEqualTo("UNSAFE_WRITER"));
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM file_purge_work WHERE file_id = ?", Integer.class, r.fileId())).isZero();
-        assertSqlRejected("""
-                INSERT INTO file_purge_work(file_id,owner_id,folder_id,file_version,file_status,file_created_at,
-                    file_updated_at,deleted_at,purge_requested_at,storage_namespace,endpoint,region,bucket,storage_key)
-                SELECT f.id,f.owner_id,f.folder_id,f.version,f.status,f.created_at,f.updated_at,f.deleted_at,
-                    f.purge_requested_at,a.storage_namespace,a.endpoint,a.region,a.bucket,a.storage_key
-                FROM files f JOIN file_storage_objects a ON a.file_id = f.id WHERE f.id = ?
-                """, r.fileId());
+        assertThat(purgeFiles.prepare(context, r.fileId()).logicalOnly()).isTrue();
+        assertThat(jdbc.queryForObject("SELECT bytes_deleted_at IS NULL AND never_written_at IS NULL FROM file_purge_work WHERE file_id = ?", Boolean.class, r.fileId())).isTrue();
         assertSqlRejected("DELETE FROM files WHERE id = ?", r.fileId());
     }
 

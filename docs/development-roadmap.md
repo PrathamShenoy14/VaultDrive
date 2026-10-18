@@ -222,3 +222,12 @@ Exit criteria: correctness tests remain green and measured contention improves f
 Broad pre-outbox/blocked-history repair, quarantine disposition, retention, resets,
 stale uploads/orphans and measured tuning remain separate work. Execution results
 are reported with verification; no deployment or autonomous default is enabled.
+
+## M5 multipart purge compatibility
+
+Implemented: cancellation/expiry filename release; retained logical disposal for
+unfinished multipart folder members; receipt-bound READY file/folder deletion;
+late outcome retention and deterministic completion/purge ordering. See [M5 guarantees
+and verification](multipart-purge-compatibility.md). Physical multipart block reclamation,
+unknown-allocation repair, browser release and autonomous cleanup remain deferred.
+M5 ends here; no later milestone is implemented by this change.

@@ -1,5 +1,10 @@
 # Physical file purge (Phase 2D.1 and Phase 2D.2 Slices 2–6)
 
+M5 extends this legacy purge design with [multipart compatibility](multipart-purge-compatibility.md):
+READY requires multipart completion evidence; unfinished folder members use retained
+logical-discard proof. Folder success does not promise physical reclamation of
+those unfinished allocations.
+
 ## Accepted storage contract
 
 VaultDrive retains Garage 2.3.0 under a **trusted-writer assumption**. All writers

@@ -40,3 +40,12 @@ Folder requests take the exclusive owner hierarchy lock, pessimistically lock th
 - Synchronous database-first deletion: can leak untracked objects without a durable retry record.
 - Distributed transactions: not realistically provided across PostgreSQL and S3-compatible storage.
 - Add `DELETING` to upload status: conflates readiness and deletion lifecycle.
+
+## M5 multipart compatibility
+
+The later folder execution/finalization slices and [M5](../multipart-purge-compatibility.md)
+extend this original request boundary. READY multipart shares durable exact-key
+DELETE and metadata receipts only with its original completion evidence. For
+unfinished multipart, sealed folder intent records logical disposal and retains
+all possible storage effects; folder success does not assert physical reclamation.
+No storage call is made by that branch and no pending-purge escape is introduced.

@@ -524,3 +524,24 @@ URL construction. Rejecting that batch preserves a clear response-authorization
 point, while acknowledging that already delivered or in-transit capabilities
 cannot be revoked by a database transaction. Retention and blocked purge are
 explicit costs of preserving uncertainty. See the [M4 runbook](multipart-cancellation-expiry.md).
+
+## M5: logical removal is not physical reclamation
+
+A cancelled upload can safely release its display name because a future upload
+gets a new immutable file/key allocation. That says nothing about outstanding
+Garage requests. Reusing FAILED and the existing unique index keeps namespace
+behavior simple; retaining cancellation/session identity preserves recovery facts.
+
+A permanent folder intent already prohibits restore and new upload capabilities.
+Sealed exact membership can therefore authorize removal of unfinished file metadata
+without waiting for impossible Garage quiescence proof. A distinct immutable logical
+receipt preserves this decision across checkpoints and crashes. It must never be
+represented as DELETE or never-written proof: a previously permitted completion
+can still produce an object after the folder disappears. Keep that object tracked.
+
+READY is different: its positive completion receipt and permanent sole dispatch
+identify a completed object, and permanent key nonreuse makes repeated exact-key
+DELETE safe. An accepted late part returned 200 after deletion in the M5 live test;
+the completed key stayed absent in that interleaving. This establishes neither
+physical block reclamation nor a universal multi-node guarantee. Preserve the
+boundary in APIs, SQL proof guards and operations documentation. See [M5](multipart-purge-compatibility.md).

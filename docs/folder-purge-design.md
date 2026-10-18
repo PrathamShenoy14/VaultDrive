@@ -1,5 +1,10 @@
 # Phase 2D.2: Safe recursive folder purge and metadata finalization
 
+M5 extends this legacy purge design with [multipart compatibility](multipart-purge-compatibility.md):
+READY requires multipart completion evidence; unfinished folder members use retained
+logical-discard proof. Folder success does not promise physical reclamation of
+those unfinished allocations.
+
 Status: Approved implementation design; implementation in progress.
 Phase 2D.2 Slice 1 completed in commit `8ca8d9b`.
 Phase 2D.2 Slice 2 completed and verified on 2026-10-13.

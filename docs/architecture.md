@@ -25,6 +25,17 @@ PostgreSQL and Garage do not share a transaction. Code must make cross-system fa
 
 ## Implemented components
 
+### Multipart purge compatibility — M5
+
+V31 separates namespace release, logical metadata disposal and completed-key byte
+receipts. Cancellation/expiry atomically releases eligible names using FAILED;
+identity and physical uncertainty remain retained. Sealed folder purge can remove
+non-READY multipart metadata with an immutable logical-discard receipt and no
+storage I/O. READY multipart uses the existing durable exact-key deletion path
+with its original completion receipt/binding and all deletion barriers. Folder
+FINALIZED does not promise reclamation of discarded multipart allocations.
+No autonomous cleanup default changes. See [guarantees, recovery and verification](multipart-purge-compatibility.md).
+
 ### Multipart cancellation and expiry — M4
 
 V30 adds retained cancellation/expiry intent and guarded progress, immutable full
@@ -34,8 +45,9 @@ never-initiation allows 200 cancellation; uncertain/blocked results are 202 and
 never grant another abort. Explicit bounded PostgreSQL-time expiry records
 abandonment without Garage I/O; no autonomous execution exists. Final URL-response
 authorization rejects cancellation/expiry that wins during signing. Folder barriers,
-completion/READY evidence, allocation retention and every physical purge fence stay
-intact. Acknowledgement supplies no writer-termination or removal proof. See
+completion/READY evidence and allocation retention stay intact; M5 extends purge
+and namespace behavior above. Acknowledgement supplies no writer-termination or
+removal proof. See
 [API, state, expiry and retention runbook](multipart-cancellation-expiry.md).
 
 ### Multipart completion and recovery — Phase 3E / M3
@@ -47,9 +59,9 @@ pages, freeze before dispatch, persist exact positive object evidence, then perf
 fresh receipt-backed READY finalization. Unknown dispatches never repeat Complete;
 explicit recovery uses at most one exact positive checksum/metadata HEAD, or no
 Garage call when a receipt already exists. No transaction or hierarchy lock spans
-network I/O. V25/V26 and multipart physical purge fences remain unchanged, including
-for READY multipart files. M4 adds cancellation above; autonomous cleanup and browser
-UI remain planned. See the [completion/evidence/recovery contract](multipart-completion-recovery.md).
+network I/O. At the M3 boundary, V25/V26 and multipart purge fences were unchanged.
+M5 adds the explicit proof paths above. M4 adds cancellation; autonomous cleanup
+and browser UI remain planned. See the [completion/evidence/recovery contract](multipart-completion-recovery.md).
 
 ### Multipart part transfers — Phase 3D / M2A
 
@@ -74,9 +86,9 @@ creates UPLOADING metadata/allocation/session with fixed geometry and database
 expiry. Hierarchy → file → allocation → session coordination protects permanent
 initiation and mutually exclusive completion/abandonment decisions and monotonic
 revision. OPEN requires a durable upload ID; M1 performs no Garage operation.
-Database guards exclude multipart from V25/V26/B2 and all existing READY/removal
-proofs; unfinished sessions block purge even before initiation. M1 itself added no
-endpoint, dispatcher, part table or browser feature; M2A extends it above. See the
+At the M1 boundary, database guards excluded multipart from V25/V26/B2 and all
+READY/removal proofs; M3 and M5 add protocol-specific READY and purge paths.
+M1 itself added no endpoint, dispatcher, part table or browser feature; M2A extends it above. See the
 [M1 contract and limitations](multipart-upload-sessions.md).
 
 ### Garage multipart characterization — Phase 3B / M0

@@ -89,7 +89,8 @@ class MultipartCancellationIntegrationTest {
         verify(storage, never()).delete(any(StorageTarget.class)); verify(storage, never()).delete(anyString());
         verify(storage, never()).completeMultipart(any(), any(), anyList(), any());
         verify(storage, never()).inspectMultipartObject(any());
-        assertThat(jdbc.queryForObject("SELECT status FROM files WHERE id = ?", String.class, session.fileId())).isEqualTo("UPLOADING");
+        assertThat(jdbc.queryForObject("SELECT status FROM files WHERE id = ?", String.class, session.fileId())).isEqualTo(
+                jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM multipart_cancellations WHERE session_id = ?)", Boolean.class, session.id()) ? "FAILED" : "UPLOADING");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM file_storage_objects WHERE owner_id = ? "
                 + "AND (put_succeeded_at IS NOT NULL OR admitted_file_version IS NOT NULL OR write_precluded_at IS NOT NULL)", Integer.class, owner)).isZero();
     }
@@ -362,7 +363,7 @@ class MultipartCancellationIntegrationTest {
         assertThat(cancellations.recover(owner, session.id()).cancelled()).isTrue();
     }
 
-    @Test void folderPurgeDuringAbortRetainsAcknowledgementAndLeavesManifestUnsafe() throws Exception {
+    @Test void folderPurgeDuringAbortRetainsAcknowledgementAndAllowsOnlyLogicalDisposal() throws Exception {
         UUID folder = folders.createFolder(owner, null, "purge-during"); session = reserve(folder); open();
         doAnswer(call -> { assertNoTransaction(); folders.deleteFolder(owner, folder); folders.requestPermanentDeletion(owner, folder); return null; })
                 .when(storage).abortMultipart(any(), any());
@@ -376,10 +377,9 @@ class MultipartCancellationIntegrationTest {
         }
         var manifest = jdbc.queryForMap("SELECT * FROM folder_purge_files WHERE file_id = ?", session.fileId());
         var context = mock(com.vaultdrive.worker.JobExecutionContext.class); when(context.claim()).thenReturn(claim);
-        assertThatThrownBy(() -> purge.prepare(context, session.fileId())).isInstanceOfSatisfying(com.vaultdrive.worker.FolderPurgeFileService.BlockedFile.class,
-                e -> assertThat(e.reason()).isEqualTo("UNSAFE_WRITER"));
+        assertThat(purge.prepare(context, session.fileId()).logicalOnly()).isTrue();
         assertThat(jdbc.queryForMap("SELECT * FROM folder_purge_files WHERE file_id = ?", session.fileId())).isEqualTo(manifest);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM file_purge_work WHERE file_id = ?", Integer.class, session.fileId())).isZero();
+        assertThat(jdbc.queryForObject("SELECT bytes_deleted_at IS NULL AND never_written_at IS NULL FROM file_purge_work WHERE file_id = ?", Boolean.class, session.fileId())).isTrue();
         assertThatThrownBy(() -> cancellations.recover(owner, session.id())).isInstanceOf(FileNotFoundException.class);
     }
 

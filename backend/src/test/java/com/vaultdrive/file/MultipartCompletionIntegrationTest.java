@@ -420,7 +420,7 @@ class MultipartCompletionIntegrationTest {
     }
 
     @ParameterizedTest @ValueSource(booleans = {true, false})
-    void pendingFolderPurgeRetainsSnapshotAndNeverAuthorizesMultipartBytesDeletion(boolean readyFirst) throws Exception {
+    void pendingFolderPurgeSeparatesReadyBytesFromUnfinishedLogicalDisposal(boolean readyFirst) throws Exception {
         UUID folder = folders.createFolder(owner, null, "purge"); session = open(folder, 8388609);
         var permit = transactions.claim(owner, frozen().session().id());
         transactions.recordReceipt(owner, permit.snapshot(), evidence(session), Evidence.COMPLETE_HEAD);
@@ -435,9 +435,10 @@ class MultipartCompletionIntegrationTest {
             if (discovery.discover(claim, version, 20).sealed()) break;
         }
         var context = mock(com.vaultdrive.worker.JobExecutionContext.class); when(context.claim()).thenReturn(claim);
-        assertThatThrownBy(() -> purge.prepare(context, session.fileId())).isInstanceOfSatisfying(com.vaultdrive.worker.FolderPurgeFileService.BlockedFile.class,
-                e -> assertThat(e.reason()).isEqualTo("UNSAFE_WRITER"));
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM file_purge_work WHERE file_id = ?", Integer.class, session.fileId())).isZero();
+        var prepared = purge.prepare(context, session.fileId());
+        assertThat(prepared.logicalOnly()).isEqualTo(!readyFirst);
+        assertThat(prepared.neverWritten()).isFalse();
+        assertThat(prepared.proven()).isFalse();
         assertThat(jdbc.queryForObject("SELECT status FROM files WHERE id = ?", String.class, session.fileId())).isEqualTo(readyFirst ? "READY" : "UPLOADING");
         verifyNoInteractions(storage);
     }
