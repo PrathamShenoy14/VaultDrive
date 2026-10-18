@@ -8,8 +8,10 @@ length/SHA-256 for every part, one trusted backend control plane, permanent
 allocation identity, no uncertain redispatch, and no inference of writer
 termination from expiry or provider absence. Synchronous uploads are unchanged.
 
-No cancellation/abort API, presigned completion/abort, autonomous recovery,
-expiry/cleanup, worker, browser UI or new infrastructure is introduced.
+M3 itself introduced no cancellation/abort API, presigned completion/abort,
+autonomous recovery, expiry/cleanup, worker, browser UI or new infrastructure.
+[M4 adds cancellation and explicit expiry](multipart-cancellation-expiry.md),
+preserving every permanent completion decision and recovery constraint.
 
 ## API and durable state
 

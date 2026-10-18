@@ -135,6 +135,22 @@ public class S3ObjectStorageService implements ObjectStorageService {
         }
     }
 
+    @Override
+    public void abortMultipart(StorageTarget target, String uploadId) {
+        requireMultipartTarget(target);
+        if (uploadId == null || uploadId.isBlank() || uploadId.length() > 2048) {
+            throw new IllegalArgumentException("Invalid upload identity");
+        }
+        try {
+            var result = s3Client.abortMultipartUpload(AbortMultipartUploadRequest.builder()
+                    .bucket(target.bucket()).key(target.key()).uploadId(uploadId)
+                    .overrideConfiguration(c -> c.apiCallTimeout(DELETE_TIMEOUT).apiCallAttemptTimeout(DELETE_ATTEMPT_TIMEOUT)).build());
+            if (result.sdkHttpResponse() == null || result.sdkHttpResponse().statusCode() != 204) {
+                throw new IllegalStateException();
+            }
+        } catch (RuntimeException uncertain) { throw new MultipartStorageException(); }
+    }
+
     private void requireMultipartTarget(StorageTarget target) {
         requireNoTransaction();
         if (!binding.matches(target)) { throw new MultipartStorageException(); }

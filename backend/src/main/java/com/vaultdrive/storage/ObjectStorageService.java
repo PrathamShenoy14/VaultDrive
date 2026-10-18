@@ -31,4 +31,7 @@ public interface ObjectStorageService {
             java.util.List<MultipartStorage.ManifestPart> manifest, String compositeSha256);
 
     MultipartStorage.CompletedObject inspectMultipartObject(StorageTarget target);
+
+    /** Backend-only, one dispatch. Acknowledgement is not writer-termination or removal proof. */
+    void abortMultipart(StorageTarget target, String uploadId);
 }

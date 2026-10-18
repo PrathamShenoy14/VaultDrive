@@ -93,9 +93,36 @@ class S3MultipartStorageTest {
                 assertThatThrownBy(() -> adapter.listParts(bad, "id", 0, 1)).isInstanceOf(RuntimeException.class);
                 assertThatThrownBy(() -> adapter.completeMultipart(bad, "id", List.of(part()), sha)).isInstanceOf(RuntimeException.class);
                 assertThatThrownBy(() -> adapter.inspectMultipartObject(bad)).isInstanceOf(RuntimeException.class);
+                assertThatThrownBy(() -> adapter.abortMultipart(bad, "id")).isInstanceOf(RuntimeException.class);
             } finally { TransactionSynchronizationManager.setActualTransactionActive(false); }
         }
         verifyNoInteractions(client, signer);
+    }
+
+    @Test void abortUsesExactIdentityAndAcceptsOnlyPositive204WithoutRetry() {
+        var response = AbortMultipartUploadResponse.builder();
+        response.sdkHttpResponse(software.amazon.awssdk.http.SdkHttpResponse.builder().statusCode(204).build());
+        when(client.abortMultipartUpload(any(AbortMultipartUploadRequest.class))).thenReturn(response.build());
+        adapter.abortMultipart(target, "exact-upload");
+        var capture = org.mockito.ArgumentCaptor.forClass(AbortMultipartUploadRequest.class);
+        verify(client).abortMultipartUpload(capture.capture());
+        var request = capture.getValue();
+        assertThat(request.bucket()).isEqualTo(target.bucket()); assertThat(request.key()).isEqualTo(target.key());
+        assertThat(request.uploadId()).isEqualTo("exact-upload");
+        assertThat(request.overrideConfiguration().orElseThrow().apiCallTimeout()).contains(Duration.ofSeconds(10));
+        assertThat(request.overrideConfiguration().orElseThrow().apiCallAttemptTimeout()).contains(Duration.ofSeconds(5));
+        doThrow(S3Exception.builder().statusCode(404).message("sensitive NoSuchUpload").build()).when(client).abortMultipartUpload(any(AbortMultipartUploadRequest.class));
+        assertThatThrownBy(() -> adapter.abortMultipart(target, "exact-upload"))
+                .isInstanceOf(MultipartStorageException.class).hasNoCause().hasMessage("Multipart storage outcome unavailable");
+        verify(client, times(2)).abortMultipartUpload(any(AbortMultipartUploadRequest.class));
+        verify(client, never()).deleteObject(any(DeleteObjectRequest.class));
+    }
+
+    @Test void malformedAbortAcknowledgementDoesNotInventSuccess() {
+        when(client.abortMultipartUpload(any(AbortMultipartUploadRequest.class))).thenReturn(AbortMultipartUploadResponse.builder().build());
+        assertThatThrownBy(() -> adapter.abortMultipart(target, "id")).isInstanceOf(MultipartStorageException.class);
+        assertThatThrownBy(() -> adapter.abortMultipart(target, "")).isInstanceOf(IllegalArgumentException.class);
+        verify(client, times(1)).abortMultipartUpload(any(AbortMultipartUploadRequest.class));
     }
 
     @Test void completeDispatchesOnlyExactFrozenPartsChecksumAndBoundedRequest() {

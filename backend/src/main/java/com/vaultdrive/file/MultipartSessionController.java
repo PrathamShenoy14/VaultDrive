@@ -18,11 +18,14 @@ public class MultipartSessionController {
     private final MultipartSessionService sessions;
     private final MultipartTransferService transfers;
     private final MultipartCompletionService completions;
+    private final MultipartCancellationService cancellations;
 
-    public MultipartSessionController(MultipartSessionService sessions, MultipartTransferService transfers, MultipartCompletionService completions) {
+    public MultipartSessionController(MultipartSessionService sessions, MultipartTransferService transfers,
+            MultipartCompletionService completions, MultipartCancellationService cancellations) {
         this.sessions = sessions;
         this.transfers = transfers;
         this.completions = completions;
+        this.cancellations = cancellations;
     }
 
     @PostMapping
@@ -72,6 +75,26 @@ public class MultipartSessionController {
     private static ResponseEntity<Session> completionResult(Session session) {
         return ResponseEntity.status(session.completion() != null && session.completion().ready() ? 200 : 202)
                 .header("Location", "/api/v1/upload-sessions/" + session.id()).body(session);
+    }
+
+    @PostMapping("/{id}/cancel")
+    public ResponseEntity<MultipartCancellationTransactions.Cancellation> cancel(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return cancellationResult(cancellations.cancel(owner(jwt), id));
+    }
+
+    @PostMapping("/{id}/cancel/recover")
+    public ResponseEntity<MultipartCancellationTransactions.Cancellation> recoverCancellation(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return cancellationResult(cancellations.recover(owner(jwt), id));
+    }
+
+    @GetMapping("/{id}/cancellation")
+    public MultipartCancellationTransactions.Cancellation cancellation(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return cancellations.get(owner(jwt), id);
+    }
+
+    private static ResponseEntity<MultipartCancellationTransactions.Cancellation> cancellationResult(MultipartCancellationTransactions.Cancellation result) {
+        return ResponseEntity.status(result.cancelled() ? 200 : 202)
+                .header("Location", "/api/v1/upload-sessions/" + result.session().id() + "/cancellation").body(result);
     }
 
     @ExceptionHandler(MultipartConflictException.class)

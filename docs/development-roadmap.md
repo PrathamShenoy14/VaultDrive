@@ -184,9 +184,11 @@ Exit criteria: correctness tests remain green and measured contention improves f
   URL refresh and bounded resume APIs; [implemented contract](multipart-part-transfers.md).
 - [x] Phase 3E / M3: frozen manifest, one completion dispatcher, multipart receipt,
   READY and bounded explicit recovery; [implemented contract](multipart-completion-recovery.md).
-- [ ] Unknown initiation reconciliation, cancellation/expiry and multipart removal
-  proof remain separate work. No abort or autonomous cleanup is implemented;
-  browser release remains gated.
+- [x] M4: owner-scoped cancellation, single-assignment backend abort, explicit
+  bounded expiry and conservative cancellation recovery;
+  [implemented contract and retention runbook](multipart-cancellation-expiry.md).
+- [ ] Unknown initiation reconciliation and multipart removal proof remain
+  separate work. Autonomous cleanup is absent; browser release remains gated.
 
 - Evaluate presigned transfers so application servers do not proxy all bytes.
 - Define multipart/resumable upload state, checksum verification, expiry, and cleanup.

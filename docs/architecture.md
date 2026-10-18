@@ -25,6 +25,19 @@ PostgreSQL and Garage do not share a transaction. Code must make cross-system fa
 
 ## Implemented components
 
+### Multipart cancellation and expiry — M4
+
+V30 adds retained cancellation/expiry intent and guarded progress, immutable full
+identity and single-assignment abort dispatch. Owner JWT cancel/read/recovery APIs
+preserve mutually exclusive V27 decisions. A recorded HTTP 204 or permanent
+never-initiation allows 200 cancellation; uncertain/blocked results are 202 and
+never grant another abort. Explicit bounded PostgreSQL-time expiry records
+abandonment without Garage I/O; no autonomous execution exists. Final URL-response
+authorization rejects cancellation/expiry that wins during signing. Folder barriers,
+completion/READY evidence, allocation retention and every physical purge fence stay
+intact. Acknowledgement supplies no writer-termination or removal proof. See
+[API, state, expiry and retention runbook](multipart-cancellation-expiry.md).
+
 ### Multipart completion and recovery — Phase 3E / M3
 
 V29 adds a frozen ordered completion manifest, immutable decision/upload identity,
@@ -35,8 +48,8 @@ fresh receipt-backed READY finalization. Unknown dispatches never repeat Complet
 explicit recovery uses at most one exact positive checksum/metadata HEAD, or no
 Garage call when a receipt already exists. No transaction or hierarchy lock spans
 network I/O. V25/V26 and multipart physical purge fences remain unchanged, including
-for READY multipart files. Abort/cancellation, autonomous cleanup and browser UI
-remain planned. See the [completion/evidence/recovery contract](multipart-completion-recovery.md).
+for READY multipart files. M4 adds cancellation above; autonomous cleanup and browser
+UI remain planned. See the [completion/evidence/recovery contract](multipart-completion-recovery.md).
 
 ### Multipart part transfers — Phase 3D / M2A
 
@@ -48,7 +61,7 @@ permission can initiate; INITIATING after uncertainty never grants another Creat
 Exact upload ID binding commits before OPEN/URLs. Garage I/O and signing run outside
 database transactions and hierarchy locks. Fixed M1 geometry, signed length/checksum,
 fresh ancestry checks and all legacy/purge/READY fences remain mandatory.
-M2A added no completion or READY; M3 extends it above. Abort, browser and autonomous
+M2A added no completion or READY; M3 and M4 extend it above. Browser and autonomous
 cleanup remain planned. Nominal
 five-minute URL lifetimes do not resolve the measured deployment clock skew.
 See [endpoint, transaction and evidence contracts](multipart-part-transfers.md).
@@ -150,7 +163,7 @@ enablement is added. See [eligibility, state machine, invocation and limits](kno
 ### Platform and persistence — Committed
 
 - Java 21, Spring Boot 4.1.1, Maven wrapper, Spring MVC, Spring Data JPA, validation, and Spring Security.
-- PostgreSQL schema managed by append-only Flyway migrations V1-V27. Hibernate validates the schema (`ddl-auto=validate`) rather than creating it.
+- PostgreSQL schema managed by append-only Flyway migrations V1-V30. Hibernate validates the schema (`ddl-auto=validate`) rather than creating it.
 - Configuration comes from properties and environment variables. Secrets are not intended for source control.
 
 ### Authentication and security — Committed

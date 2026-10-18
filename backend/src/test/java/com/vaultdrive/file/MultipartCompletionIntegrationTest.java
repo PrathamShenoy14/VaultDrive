@@ -55,6 +55,8 @@ class MultipartCompletionIntegrationTest {
     @Autowired MultipartSessionService sessions;
     @Autowired MultipartCompletionTransactions transactions;
     @Autowired MultipartCompletionService completions;
+    @Autowired MultipartCancellationService cancellations;
+    @Autowired MultipartCancellationTransactions cancellationTx;
     @Autowired MultipartTransferService transfers;
     @Autowired StoredFileRepository files;
     @Autowired FileService legacy;
@@ -115,6 +117,13 @@ class MultipartCompletionIntegrationTest {
         assertThat(completions.complete(owner, session.id())).isEqualTo(ready);
         assertThat(completions.recover(owner, session.id())).isEqualTo(ready);
         assertThat(sessions.get(owner, session.id())).isEqualTo(ready);
+        assertThatThrownBy(() -> cancellations.cancel(owner, session.id())).isInstanceOf(MultipartConflictException.class);
+        assertThatThrownBy(() -> cancellations.recover(owner, session.id())).isInstanceOf(MultipartConflictException.class);
+        expire();
+        assertThat(cancellationTx.expire(new MultipartCancellationTransactions.Candidate(owner, session.id())).reason()).isEqualTo("DECISION_EXISTS");
+        String token = "Bearer " + jwt.generateAccessToken(owner);
+        try { mvc.perform(post("/api/v1/upload-sessions/{id}/cancel", session.id()).header("Authorization", token)).andExpect(status().isConflict()); }
+        catch (Exception e) { throw new AssertionError(e); }
         assertThat(jdbc.queryForMap("SELECT * FROM multipart_completion_receipts WHERE session_id = ?", session.id())).isEqualTo(row);
         verifyNoInteractions(storage);
         assertThatThrownBy(() -> transfers.partUrls(owner, session.id(), List.of(new PartExpectation(1, 8388608, SHA))))

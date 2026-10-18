@@ -1,6 +1,6 @@
 # ADR-0009: Multipart capability boundary before direct-upload implementation
 
-- Status: M0 constraints accepted; M1/M2A and M3 completion/evidence/READY implemented
+- Status: M0 constraints accepted; M1–M4 backend lifecycle implemented; removal/browser work deferred
 - Date: 2026-10-18
 - Evidence: [version-pinned M0 matrix](../garage-multipart-capabilities.md)
 - Proposal: [Phase 3A architecture](../direct-upload-architecture.md)
@@ -49,8 +49,16 @@ identity isolation without proving request quiescence or physical reclamation.
 Duplicate completion can return NoSuchUpload after success; it is not an outcome
 oracle. Signed length/checksum are mandatory capability restrictions, not quotas.
 
-Later cancellation, reconciliation and removal work remains bounded by the matrix
-and must not introduce blind completion retry or uncertain cleanup. Browser
+M4 adds [cancellation and explicit bounded expiry](../multipart-cancellation-expiry.md).
+V30 retains abandonment intent, exact identity, one non-reassignable abort dispatch
+and terminal acknowledgement. A lost abort response remains UNKNOWN without
+probing absence or redispatching. HTTP 204 permits control-plane cancellation but
+supplies no physical-removal proof. Expiry uses PostgreSQL time and records intent
+without storage I/O; no autonomous execution is added. Files/versions and folder
+purge snapshots remain unchanged, including their multipart blockers.
+
+Later reconciliation and removal work remains bounded by the matrix and must not
+introduce blind completion/abort retry or uncertain cleanup. Browser
 enablement additionally requires approved HTTPS reachability,
 working real-origin CORS and bounded signer/storage clock skew. Current live
 configuration does not establish those prerequisites. Multi-node, GC and browser

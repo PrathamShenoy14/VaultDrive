@@ -13,6 +13,10 @@ Phase 3E adds [M3 completion, immutable receipts and READY recovery](multipart-c
 V27 decision state remains permanent; V29 stores completion/readiness progress
 separately and permits READY only with its multipart-specific receipt.
 
+[M4 adds cancellation and explicit expiry](multipart-cancellation-expiry.md).
+V30 retains abandonment progress separately without changing immutable V27
+decisions or granting physical-removal proof.
+
 ## Schema and compatibility
 
 [V27](../backend/src/main/resources/db/migration/V27__multipart_session_identity.sql)

@@ -137,6 +137,13 @@ public class MultipartSessionService {
         return transfer(session, List.of());
     }
 
+    /** Final response authorization after signing, so a cancellation/expiry that won during signing rejects the batch. */
+    public void validatePartAuthorization(UUID owner, UUID id, long revision) {
+        Session session = lock(owner, id);
+        requireOpen(session);
+        require(session.revision() == revision);
+    }
+
     private Transfer transfer(Session session, List<RegisteredPart> parts) {
         Object[] r = (Object[]) em.createNativeQuery("SELECT storage_namespace, endpoint, region, bucket, storage_key, declared_type, "
                 + "extract(epoch from expires_at - clock_timestamp()) FROM upload_sessions WHERE id = :id")

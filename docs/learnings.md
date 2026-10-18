@@ -506,3 +506,21 @@ rollback, and outside its returned commit to test authoritative reload. Neither
 case permits re-PUT or compensating deletion. Finite direct-connection tests do
 not certify independent proxies, external writers or storage fencing. See the
 [request counts and evidence boundary](single-put-dispatch-verification.md).
+
+## Cancellation acknowledgement and cleanup proof are separate facts
+
+M4 permanently chooses abandonment before granting one backend abort permission.
+Its immutable upload ID, allocation binding and mutually exclusive completion
+decision identify what may be aborted. A lost response remains uncertain across
+restart: retrying abort or inspecting negative evidence cannot reconstruct the
+missing acknowledgement. A successful HTTP 204 can complete the control-plane
+cancellation while an already accepted part still returns 200 afterward, as the
+live production-adapter gate demonstrated. Neither fact grants physical purge.
+
+Expiry is an authorization decision using PostgreSQL time after lock acquisition;
+it needs no autonomous storage action. A final authorization check after signing
+also matters: cancellation can commit between the original part registration and
+URL construction. Rejecting that batch preserves a clear response-authorization
+point, while acknowledging that already delivered or in-transit capabilities
+cannot be revoked by a database transaction. Retention and blocked purge are
+explicit costs of preserving uncertainty. See the [M4 runbook](multipart-cancellation-expiry.md).

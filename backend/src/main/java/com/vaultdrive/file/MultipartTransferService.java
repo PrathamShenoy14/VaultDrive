@@ -44,8 +44,10 @@ public class MultipartTransferService {
 
     public List<PartUrl> partUrls(UUID owner, UUID id, List<PartExpectation> parts) {
         Transfer transfer = sessions.authorizeParts(owner, id, parts); // Expectations committed before signing.
-        return transfer.parts().stream().map(p -> new PartUrl(p, storage.signPart(transfer.target(),
+        List<PartUrl> signed = transfer.parts().stream().map(p -> new PartUrl(p, storage.signPart(transfer.target(),
                 transfer.session().uploadId(), p.partNumber(), p.length(), p.sha256(), transfer.authorizationDeadline()))).toList();
+        sessions.validatePartAuthorization(owner, id, transfer.session().revision());
+        return signed;
     }
 
     public MultipartStorage.Page list(UUID owner, UUID id, int marker, int limit) {

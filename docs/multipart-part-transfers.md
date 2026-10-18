@@ -9,8 +9,9 @@ were unimplemented.
 
 This is the M2A milestone record. Phase 3E subsequently adds
 [M3 safe completion, durable evidence, READY and explicit recovery](multipart-completion-recovery.md).
-M3 preserves M2A's part authorization and initiation contracts; cancellation,
-autonomous cleanup and browser UI remain outside both milestones.
+M3 preserves M2A's part authorization and initiation contracts.
+[M4 adds cancellation/expiry](multipart-cancellation-expiry.md) and final response
+authorization after signing. Autonomous cleanup and browser UI remain planned.
 
 ## Authenticated endpoints
 

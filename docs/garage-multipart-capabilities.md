@@ -46,6 +46,12 @@ deadline, **never** using that wait as proof of writer termination.
 
 ## Important qualifications and source comparison
 
+M4's [production cancellation tests](../backend/src/test/java/com/vaultdrive/storage/GarageMultipartCancellationIntegrationTest.java)
+subsequently rechecked HTTP 204 abort, fresh part rejection, partial uploads,
+accepted late parts, response loss and retained application uncertainty through
+the real backend adapter. See [M4 results and retention limits](multipart-cancellation-expiry.md).
+These observations add no physical-reclamation or writer-quiescence proof.
+
 Tagged [multipart code](https://raw.githubusercontent.com/deuxfleurs-org/garage/v2.3.0/src/api/s3/multipart.rs)
 checks upload state before streaming and assembles a separate final version.
 Live late-200 responses and unchanged completed bytes agree with that model.

@@ -25,6 +25,17 @@ File restore and permanent-delete request acquire the shared hierarchy lock befo
 
 ## Consequences
 
+M4 cancellation and expiry reuse shared hierarchy → fresh file → allocation →
+session, followed by cancellation progress. Abandonment and intent commit
+atomically; completion cannot consume the same decision. A separate commit grants
+one non-reassignable abort permission. No database lock spans Abort, and a later
+folder barrier cannot erase its positive acknowledgement. Expiry scans immutable
+UUID identities, then independently revalidates PostgreSQL time and eligibility
+under these locks. New capabilities and first abort permissions respect folder
+barriers; already permitted facts do not mutate file versions or purge snapshots.
+Final authorization after URL signing rejects decisions/expiry that won while
+signing. See [M4 boundaries and race evidence](../multipart-cancellation-expiry.md).
+
 Phase 3E / M3 extends the multipart order to shared owner hierarchy → fresh file
 → allocation → session → ordered part expectations → completion progress → receipt.
 Freezing the manifest/decision, granting single-assignment dispatch, recording

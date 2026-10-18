@@ -11,7 +11,9 @@ That contract supersedes the proposed M1 details below. Phase 3D now adds the
 [M2A backend part-transfer contract](multipart-part-transfers.md), superseding
 initiation/part/resume details below. Phase 3E adds the
 [M3 completion/evidence/recovery contract](multipart-completion-recovery.md),
-superseding the proposed completion details. Cancellation and later milestones remain planned.
+superseding the proposed completion details. [M4 cancellation and explicit expiry](multipart-cancellation-expiry.md)
+now supersede the proposed abandonment details. Later removal proofs and browser
+enablement remain planned.
 
 ## Decision
 
