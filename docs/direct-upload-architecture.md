@@ -9,7 +9,9 @@ separate [M0 capability investigation](garage-multipart-capabilities.md).
 Phase 3C now implements only the [M1 database/session foundation](multipart-upload-sessions.md).
 That contract supersedes the proposed M1 details below. Phase 3D now adds the
 [M2A backend part-transfer contract](multipart-part-transfers.md), superseding
-initiation/part/resume details below. Completion and later milestones remain planned.
+initiation/part/resume details below. Phase 3E adds the
+[M3 completion/evidence/recovery contract](multipart-completion-recovery.md),
+superseding the proposed completion details. Cancellation and later milestones remain planned.
 
 ## Decision
 

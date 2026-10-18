@@ -82,7 +82,7 @@ class MultipartTransferIntegrationTest {
         });
     }
     @AfterEach void noTerminalDispatch() {
-        // The storage interface intentionally contains neither Complete nor Abort.
+        // M2A operations and rejected incomplete completion never authorize byte deletion.
         verify(storage, never()).delete(any(StorageTarget.class));
         verify(storage, never()).delete(anyString());
         assertThat(jdbc.queryForObject("SELECT count(*) FROM files WHERE owner_id = ? AND status = 'READY'", Integer.class, owner)).isZero();
@@ -270,7 +270,7 @@ class MultipartTransferIntegrationTest {
                 .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"));
         when(storage.listParts(any(), any(), anyInt(), anyInt())).thenReturn(new MultipartStorage.Page(List.of(), null));
         mvc.perform(get("/api/v1/upload-sessions/{id}/parts", id).header("Authorization", token)).andExpect(status().isOk());
-        mvc.perform(post("/api/v1/upload-sessions/{id}/complete", id).header("Authorization", token)).andExpect(status().isNotFound());
+        mvc.perform(post("/api/v1/upload-sessions/{id}/complete", id).header("Authorization", token)).andExpect(status().isConflict());
         mvc.perform(post("/api/v1/upload-sessions/{id}/abort", id).header("Authorization", token)).andExpect(status().isNotFound());
     }
 

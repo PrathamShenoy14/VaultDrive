@@ -13,6 +13,7 @@ import jakarta.persistence.EntityManager;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -62,7 +63,10 @@ public class MultipartSessionService {
     public record Request(UUID folderId, String name, long size, String contentType) { }
     public record Session(UUID id, UUID fileId, String state, long revision, UUID initiationId,
             String uploadId, UUID decisionId, Instant createdAt, Instant expiresAt,
-            long declaredSize, int partSize, int partCount) { }
+            long declaredSize, int partSize, int partCount, CompletionInfo completion) { }
+    public record CompletionInfo(String disposition, long revision, UUID dispatchId, boolean receiptRecorded, String reason) {
+        public boolean ready() { return disposition.equals("READY"); }
+    }
     public enum Decision { COMPLETE, ABANDON }
     public record PartExpectation(int partNumber, long length, String sha256) { }
     public record RegisteredPart(int partNumber, long length, String sha256, UUID registrationId) { }
@@ -266,6 +270,15 @@ public class MultipartSessionService {
     }
 
     private Session lock(UUID owner, UUID id) {
+        Session session = lockForEvidence(owner, id);
+        if (!(Boolean) em.createNativeQuery("SELECT multipart_session_eligible(s) OR multipart_ready_accessible(s) "
+                + "FROM upload_sessions s WHERE id = :id").setParameter("id", id).getSingleResult()) { throw absent(); }
+        return session;
+    }
+
+    /** Internal fact/progress recording may outlive accessible ancestry; public reads still use lock(). */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Session lockForEvidence(UUID owner, UUID id) {
         bounds();
         hierarchy.acquireShared(owner);
         // Pre-row-lock read is immutable, owner-scoped identity only.
@@ -277,20 +290,21 @@ public class MultipartSessionService {
         em.createNativeQuery("SELECT file_id FROM file_storage_objects WHERE file_id = :file FOR UPDATE")
                 .setParameter("file", file).getResultList();
         em.createNativeQuery("SELECT id FROM upload_sessions WHERE id = :id FOR UPDATE").setParameter("id", id).getSingleResult();
-        if (!(Boolean) em.createNativeQuery("SELECT multipart_session_eligible(s) FROM upload_sessions s WHERE id = :id")
-                .setParameter("id", id).getSingleResult()) { throw absent(); }
         return read(id);
     }
 
     private Session read(UUID id) {
         Object[] r = (Object[]) em.createNativeQuery("""
-                SELECT id, file_id, state, revision, initiation_id, garage_upload_id, decision_id, created_at, expires_at,
-                    declared_size, part_size, part_count
-                FROM upload_sessions WHERE id = :id
+                SELECT s.id, file_id, state, s.revision, initiation_id, s.garage_upload_id, s.decision_id, s.created_at, expires_at,
+                    declared_size, part_size, part_count, c.disposition, c.revision, c.dispatch_id,
+                    EXISTS (SELECT 1 FROM multipart_completion_receipts WHERE session_id = s.id), c.reason
+                FROM upload_sessions s LEFT JOIN multipart_completions c ON c.session_id = s.id WHERE s.id = :id
                 """).setParameter("id", id).getSingleResult();
         return new Session((UUID) r[0], (UUID) r[1], (String) r[2], ((Number) r[3]).longValue(),
                 (UUID) r[4], (String) r[5], (UUID) r[6], instant(r[7]), instant(r[8]),
-                ((Number) r[9]).longValue(), ((Number) r[10]).intValue(), ((Number) r[11]).intValue());
+                ((Number) r[9]).longValue(), ((Number) r[10]).intValue(), ((Number) r[11]).intValue(),
+                r[12] == null ? null : new CompletionInfo((String) r[12], ((Number) r[13]).longValue(),
+                        (UUID) r[14], (Boolean) r[15], (String) r[16]));
     }
 
     private static Instant instant(Object value) {

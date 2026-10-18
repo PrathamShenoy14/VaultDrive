@@ -9,6 +9,9 @@ outside the boundaries described here.
 This document records the M1 foundation. Phase 3D subsequently adds
 [M2A initiation, immutable part URLs and resume endpoints](multipart-part-transfers.md).
 Statements below about absent endpoints/storage dispatch describe M1 alone.
+Phase 3E adds [M3 completion, immutable receipts and READY recovery](multipart-completion-recovery.md).
+V27 decision state remains permanent; V29 stores completion/readiness progress
+separately and permits READY only with its multipart-specific receipt.
 
 ## Schema and compatibility
 

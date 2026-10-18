@@ -91,10 +91,54 @@ class S3MultipartStorageTest {
                 assertThatThrownBy(() -> adapter.initiateMultipart(bad, UUID.randomUUID(), UUID.randomUUID(), "text/plain")).isInstanceOf(RuntimeException.class);
                 assertThatThrownBy(() -> adapter.signPart(bad, "id", 1, 1, sha, Instant.now().plusSeconds(120))).isInstanceOf(RuntimeException.class);
                 assertThatThrownBy(() -> adapter.listParts(bad, "id", 0, 1)).isInstanceOf(RuntimeException.class);
+                assertThatThrownBy(() -> adapter.completeMultipart(bad, "id", List.of(part()), sha)).isInstanceOf(RuntimeException.class);
+                assertThatThrownBy(() -> adapter.inspectMultipartObject(bad)).isInstanceOf(RuntimeException.class);
             } finally { TransactionSynchronizationManager.setActualTransactionActive(false); }
         }
         verifyNoInteractions(client, signer);
     }
+
+    @Test void completeDispatchesOnlyExactFrozenPartsChecksumAndBoundedRequest() {
+        when(client.completeMultipartUpload(any(CompleteMultipartUploadRequest.class))).thenReturn(CompleteMultipartUploadResponse.builder()
+                .eTag("opaque-final").checksumSHA256(sha).checksumType(ChecksumType.COMPOSITE).build());
+        var result = adapter.completeMultipart(target, "retained-id", List.of(part()), sha);
+        assertThat(result).isEqualTo(new MultipartStorage.CompletionAck("opaque-final", sha, "COMPOSITE"));
+        var capture = org.mockito.ArgumentCaptor.forClass(CompleteMultipartUploadRequest.class);
+        verify(client, times(1)).completeMultipartUpload(capture.capture());
+        var request = capture.getValue();
+        assertThat(request.key()).isEqualTo(target.key()); assertThat(request.bucket()).isEqualTo(target.bucket());
+        assertThat(request.uploadId()).isEqualTo("retained-id"); assertThat(request.checksumSHA256()).isEqualTo(sha);
+        assertThat(request.checksumType()).isEqualTo(ChecksumType.COMPOSITE);
+        assertThat(request.multipartUpload().parts()).singleElement().satisfies(p -> {
+            assertThat(p.partNumber()).isEqualTo(1); assertThat(p.eTag()).isEqualTo("opaque"); assertThat(p.checksumSHA256()).isEqualTo(sha);
+        });
+        assertThat(request.overrideConfiguration().orElseThrow().apiCallTimeout()).contains(Duration.ofSeconds(10));
+        verifyNoInteractions(signer);
+    }
+
+    @Test void completionNoSuchUploadAndHeadAbsenceRemainSanitizedUnavailableOutcomes() {
+        doThrow(NoSuchUploadException.builder().message("private provider body").build()).when(client)
+                .completeMultipartUpload(any(CompleteMultipartUploadRequest.class));
+        assertThatThrownBy(() -> adapter.completeMultipart(target, "id", List.of(part()), sha))
+                .isInstanceOf(MultipartStorageException.class).hasNoCause();
+        doThrow(NoSuchKeyException.builder().message("private provider body").build()).when(client).headObject(any(HeadObjectRequest.class));
+        assertThatThrownBy(() -> adapter.inspectMultipartObject(target)).isInstanceOf(MultipartStorageException.class).hasNoCause();
+        verify(client, times(1)).completeMultipartUpload(any(CompleteMultipartUploadRequest.class));
+        verify(client, never()).abortMultipartUpload(any(AbortMultipartUploadRequest.class));
+        verify(client, never()).deleteObject(any(DeleteObjectRequest.class));
+    }
+
+    @Test void completedObjectInspectionRequestsChecksumsAndPreservesPositiveMetadata() {
+        when(client.headObject(any(HeadObjectRequest.class))).thenReturn(HeadObjectResponse.builder().contentLength(123L)
+                .eTag("opaque-final").contentType("text/plain").checksumSHA256(sha).metadata(Map.of("session", "identity")).build());
+        assertThat(adapter.inspectMultipartObject(target)).isEqualTo(new MultipartStorage.CompletedObject(123, sha, "opaque-final", "text/plain", Map.of("session", "identity")));
+        var capture = org.mockito.ArgumentCaptor.forClass(HeadObjectRequest.class); verify(client).headObject(capture.capture());
+        assertThat(capture.getValue().checksumMode()).isEqualTo(ChecksumMode.ENABLED);
+        assertThat(capture.getValue().key()).isEqualTo(target.key());
+        assertThat(capture.getValue().overrideConfiguration().orElseThrow().apiCallTimeout()).contains(Duration.ofSeconds(10));
+    }
+
+    private MultipartStorage.ManifestPart part() { return new MultipartStorage.ManifestPart(1, 123, sha, UUID.randomUUID(), "opaque"); }
 
     @Test void listMapsAuthoritativeOpaquePartsAndPagination() {
         when(client.listParts(any(ListPartsRequest.class))).thenReturn(ListPartsResponse.builder().isTruncated(true).nextPartNumberMarker(1)

@@ -182,9 +182,11 @@ Exit criteria: correctness tests remain green and measured contention improves f
   permanent decision guards; [implemented contract](multipart-upload-sessions.md).
 - [x] Phase 3D / M2A: backend initiation, immutable signed part authorization,
   URL refresh and bounded resume APIs; [implemented contract](multipart-part-transfers.md).
-- [ ] Remaining M2/M3 recovery and receipt-based completion;
-  [proposed boundaries](direct-upload-architecture.md). M2A supplies no completion,
-  abort, READY or autonomous cleanup. Browser release remains gated.
+- [x] Phase 3E / M3: frozen manifest, one completion dispatcher, multipart receipt,
+  READY and bounded explicit recovery; [implemented contract](multipart-completion-recovery.md).
+- [ ] Unknown initiation reconciliation, cancellation/expiry and multipart removal
+  proof remain separate work. No abort or autonomous cleanup is implemented;
+  browser release remains gated.
 
 - Evaluate presigned transfers so application servers do not proxy all bytes.
 - Define multipart/resumable upload state, checksum verification, expiry, and cleanup.

@@ -17,10 +17,12 @@ import java.util.UUID;
 public class MultipartSessionController {
     private final MultipartSessionService sessions;
     private final MultipartTransferService transfers;
+    private final MultipartCompletionService completions;
 
-    public MultipartSessionController(MultipartSessionService sessions, MultipartTransferService transfers) {
+    public MultipartSessionController(MultipartSessionService sessions, MultipartTransferService transfers, MultipartCompletionService completions) {
         this.sessions = sessions;
         this.transfers = transfers;
+        this.completions = completions;
     }
 
     @PostMapping
@@ -55,6 +57,21 @@ public class MultipartSessionController {
     public com.vaultdrive.storage.MultipartStorage.Page list(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
             @RequestParam(defaultValue = "0") int marker, @RequestParam(defaultValue = "100") int limit) {
         return transfers.list(owner(jwt), id, marker, limit);
+    }
+
+    @PostMapping("/{id}/complete")
+    public ResponseEntity<Session> complete(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return completionResult(completions.complete(owner(jwt), id));
+    }
+
+    @PostMapping("/{id}/recover")
+    public ResponseEntity<Session> recover(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return completionResult(completions.recover(owner(jwt), id));
+    }
+
+    private static ResponseEntity<Session> completionResult(Session session) {
+        return ResponseEntity.status(session.completion() != null && session.completion().ready() ? 200 : 202)
+                .header("Location", "/api/v1/upload-sessions/" + session.id()).body(session);
     }
 
     @ExceptionHandler(MultipartConflictException.class)

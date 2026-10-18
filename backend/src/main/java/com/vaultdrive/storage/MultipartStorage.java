@@ -12,4 +12,7 @@ public final class MultipartStorage {
     }
     public record Part(int partNumber, long size, String etag, String sha256) { }
     public record Page(List<Part> parts, Integer nextMarker) { }
+    public record ManifestPart(int partNumber, long length, String sha256, java.util.UUID registrationId, String etag) { }
+    public record CompletionAck(String etag, String sha256, String checksumType) { }
+    public record CompletedObject(long size, String sha256, String etag, String contentType, Map<String, String> metadata) { }
 }

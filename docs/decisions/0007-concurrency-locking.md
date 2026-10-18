@@ -25,6 +25,16 @@ File restore and permanent-delete request acquire the shared hierarchy lock befo
 
 ## Consequences
 
+Phase 3E / M3 extends the multipart order to shared owner hierarchy → fresh file
+→ allocation → session → ordered part expectations → completion progress → receipt.
+Freezing the manifest/decision, granting single-assignment dispatch, recording
+positive evidence and finalizing READY are separate short transactions. The
+orchestrator rejects ambient transactions, so ListParts, Complete and HEAD hold
+no database locks. Receipt recording preserves facts despite a concurrent folder
+barrier; READY separately revalidates the captured file version/destination and
+ancestry. Complete/recover replays cannot reassign an existing dispatch identity.
+See [the M3 contract and race evidence](../multipart-completion-recovery.md).
+
 Phase 3C / M1 multipart reservation adds a key-specific two-integer advisory lock
 after shared owner hierarchy coordination, before creating file/allocation/session
 rows. Class `1297109833` and PostgreSQL `hashtext(owner + ':' + idempotencyKey)`

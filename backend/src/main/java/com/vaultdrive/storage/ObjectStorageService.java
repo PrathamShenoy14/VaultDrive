@@ -26,4 +26,9 @@ public interface ObjectStorageService {
             long length, String sha256, Instant deadline);
 
     MultipartStorage.Page listParts(StorageTarget target, String uploadId, int marker, int limit);
+
+    MultipartStorage.CompletionAck completeMultipart(StorageTarget target, String uploadId,
+            java.util.List<MultipartStorage.ManifestPart> manifest, String compositeSha256);
+
+    MultipartStorage.CompletedObject inspectMultipartObject(StorageTarget target);
 }

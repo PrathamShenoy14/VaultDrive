@@ -36,3 +36,13 @@ FAILED. Explicit recovery revalidates receipts and eligibility, never resurrects
 FAILED and never repeats PUT, HEAD or DELETE. A crash before the receipt commit
 remains uncertain; historical admissions are not backfilled. See
 [the exact identity, boundaries and remaining gap](../upload-success-recovery.md).
+
+## Phase 3E / M3 direct multipart completion
+
+The separately labelled DIRECT_MULTIPART protocol now freezes an authoritative
+part manifest, dispatches completion at most once and commits its own immutable
+receipt before a freshly eligible READY CAS. Explicit recovery uses strict positive
+object evidence or the retained receipt, never another uncertain Complete. V25
+PUT receipts, V26 cleanup and existing physical purge proofs do not adopt multipart,
+including READY multipart files. The synchronous contract above is unchanged.
+See [completion and recovery conditions](../multipart-completion-recovery.md).

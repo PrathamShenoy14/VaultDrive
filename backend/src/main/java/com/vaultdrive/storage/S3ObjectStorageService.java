@@ -98,10 +98,41 @@ public class S3ObjectStorageService implements ObjectStorageService {
                     .uploadId(uploadId).partNumberMarker(marker).maxParts(limit)
                     .overrideConfiguration(c -> c.apiCallTimeout(DELETE_TIMEOUT).apiCallAttemptTimeout(DELETE_ATTEMPT_TIMEOUT)).build());
             Integer next = Boolean.TRUE.equals(result.isTruncated()) ? result.nextPartNumberMarker() : null;
-            if (result.parts().size() > limit || (next != null && (next <= marker || next > 640))) { throw new IllegalStateException(); }
+            if (result.parts().size() > limit || (Boolean.TRUE.equals(result.isTruncated()) && next == null)
+                    || (next != null && (next <= marker || next > 640))) { throw new IllegalStateException(); }
             return new MultipartStorage.Page(result.parts().stream().map(p ->
                     new MultipartStorage.Part(p.partNumber(), p.size(), p.eTag(), p.checksumSHA256())).toList(), next);
         } catch (RuntimeException failure) { throw new MultipartStorageException(); }
+    }
+
+    @Override
+    public MultipartStorage.CompletionAck completeMultipart(StorageTarget target, String uploadId,
+            java.util.List<MultipartStorage.ManifestPart> manifest, String compositeSha256) {
+        requireMultipartTarget(target);
+        if (manifest.isEmpty() || manifest.size() > 640) { throw new IllegalArgumentException("Invalid completion manifest bound"); }
+        try {
+            var result = s3Client.completeMultipartUpload(CompleteMultipartUploadRequest.builder()
+                    .bucket(target.bucket()).key(target.key()).uploadId(uploadId)
+                    .checksumType(ChecksumType.COMPOSITE).checksumSHA256(compositeSha256)
+                    .multipartUpload(b -> b.parts(manifest.stream().map(p -> CompletedPart.builder()
+                            .partNumber(p.partNumber()).eTag(p.etag()).checksumSHA256(p.sha256()).build()).toList()))
+                    .overrideConfiguration(c -> c.apiCallTimeout(DELETE_TIMEOUT).apiCallAttemptTimeout(DELETE_ATTEMPT_TIMEOUT)).build());
+            return new MultipartStorage.CompletionAck(result.eTag(), result.checksumSHA256(), result.checksumTypeAsString());
+        } catch (RuntimeException failure) { throw new MultipartStorageException(); }
+    }
+
+    @Override
+    public MultipartStorage.CompletedObject inspectMultipartObject(StorageTarget target) {
+        requireMultipartTarget(target);
+        try {
+            var head = s3Client.headObject(HeadObjectRequest.builder().bucket(target.bucket()).key(target.key())
+                    .checksumMode(ChecksumMode.ENABLED)
+                    .overrideConfiguration(c -> c.apiCallTimeout(DELETE_TIMEOUT).apiCallAttemptTimeout(DELETE_ATTEMPT_TIMEOUT)).build());
+            return new MultipartStorage.CompletedObject(head.contentLength(), head.checksumSHA256(), head.eTag(), head.contentType(), head.metadata());
+        } catch (RuntimeException failure) {
+            // Includes absent objects. Absence never resolves a dispatched completion.
+            throw new MultipartStorageException();
+        }
     }
 
     private void requireMultipartTarget(StorageTarget target) {

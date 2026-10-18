@@ -3,8 +3,14 @@
 M2A adds the backend control plane for initiation, immutable part authorization and
 resume. It builds on [M1 identity/decision guards](multipart-upload-sessions.md)
 and the [M0 verified Garage contract](garage-multipart-capabilities.md). Synchronous
-uploads retain their existing protocol. Completion, abort/cancellation, READY,
-browser clients, reconciliation and autonomous cleanup remain unimplemented.
+uploads retain their existing protocol. At the M2A boundary, completion,
+abort/cancellation, READY, browser clients, reconciliation and autonomous cleanup
+were unimplemented.
+
+This is the M2A milestone record. Phase 3E subsequently adds
+[M3 safe completion, durable evidence, READY and explicit recovery](multipart-completion-recovery.md).
+M3 preserves M2A's part authorization and initiation contracts; cancellation,
+autonomous cleanup and browser UI remain outside both milestones.
 
 ## Authenticated endpoints
 

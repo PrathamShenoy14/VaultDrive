@@ -25,6 +25,19 @@ PostgreSQL and Garage do not share a transaction. Code must make cross-system fa
 
 ## Implemented components
 
+### Multipart completion and recovery — Phase 3E / M3
+
+V29 adds a frozen ordered completion manifest, immutable decision/upload identity,
+single-assignment dispatch identity and guarded progress, plus a separate immutable
+multipart receipt. Complete/recover APIs validate authoritative bounded Garage
+pages, freeze before dispatch, persist exact positive object evidence, then perform
+fresh receipt-backed READY finalization. Unknown dispatches never repeat Complete;
+explicit recovery uses at most one exact positive checksum/metadata HEAD, or no
+Garage call when a receipt already exists. No transaction or hierarchy lock spans
+network I/O. V25/V26 and multipart physical purge fences remain unchanged, including
+for READY multipart files. Abort/cancellation, autonomous cleanup and browser UI
+remain planned. See the [completion/evidence/recovery contract](multipart-completion-recovery.md).
+
 ### Multipart part transfers — Phase 3D / M2A
 
 V28 adds append-only initiation dispatch permission and immutable per-part exact
@@ -35,7 +48,8 @@ permission can initiate; INITIATING after uncertainty never grants another Creat
 Exact upload ID binding commits before OPEN/URLs. Garage I/O and signing run outside
 database transactions and hierarchy locks. Fixed M1 geometry, signed length/checksum,
 fresh ancestry checks and all legacy/purge/READY fences remain mandatory.
-Completion, abort, READY, browser and autonomous cleanup remain planned. Nominal
+M2A added no completion or READY; M3 extends it above. Abort, browser and autonomous
+cleanup remain planned. Nominal
 five-minute URL lifetimes do not resolve the measured deployment clock skew.
 See [endpoint, transaction and evidence contracts](multipart-part-transfers.md).
 
@@ -343,7 +357,7 @@ recovery](folder-purge-design.md#slice-6-bottom-up-metadata-removal-and-durable-
 - Historical admitted stale `UPLOADING`, `FAILED` and orphan cleanup remain unresolved. B2 implements never-admitted expiry; B3 recovers only freshly eligible UPLOADING with durable success receipts. PUT success before receipt commit remains unknown after a crash.
 - Audited legacy storage-identity recovery and verified quiescence for admitted
   uncertain upload writers; these files still block automatic folder finalization.
-- Sharing/permissions, versioning, presigned or resumable transfers, quotas, malware scanning, audit logs, observability, and client applications.
+- Sharing/permissions, versioning, client integration for direct/resumable transfers, quotas, malware scanning, audit logs, observability, and client applications.
 - Production deployment, backup/restore, retention, encryption/key-management, and service-level objectives.
 
 No benchmark, scale limit, or production-readiness claim has been established.

@@ -2,6 +2,25 @@
 
 This is a living explanation of lessons demonstrated by committed VaultDrive code. It is not a claim that every production concern is solved.
 
+## Completion evidence must survive lost acknowledgements and blocked destinations
+
+M3 freezes the exact validated Garage part manifest and chooses completion in one
+commit, then grants a single-assignment dispatch identity in another. A crash
+between those commits can resume; a crash after permission cannot send again.
+The progress revision can advance without changing V27's permanent decision.
+
+Garage 2.3.0 returns a composite SHA-256 over the ordered binary part hashes,
+without an AWS-style part-count suffix. Verified size/type, backend-set identity
+metadata and this checksum can recover a completed object only under the sole
+control-plane/nonreuse contract. HEAD absence and NoSuchUpload remain unknown.
+The composite is not a full-file hash, and an ETag is not substituted for either.
+
+An independent immutable receipt records positive facts even if folder trash/purge
+has won in the meantime. A separate fresh status/version CAS controls READY, so
+recovery after a receipt needs no Garage call. None of that establishes accepted
+writer termination or physical purge authority, including for multipart READY.
+See [M3 conditions, crash boundaries and evidence](multipart-completion-recovery.md).
+
 ## Dispatch permission and part authorization must survive retries
 
 M2A commits a permanent initiation dispatch record before Garage I/O. A crash
