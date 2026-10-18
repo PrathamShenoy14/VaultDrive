@@ -6,6 +6,9 @@ baseline: `5ea54e1`, including V26. This is a proposal, not implemented behavior
 Garage findings are source-level expectations unless explicitly verified by the
 separate [M0 capability investigation](garage-multipart-capabilities.md).
 
+Phase 3C now implements only the [M1 database/session foundation](multipart-upload-sessions.md).
+That contract supersedes the proposed M1 details below; later milestones remain planned.
+
 ## Decision
 
 GO for a bounded Garage capability-verification slice; NO-GO for enabling direct

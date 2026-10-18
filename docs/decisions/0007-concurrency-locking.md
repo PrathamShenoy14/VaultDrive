@@ -25,6 +25,15 @@ File restore and permanent-delete request acquire the shared hierarchy lock befo
 
 ## Consequences
 
+Phase 3C / M1 multipart reservation adds a key-specific two-integer advisory lock
+after shared owner hierarchy coordination, before creating file/allocation/session
+rows. Class `1297109833` and PostgreSQL `hashtext(owner + ':' + idempotencyKey)`
+serialize identical owner/key requests; collisions only add contention. Existing
+session transitions take shared hierarchy → fresh file FOR UPDATE → allocation
+FOR UPDATE → session FOR UPDATE, then validate original lifecycle and bounded
+ancestry using scalar queries. No existing-resource path acquires the reservation
+key lock. No storage I/O or dispatch occurs. See the [M1 contract](../multipart-upload-sessions.md).
+
 - All folder mutations for one owner still serialize; different owners normally proceed independently.
 - Shared mode coordinates file rename, move, and trash with folder structural operations while allowing unrelated file metadata mutations to overlap.
 - A rare derived-key collision can serialize different owners without weakening correctness.

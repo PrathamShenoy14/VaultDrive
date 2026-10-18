@@ -34,15 +34,24 @@ public class FileStorageIdentityService {
     /** Called after the new file flush, under the existing owner hierarchy lock. */
     @Transactional(propagation = Propagation.MANDATORY)
     public void reserve(StoredFile file) {
+        reserve(file, "SERVER_PUT");
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void reserveMultipart(StoredFile file) {
+        reserve(file, "DIRECT_MULTIPART");
+    }
+
+    private void reserve(StoredFile file, String protocol) {
         StorageTarget target = binding.target(file.getStorageKey());
         entityManager.createNativeQuery("""
                 INSERT INTO file_storage_objects(storage_key, file_id, owner_id,
-                    storage_namespace, endpoint, region, bucket)
-                VALUES (:key, :file, :owner, :namespace, :endpoint, :region, :bucket)
+                    storage_namespace, endpoint, region, bucket, upload_protocol)
+                VALUES (:key, :file, :owner, :namespace, :endpoint, :region, :bucket, :protocol)
                 """).setParameter("key", target.key()).setParameter("file", file.getId())
                 .setParameter("owner", file.getOwnerId()).setParameter("namespace", target.namespace())
                 .setParameter("endpoint", target.endpoint()).setParameter("region", target.region())
-                .setParameter("bucket", target.bucket()).executeUpdate();
+                .setParameter("bucket", target.bucket()).setParameter("protocol", protocol).executeUpdate();
     }
 
     /** One application write invocation per allocation, even after uncertain failure or file removal. */
@@ -63,7 +72,8 @@ public class FileStorageIdentityService {
         int changed = entityManager.createNativeQuery("""
                 UPDATE file_storage_objects SET write_started = TRUE,
                     admitted_file_version = :version, admitted_folder_id = :folder
-                WHERE storage_key = :key AND NOT write_started AND write_precluded_at IS NULL
+                WHERE storage_key = :key AND upload_protocol = 'SERVER_PUT'
+                    AND NOT write_started AND write_precluded_at IS NULL
                     AND file_id = :file AND owner_id = :owner
                     AND storage_namespace = :namespace AND endpoint = :endpoint
                     AND region = :region AND bucket = :bucket

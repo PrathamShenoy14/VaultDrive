@@ -73,7 +73,8 @@ public class StaleUploadExpiryTransactions {
                     WHEN f.status IN ('READY', 'FAILED') THEN 'ALREADY_RESOLVED'
                     WHEN f.id IS NULL OR f.status <> 'UPLOADING' OR f.version <> :version
                         OR NOT EXISTS (SELECT 1 FROM users WHERE id = f.owner_id)
-                        OR a.file_id IS NULL OR a.owner_id <> f.owner_id OR a.storage_key <> f.storage_key
+                        OR a.file_id IS NULL OR a.upload_protocol <> 'SERVER_PUT'
+                        OR a.owner_id <> f.owner_id OR a.storage_key <> f.storage_key
                         OR num_nonnulls(a.storage_namespace, a.endpoint, a.region, a.bucket) <> 4
                         OR a.reservation_expired_at IS NOT NULL
                         OR (f.folder_id IS NOT NULL AND NOT EXISTS (

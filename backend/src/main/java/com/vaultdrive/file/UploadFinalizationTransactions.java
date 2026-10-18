@@ -45,7 +45,7 @@ public class UploadFinalizationTransactions {
                     AND f.status = 'UPLOADING' AND f.version = a.admitted_file_version
                     AND f.folder_id IS NOT DISTINCT FROM a.admitted_folder_id
                     AND f.deleted_at IS NULL AND f.purge_requested_at IS NULL
-                    AND a.put_succeeded_at IS NULL
+                    AND a.put_succeeded_at IS NULL AND a.upload_protocol = 'SERVER_PUT'
                 """).setParameter("id", original.getId()).executeUpdate();
         if (changed != 1) { throw new IllegalStateException("Upload receipt metadata changed"); }
     }
@@ -62,6 +62,7 @@ public class UploadFinalizationTransactions {
         return (Boolean) em.createNativeQuery("""
                 SELECT EXISTS (SELECT 1 FROM file_storage_objects a WHERE a.file_id = :id
                     AND a.owner_id = :owner AND a.storage_key = :key AND a.write_started
+                    AND a.upload_protocol = 'SERVER_PUT'
                     AND a.admitted_file_version = :version
                     AND a.admitted_folder_id IS NOT DISTINCT FROM cast(:folder AS uuid)
                     AND num_nonnulls(a.storage_namespace, a.endpoint, a.region, a.bucket) = 4
@@ -107,7 +108,7 @@ public class UploadFinalizationTransactions {
                     WHERE NOT a.cycle AND a.depth < 128
                 )
                 SELECT CASE
-                    WHEN a.put_succeeded_at IS NULL THEN 'NO_RECEIPT'
+                    WHEN a.upload_protocol <> 'SERVER_PUT' OR a.put_succeeded_at IS NULL THEN 'NO_RECEIPT'
                     WHEN f.id IS NULL OR f.owner_id <> a.owner_id OR f.storage_key <> a.storage_key
                         OR NOT EXISTS (SELECT 1 FROM users WHERE id = a.owner_id)
                         OR NOT a.write_started OR a.admitted_file_version IS NULL

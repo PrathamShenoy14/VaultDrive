@@ -178,7 +178,9 @@ Exit criteria: correctness tests remain green and measured contention improves f
 
 - [x] Phase 3B / M0: bounded live Garage 2.3.0 multipart capability characterization;
   [matrix, unsupported races and browser prerequisites](garage-multipart-capabilities.md).
-- [ ] M1–M3 direct-upload sessions, resumable transfer and receipt-based completion;
+- [x] Phase 3C / M1: durable session/allocation identity, idempotent reservation and
+  permanent decision guards; [implemented contract](multipart-upload-sessions.md).
+- [ ] M2–M3 resumable transfer and receipt-based completion;
   [proposed boundaries](direct-upload-architecture.md). M0 does not implement them
   or authorize automatic progression. Browser release remains gated.
 

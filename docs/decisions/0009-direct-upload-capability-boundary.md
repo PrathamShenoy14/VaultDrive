@@ -1,6 +1,6 @@
 # ADR-0009: Multipart capability boundary before direct-upload implementation
 
-- Status: M0 characterization accepted; direct-upload implementation remains planned
+- Status: M0 constraints accepted; M1 database foundation implemented, transfer remains planned
 - Date: 2026-10-18
 - Evidence: [version-pinned M0 matrix](../garage-multipart-capabilities.md)
 - Proposal: [Phase 3A architecture](../direct-upload-architecture.md)
@@ -21,6 +21,12 @@ this decision. Explicit unknown outcomes remain retained. No worker, job, endpoi
 migration or production behavior is introduced by M0.
 
 ## Consequences and limits
+
+Phase 3C implements the [M1 session foundation](../multipart-upload-sessions.md):
+immutable allocation protocol, idempotent reservation and permanent decision
+guards. It introduces no multipart storage calls or dispatch authority and rejects
+multipart READY/removal until protocol-specific evidence is implemented. All M0
+constraints below remain mandatory for later milestones.
 
 Accepted part requests can return 200 after complete, abort or URL expiry. The
 tested late requests did not change completed bytes, supporting bounded multipart

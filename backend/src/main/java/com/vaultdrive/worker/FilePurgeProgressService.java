@@ -124,7 +124,7 @@ public class FilePurgeProgressService {
                       ON a.file_id = t.file_id AND a.owner_id = t.owner_id
                      AND a.storage_key = t.storage_key AND a.storage_namespace = t.storage_namespace
                      AND a.endpoint = t.endpoint AND a.region = t.region AND a.bucket = t.bucket
-                    WHERE t.event_id = :event AND a.write_started)
+                    WHERE t.event_id = :event AND a.write_started AND a.upload_protocol = 'SERVER_PUT')
                 """).setParameter("event", target.event()).getSingleResult();
         if (!verified) { throw new IllegalStateException("Purge allocation does not match target"); }
     }

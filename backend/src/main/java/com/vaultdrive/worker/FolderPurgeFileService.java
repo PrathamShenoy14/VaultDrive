@@ -188,6 +188,11 @@ public class FolderPurgeFileService {
             """;
 
     private Prepared verify(UUID file, ClaimedJob claim, boolean create) {
+        if ((Boolean) em.createNativeQuery("SELECT EXISTS (SELECT 1 FROM file_storage_objects "
+                + "WHERE file_id = :file AND upload_protocol = 'DIRECT_MULTIPART')")
+                .setParameter("file", file).getSingleResult()) {
+            throw new BlockedFile("UNSAFE_WRITER");
+        }
         List<?> allocations = em.createNativeQuery("""
                 SELECT a.storage_namespace, a.endpoint, a.region, a.bucket, a.storage_key, a.write_started,
                     m.file_status, m.purge_requested_at, m.standalone_event_id

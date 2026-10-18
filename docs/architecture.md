@@ -25,6 +25,19 @@ PostgreSQL and Garage do not share a transaction. Code must make cross-system fa
 
 ## Implemented components
 
+### Multipart session foundation — Phase 3C / M1
+
+V27 adds immutable SERVER_PUT/DIRECT_MULTIPART allocation identity and retained
+owner-scoped idempotent sessions. Internal PostgreSQL-only reservation atomically
+creates UPLOADING metadata/allocation/session with fixed geometry and database
+expiry. Hierarchy → file → allocation → session coordination protects permanent
+initiation and mutually exclusive completion/abandonment decisions and monotonic
+revision. OPEN requires a durable upload ID; M1 performs no Garage operation.
+Database guards exclude multipart from V25/V26/B2 and all existing READY/removal
+proofs; unfinished sessions block purge even before initiation. No endpoint,
+dispatcher, part table or browser feature is added. See the
+[M1 contract and limitations](multipart-upload-sessions.md).
+
 ### Garage multipart characterization — Phase 3B / M0
 
 Test-only Garage 2.3.0 experiments now characterize presigned UploadPart,
@@ -109,7 +122,7 @@ enablement is added. See [eligibility, state machine, invocation and limits](kno
 ### Platform and persistence — Committed
 
 - Java 21, Spring Boot 4.1.1, Maven wrapper, Spring MVC, Spring Data JPA, validation, and Spring Security.
-- PostgreSQL schema managed by append-only Flyway migrations V1-V26. Hibernate validates the schema (`ddl-auto=validate`) rather than creating it.
+- PostgreSQL schema managed by append-only Flyway migrations V1-V27. Hibernate validates the schema (`ddl-auto=validate`) rather than creating it.
 - Configuration comes from properties and environment variables. Secrets are not intended for source control.
 
 ### Authentication and security — Committed

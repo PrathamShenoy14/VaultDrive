@@ -2,6 +2,23 @@
 
 This is a living explanation of lessons demonstrated by committed VaultDrive code. It is not a claim that every production concern is solved.
 
+## Protocol identity must precede new evidence
+
+M1 permanently labels allocations before multipart storage work exists. A reserved
+multipart session has not started writing, but that does not make it a synchronous
+never-admitted reservation: its future capabilities need different cleanup proof.
+Database protocol guards prevent legacy admission, receipts, expiry and purge from
+silently adopting the new allocation. Deferred pairing constraints allow atomic
+file/allocation/session creation while rejecting orphan allocations at commit.
+
+Idempotency returns the original identity and deadline, never renewed authority.
+Separate immutable initiation and mutually exclusive decision UUIDs preserve the
+first outcome across retries; state revision advances only on actual transitions.
+Neither an abandonment decision nor OPEN with a durable upload ID proves storage
+completion or writer termination. M1 therefore rejects all multipart READY and
+removal paths until later protocol-specific evidence exists. See the
+[session contract and test boundary](multipart-upload-sessions.md).
+
 ## Multipart capability identity is separate from request termination
 
 M0 observed accepted UploadPart requests returning 200 after complete, abort and
