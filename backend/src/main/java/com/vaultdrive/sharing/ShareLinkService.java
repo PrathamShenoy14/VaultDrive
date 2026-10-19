@@ -17,10 +17,12 @@ import java.util.UUID;
 public class ShareLinkService {
     private final ResourceAccessRepository access;
     private final HierarchyCoordinator hierarchy;
+    private final PermissionActivityService activity;
 
-    public ShareLinkService(ResourceAccessRepository access, HierarchyCoordinator hierarchy) {
+    public ShareLinkService(ResourceAccessRepository access, HierarchyCoordinator hierarchy, PermissionActivityService activity) {
         this.access = access;
         this.hierarchy = hierarchy;
+        this.activity = activity;
     }
 
     public record Link(UUID id, Instant createdAt, Instant expiresAt, Instant revokedAt, long version) {}
@@ -48,6 +50,8 @@ public class ShareLinkService {
                 """).setParameter("id", id).setParameter("owner", actor).setParameter("file", file)
                 .setParameter("hash", ShareLinkTokens.hash(secret)).setParameter("created", now)
                 .setParameter("expiry", expiry).executeUpdate();
+        activity.append(actor, false, resource, PermissionActivityType.LINK_CREATED, id, 0,
+                null, null, null, null, expiry);
         return new CreatedLink(new Link(id, now, expiry, null, 0), secret);
     }
 
@@ -66,11 +70,17 @@ public class ShareLinkService {
     }
 
     public void revoke(UUID actor, UUID file, UUID link) {
-        owner(actor, file, true);
-        access.query("""
+        ResourceAccess resource = owner(actor, file, true);
+        List<?> rows = access.query("""
                 UPDATE share_links SET revoked_at = statement_timestamp(), version = version + 1
                 WHERE id = :id AND file_id = :file AND revoked_at IS NULL
-                """).setParameter("id", link).setParameter("file", file).executeUpdate();
+                RETURNING version, expires_at
+                """).setParameter("id", link).setParameter("file", file).getResultList();
+        if (!rows.isEmpty()) {
+            Object[] r = (Object[]) rows.getFirst();
+            activity.append(actor, false, resource, PermissionActivityType.LINK_REVOKED, link,
+                    ((Number) r[0]).longValue(), null, null, null, null, ResourceAccessRepository.instant(r[1]));
+        }
     }
 
     @Transactional(readOnly = true)

@@ -25,6 +25,15 @@ File restore and permanent-delete request acquire the shared hierarchy lock befo
 
 ## Consequences
 
+Sharing M5 appends immutable permission activity and an outbox pointer after each
+successful source mutation under the existing exclusive owner hierarchy lock.
+Fresh resource names and subject role/version snapshots precede insertion in the
+same transaction. No-op/stale/failed requests append nothing; outer rollback removes
+mutation, activity and outbox. Historical owner-only reads filter immutable
+ownership in a single statement before count/pagination, without reading live
+resource/ancestor state or granting current access. No new lock class or lock
+order change is introduced. See [M5 races and verification](../sharing-m5.md).
+
 Sharing M1 adds exclusive owner hierarchy coordination for grant creation, role
 changes and revocation, followed by fresh scalar resource/ancestry/grant reads.
 Owner grant listing and resource authorization use short shared hierarchy

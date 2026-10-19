@@ -44,6 +44,22 @@ public class RabbitOutboxTransport implements OutboxTransport {
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalStateException("RabbitMQ I/O must run outside a database transaction");
         }
+        String queue;
+        String routingKey;
+        switch (event.eventType()) {
+            case "FILE_PURGE_REQUESTED", "FOLDER_PURGE_REQUESTED" -> {
+                queue = properties.queue();
+                routingKey = properties.routingKey();
+            }
+            case "PERMISSION_ACTIVITY_RECORDED" -> {
+                queue = properties.permissionQueue();
+                routingKey = properties.permissionRoutingKey();
+            }
+            default -> { return PublishResult.SERIALIZATION_ERROR; }
+        }
+        if (!properties.isRoutingDistinct()) {
+            throw new IllegalArgumentException("Permission events require isolated routing");
+        }
         byte[] body;
         try {
             body = mapper.writeValueAsBytes(Map.of(
@@ -59,9 +75,9 @@ public class RabbitOutboxTransport implements OutboxTransport {
             // Idempotent declarations also repair a removed topology. They
             // happen after the claim commits, never inside a DB transaction.
             admin.declareExchange(new DirectExchange(properties.exchange(), true, false));
-            admin.declareQueue(QueueBuilder.durable(properties.queue()).quorum().build());
-            admin.declareBinding(new Binding(properties.queue(), Binding.DestinationType.QUEUE,
-                    properties.exchange(), properties.routingKey(), null));
+            admin.declareQueue(QueueBuilder.durable(queue).quorum().build());
+            admin.declareBinding(new Binding(queue, Binding.DestinationType.QUEUE,
+                    properties.exchange(), routingKey, null));
             MessageProperties messageProperties = new MessageProperties();
             messageProperties.setMessageId(event.id().toString());
             messageProperties.setType(event.eventType());
@@ -69,7 +85,7 @@ public class RabbitOutboxTransport implements OutboxTransport {
             messageProperties.setContentEncoding("UTF-8");
             messageProperties.setDeliveryMode(MessageDeliveryMode.PERSISTENT);
             CorrelationData correlation = new CorrelationData(event.claimToken().toString());
-            template.send(properties.exchange(), properties.routingKey(),
+            template.send(properties.exchange(), routingKey,
                     new Message(body, messageProperties), correlation);
             CorrelationData.Confirm confirm = correlation.getFuture()
                     .get(properties.confirmTimeout().toMillis(), TimeUnit.MILLISECONDS);

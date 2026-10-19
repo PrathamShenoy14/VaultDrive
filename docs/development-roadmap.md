@@ -179,7 +179,9 @@ Exit criteria: correctness tests remain green and measured contention improves f
   [M3 contract](sharing-m3.md).
 - [x] Sharing M4: secure expiring/revocable file-only Viewer links and backend streams;
   [M4 contract](sharing-m4.md).
-- [ ] Sharing M5-M6: permission activity and notifications.
+- [x] Sharing M5: immutable permission activity, owner-only paginated history,
+  atomic outbox persistence and isolated routing; [M5 contract](sharing-m5.md).
+- [ ] Sharing M6: in-app sharing notifications.
 - Threat-model enumeration, confused-deputy, and link-token risks.
 
 ## Phase 6 — Transfer scalability

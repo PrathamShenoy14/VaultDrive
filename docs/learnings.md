@@ -619,3 +619,20 @@ streaming makes the download permit cover storage open through response closure,
 including client disconnect, without queueing async work. These are local capacity
 bounds, with no measured throughput or distributed fairness claim. See
 [the M4 API, security and verification contract](sharing-m4.md).
+
+## Sharing M5: historical facts are separate from current authority
+
+An append-only activity row needs immutable name, recipient and direct-role
+snapshots, plus a subject revision that distinguishes real changes from no-ops
+and stale retries. Revocation gets a terminal revision; regrant has a fresh UUID.
+Retaining history without resource foreign keys lets deletion preserve useful
+facts, but history must never feed the permission resolver. Owner-only SQL scope
+before count/pagination prevents a recipient feed from exposing historical private
+ancestors or other recipients.
+
+Mutation, activity and outbox must share one transaction even when the event insert
+has already flushed. Real PostgreSQL constraint-failure and outer-rollback tests
+verify this boundary. Broker retries replay the same activity pointer; they do not
+record another business mutation. Reusing the publisher also requires a separate
+queue/key and excluding permission pointers from purge missing-job scans. A future
+notification consumer is a separate milestone. See [the M5 contract](sharing-m5.md).

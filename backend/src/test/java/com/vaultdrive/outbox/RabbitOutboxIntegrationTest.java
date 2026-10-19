@@ -79,7 +79,8 @@ class RabbitOutboxIntegrationTest {
         properties = new OutboxPublisherProperties(false, 3, 20, Duration.ofSeconds(30),
                 Duration.ofSeconds(10), Duration.ofSeconds(1), Duration.ofSeconds(2),
                 "vaultdrive.outbox.events.test." + suffix,
-                "vaultdrive.purge.requests.test." + suffix, "purge.requested");
+                "vaultdrive.purge.requests.test." + suffix, "purge.requested",
+                "vaultdrive.permission.activity.test." + suffix, "permission.activity");
     }
 
     @AfterEach
@@ -89,6 +90,7 @@ class RabbitOutboxIntegrationTest {
             try {
                 if (properties != null) {
                     admin.deleteQueue(properties.queue());
+                    admin.deleteQueue(properties.permissionQueue());
                     admin.deleteExchange(properties.exchange());
                 }
             } finally {
@@ -148,6 +150,50 @@ class RabbitOutboxIntegrationTest {
         assertThat(row.getDeliveryStatus()).isEqualTo(OutboxDeliveryStatus.PENDING);
         assertThat(row.getPublishedAt()).isNull();
         assertThat(row.getLastFailureCode()).isEqualTo("RETURNED");
+    }
+
+    @Test
+    void permissionReplayUsesDedicatedQueueAndRetainsOneImmutableActivity() {
+        admin.declareExchange(new org.springframework.amqp.core.DirectExchange(properties.exchange(), true, false));
+        admin.declareQueue(org.springframework.amqp.core.QueueBuilder.durable(properties.queue()).quorum().build());
+        admin.declareBinding(new org.springframework.amqp.core.Binding(properties.queue(),
+                org.springframework.amqp.core.Binding.DestinationType.QUEUE, properties.exchange(), properties.routingKey(), null));
+        UUID id = UUID.randomUUID();
+        new TransactionTemplate(transactionManager).executeWithoutResult(s -> {
+            entityManager.createNativeQuery("""
+                    INSERT INTO permission_activity_events(id, actor_id, actor_display_name, owner_id,
+                        resource_type, resource_id, resource_name, event_type, subject_id, subject_version,
+                        recipient_id, recipient_email, new_role)
+                    VALUES (:id, :owner, 'Test actor', :owner, 'FILE', :resource, 'snapshot.txt',
+                        'GRANT_CREATED', :subject, 0, :recipient, 'synthetic@example.test', 'VIEWER')
+                    """).setParameter("id", id).setParameter("owner", UUID.randomUUID())
+                    .setParameter("resource", UUID.randomUUID()).setParameter("subject", UUID.randomUUID())
+                    .setParameter("recipient", UUID.randomUUID()).executeUpdate();
+            Instant due = ((Instant) entityManager.createNativeQuery("SELECT clock_timestamp()", Instant.class)
+                    .getSingleResult()).minusSeconds(60);
+            writer.append(OutboxEvent.permissionActivityRecorded(id, due));
+        });
+        eventIds.add(id);
+        ClaimedOutboxEvent beforeCrash = claims.claimNext().orElseThrow();
+        assertThat(beforeCrash.id()).isEqualTo(id);
+        assertThat(transport(admin).publish(beforeCrash)).isEqualTo(PublishResult.CONFIRMED);
+        new TransactionTemplate(transactionManager).executeWithoutResult(s -> entityManager.createNativeQuery("""
+                UPDATE outbox_events SET claim_expires_at = clock_timestamp() - interval '1 second',
+                    next_attempt_at = clock_timestamp() - interval '1 second' WHERE id = :id
+                """).setParameter("id", id).executeUpdate());
+        new OutboxPublisher(claims, transport(admin)).publishNext();
+        assertEnvelope(template.receive(properties.permissionQueue(), 5000), id);
+        assertEnvelope(template.receive(properties.permissionQueue(), 5000), id);
+        assertThat(template.receive(properties.queue())).isNull();
+        assertThat(template.receive(properties.permissionQueue())).isNull();
+        assertThat(repository.findById(id).orElseThrow().getAttemptCount()).isEqualTo(2);
+        assertThat(claims.confirmed(beforeCrash)).isFalse();
+        new TransactionTemplate(transactionManager).executeWithoutResult(s -> {
+            assertThat(((Number) entityManager.createNativeQuery("SELECT count(*) FROM permission_activity_events WHERE id = :id")
+                    .setParameter("id", id).getSingleResult()).intValue()).isEqualTo(1);
+            assertThat(((Number) entityManager.createNativeQuery("SELECT count(*) FROM background_jobs WHERE id = :id")
+                    .setParameter("id", id).getSingleResult()).intValue()).isZero();
+        });
     }
 
     private RabbitOutboxTransport transport(RabbitAdmin rabbitAdmin) {

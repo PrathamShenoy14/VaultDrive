@@ -42,6 +42,7 @@ public class MissingJobReconciliationTransactions {
         var query = em.createNativeQuery("""
                 SELECT e.published_at, e.id FROM outbox_events e
                 WHERE e.delivery_status = 'PUBLISHED'
+                  AND e.event_type <> 'PERMISSION_ACTIVITY_RECORDED'
                   AND e.published_at <= clock_timestamp() - :delay * interval '1 millisecond'
                   AND NOT EXISTS (SELECT 1 FROM background_jobs j WHERE j.id = e.id)
                 """ + (after == null ? "" : " AND (e.published_at, e.id) > (:published, :id)")
@@ -68,6 +69,7 @@ public class MissingJobReconciliationTransactions {
                     'payloadVersion', e.payload_version, 'createdAt', e.created_at,
                     'payload', e.payload)::text END
                 FROM outbox_events e WHERE e.id = :id AND e.delivery_status = 'PUBLISHED'
+                  AND e.event_type <> 'PERMISSION_ACTIVITY_RECORDED'
                   AND e.published_at <= clock_timestamp() - :delay * interval '1 millisecond'
                   AND NOT EXISTS (SELECT 1 FROM notification_quarantine q WHERE q.event_id = e.id)
                 """).setParameter("id", id).setParameter("delay", properties.eligibilityDelay().toMillis())

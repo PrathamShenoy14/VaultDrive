@@ -53,7 +53,7 @@ file entities are refreshed before authorization and retain optimistic version
 checks against concurrent moves/writes. Folder writes refresh the managed target
 under exclusive coordination. Grant revocation/downgrade serializes with mutations.
 M2 requires no migration, storage identity or multipart lifecycle change. M4 below
-adds links; activity and notifications remain planned.
+adds links; M5 below adds activity and notifications remain planned.
 See [M2 behavior, races and verification limits](sharing-m2.md).
 
 ### Sharing M3: delegated multipart uploads
@@ -81,6 +81,22 @@ Public rate/concurrency admission uses fixed-memory per-process bounds. Storage 
 synchronous streaming occur after authorization commits; admitted streams may finish
 after revocation. No storage, multipart or purge protocol changes are introduced.
 See [API, security, admission and verification limits](sharing-m4.md).
+
+### Sharing M5: permission activity history
+
+V35 adds immutable source-level permission snapshots for grant creation, role
+change/revocation and file-link creation/revocation. Mutation, activity and a v1
+outbox pointer commit atomically under the existing exclusive owner hierarchy
+lock. No-ops/stale or failed requests add no activity. Historical names, direct
+roles and recipient identity survive later changes and resource deletion.
+
+The JWT history feed filters immutable ownership before count/pagination, with
+optional exact resource/type/event filters and deterministic timestamp/UUID order.
+Collaborators and link holders see no history for another owner's resources;
+history supplies no current resource authority. No ancestry or link secrets enter
+events. Permission outbox events use a separate quorum queue/routing key and are
+excluded from purge recovery. M6 notifications remain planned; no consumer or
+frontend is added. See [schema, API, visibility and verification](sharing-m5.md).
 
 ### Multipart purge compatibility — M5
 
@@ -439,7 +455,7 @@ recovery](folder-purge-design.md#slice-6-bottom-up-metadata-removal-and-durable-
 - Historical admitted stale `UPLOADING`, `FAILED` and orphan cleanup remain unresolved. B2 implements never-admitted expiry; B3 recovers only freshly eligible UPLOADING with durable success receipts. PUT success before receipt commit remains unknown after a crash.
 - Audited legacy storage-identity recovery and verified quiescence for admitted
   uncertain upload writers; these files still block automatic folder finalization.
-- Sharing M5-M6 (activity and notifications), versioning, client integration for direct/resumable transfers, quotas, malware scanning, audit logs, observability, and client applications.
+- Sharing M6 (notifications), versioning, client integration for direct/resumable transfers, quotas, malware scanning, general audit logs, observability, and client applications.
 - Production deployment, backup/restore, retention, encryption/key-management, and service-level objectives.
 
 No benchmark, scale limit, or production-readiness claim has been established.

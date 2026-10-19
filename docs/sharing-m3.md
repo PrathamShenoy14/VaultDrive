@@ -3,7 +3,7 @@
 Implemented under the [approved sharing design](sharing-permissions-design.md).
 This extends [M1 grants](sharing-m1.md), [M2 Editor mutations](sharing-m2.md)
 and the existing multipart lifecycle. [M4](sharing-m4.md) subsequently adds secure
-file Viewer links; sharing M5-M6 remain planned.
+file Viewer links; [Sharing M5](sharing-m5.md) adds permission activity. M6 remains planned.
 
 ## API and ownership
 

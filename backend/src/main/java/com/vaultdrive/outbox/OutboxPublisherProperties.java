@@ -23,8 +23,16 @@ public record OutboxPublisherProperties(
         @DefaultValue("60s") @NotNull Duration maxBackoff,
         @DefaultValue("vaultdrive.outbox.events") @NotBlank String exchange,
         @DefaultValue("vaultdrive.purge.requests") @NotBlank String queue,
-        @DefaultValue("purge.requested") @NotBlank String routingKey
+        @DefaultValue("purge.requested") @NotBlank String routingKey,
+        @DefaultValue("vaultdrive.permission.activity") @NotBlank String permissionQueue,
+        @DefaultValue("permission.activity") @NotBlank String permissionRoutingKey
 ) {
+    @AssertTrue(message = "Permission events require a separate queue and routing key")
+    public boolean isRoutingDistinct() {
+        return queue != null && routingKey != null && !queue.equals(permissionQueue)
+                && !routingKey.equals(permissionRoutingKey);
+    }
+
     @AssertTrue(message = "Publisher durations must be positive, at most one day, lease greater than confirm timeout, and max backoff at least initial backoff")
     public boolean isTimingValid() {
         return valid(lease) && valid(confirmTimeout) && valid(initialBackoff) && valid(maxBackoff)

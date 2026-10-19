@@ -327,6 +327,15 @@ class MissingJobReconciliationIntegrationTest {
         assertThat(repository.count()).isZero();
     }
 
+    @Test void permissionActivityIsExcludedFromPurgeRecoveryBeforePagination() {
+        var event = remember(outbox.saveAndFlush(OutboxEvent.permissionActivityRecorded(UUID.randomUUID(), java.time.Instant.now())));
+        publish(event);
+        assertThat(recovery.scan(null, 1)).isEmpty();
+        assertThat(recovery.ingest(event.getId())).isEqualTo(MissingJobReconciliationTransactions.Outcome.SKIPPED);
+        assertThat(repository.count()).isZero();
+        verifyNoInteractions(storage);
+    }
+
     @Test void recoveredJobDoesNotDeleteGarageBytesOrChangeProof() {
         var uploaded = files.uploadFile(owner, null,
                 new MockMultipartFile("file", "disposable.txt", "text/plain", "recovery-control".getBytes()));

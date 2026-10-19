@@ -117,6 +117,13 @@ public class OutboxEvent {
         return id;
     }
 
+    public static OutboxEvent permissionActivityRecorded(UUID activityId, Instant occurredAt) {
+        OutboxEvent event = new OutboxEvent("PERMISSION_ACTIVITY_RECORDED", "PERMISSION_ACTIVITY", activityId,
+                Map.of("activityEventId", activityId.toString()), occurredAt);
+        event.id = activityId;
+        return event;
+    }
+
     public String getEventType() {
         return eventType;
     }

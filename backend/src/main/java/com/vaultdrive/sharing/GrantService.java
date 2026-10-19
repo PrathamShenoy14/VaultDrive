@@ -20,11 +20,14 @@ public class GrantService {
     private final ResourceAccessRepository access;
     private final HierarchyCoordinator hierarchy;
     private final UserRepository users;
+    private final PermissionActivityService activity;
 
-    public GrantService(ResourceAccessRepository access, HierarchyCoordinator hierarchy, UserRepository users) {
+    public GrantService(ResourceAccessRepository access, HierarchyCoordinator hierarchy, UserRepository users,
+                        PermissionActivityService activity) {
         this.access = access;
         this.hierarchy = hierarchy;
         this.users = users;
+        this.activity = activity;
     }
 
     public record Grant(UUID id, UUID fileId, UUID folderId, UUID granteeUserId, String email,
@@ -48,6 +51,8 @@ public class GrantService {
                 .setParameter("file", folder ? null : target).setParameter("folder", folder ? target : null)
                 .setParameter("recipient", recipient.getId()).setParameter("role", role.name()).executeUpdate();
         if (inserted == 0) throw new ResponseStatusException(HttpStatus.CONFLICT, "Direct grant already exists");
+        activity.append(actor, folder, resource, PermissionActivityType.GRANT_CREATED, id, 0,
+                recipient.getId(), recipient.getEmail(), null, role, null);
         return direct(folder, target, id);
     }
 
@@ -80,14 +85,24 @@ public class GrantService {
                 """).setParameter("role", role.name()).setParameter("id", grantId)
                 .setParameter("version", version).executeUpdate();
         if (updated != 1) throw stale();
+        activity.append(actor, folder, resource, PermissionActivityType.GRANT_ROLE_CHANGED, grantId, version + 1,
+                previous.granteeUserId(), previous.email(), previous.role(), role, null);
         return direct(folder, target, grantId);
     }
 
     public void revoke(UUID actor, boolean folder, UUID target, UUID grantId) {
-        owner(actor, folder, target, true);
-        access.query("DELETE FROM resource_grants WHERE id = :id AND "
-                + (folder ? "folder_id" : "file_id") + " = :target")
-                .setParameter("id", grantId).setParameter("target", target).executeUpdate();
+        ResourceAccess resource = owner(actor, folder, target, true);
+        List<?> rows = access.query("""
+                DELETE FROM resource_grants g USING users u WHERE g.id = :id
+                AND u.id = g.grantee_user_id AND
+                """ + (folder ? "g.folder_id" : "g.file_id") + " = :target RETURNING g.grantee_user_id, u.email, g.role, g.version")
+                .setParameter("id", grantId).setParameter("target", target).getResultList();
+        if (!rows.isEmpty()) {
+            Object[] r = (Object[]) rows.getFirst();
+            activity.append(actor, folder, resource, PermissionActivityType.GRANT_REVOKED, grantId,
+                    ((Number) r[3]).longValue() + 1, (UUID) r[0], (String) r[1],
+                    ResourceRole.valueOf((String) r[2]), null, null);
+        }
     }
 
     private ResourceAccess owner(UUID actor, boolean folder, UUID target, boolean mutation) {

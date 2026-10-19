@@ -42,7 +42,7 @@ class OutboxPublisherTest {
     @Test
     void exponentialBackoffCapsWithoutOverflow() {
         var properties = new OutboxPublisherProperties(false, 10, 20, Duration.ofSeconds(30),
-                Duration.ofSeconds(10), Duration.ofSeconds(1), Duration.ofSeconds(60), "e", "q", "r");
+                Duration.ofSeconds(10), Duration.ofSeconds(1), Duration.ofSeconds(60), "e", "q", "r", "pq", "pr");
         assertThat(properties.backoff(1)).isEqualTo(Duration.ofSeconds(1));
         assertThat(properties.backoff(2)).isEqualTo(Duration.ofSeconds(2));
         assertThat(properties.backoff(1000)).isEqualTo(Duration.ofSeconds(60));

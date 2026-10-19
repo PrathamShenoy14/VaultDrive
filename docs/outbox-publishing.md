@@ -8,6 +8,17 @@ Phase 2B separately adds an opt-in [notification consumer](purge-consumer.md) fo
 job creation. `PURGE_CONSUMER_ENABLED` defaults to false independently of publisher
 enablement. Consumer quarantine uses PostgreSQL and changes no publisher topology.
 
+Sharing M5 adds atomic [permission activity pointers](sharing-m5.md) using the
+existing publisher. `PERMISSION_ACTIVITY_RECORDED` routes to durable quorum queue
+`vaultdrive.permission.activity` with key `permission.activity` on the existing
+exchange. Publisher properties `permission-queue` and `permission-routing-key`
+override these defaults and must differ from purge destinations. Only the two
+purge types use the purge route; unsupported types fail with `SERIALIZATION_ERROR`.
+Purge missing-job recovery excludes permission events. No permission consumer or
+user notification is implemented; enabled publication retains these messages in
+their separate queue for M6. Test topology uses UUID-suffixed permission queues
+only in `vaultdrive_outbox_test` and removes only those test queues afterward.
+
 ## Windows connectivity and private configuration
 
 Keep the [Phase 1A SSH tunnel](rabbitmq-development.md) running before enabling publication or executing broker tests:
@@ -20,7 +31,7 @@ AMQP is Windows `127.0.0.1:5672`, forwarded to VM loopback through the SSH alias
 
 Supply `RABBITMQ_USERNAME` and `RABBITMQ_PASSWORD` through the ignored `backend/.env.local.ps1` or equivalent process environment. Use the VM development credentials privately; never paste them into tracked files, command arguments, URLs, logs, or this documentation. `RABBITMQ_HOST`, `RABBITMQ_PORT`, and `RABBITMQ_VHOST` override the default localhost/5672/`/` connection. The sanitized example contains placeholders only.
 
-`OUTBOX_PUBLISHER_ENABLED` defaults to `false`. Explicitly enable it only after approving declarations of the durable exchange `vaultdrive.outbox.events`, quorum queue `vaultdrive.purge.requests`, and `purge.requested` binding in the selected vhost. Enabling the app also permits publishing pending notifications there; it is separate from creating infrastructure-only containers. Phase 1C verification uses isolated test topology and does not enable the running development API or declare these default objects in `/`.
+`OUTBOX_PUBLISHER_ENABLED` defaults to `false`. Explicitly enable it only after approving declarations of the durable exchange `vaultdrive.outbox.events`, quorum queue `vaultdrive.purge.requests` with `purge.requested`, and M5 quorum queue `vaultdrive.permission.activity` with `permission.activity` in the selected vhost. Enabling the app also permits publishing pending notifications there; it is separate from creating infrastructure-only containers. Verification uses isolated test topology and does not enable the running development API or declare these default objects in `/`.
 
 The transport requires correlated confirms, publisher returns, and mandatory sends. Application properties configure those settings and disable in-memory RabbitTemplate retries; durable retry scheduling belongs to PostgreSQL. Connection timeout is three seconds and channel RPC timeout five seconds; confirm wait is ten seconds.
 
@@ -46,6 +57,7 @@ These are component bounds, not a single wall-clock deadline for the whole publi
 | `initial-backoff` / `max-backoff` | `1s` / `60s` | Exponential retry delay, capped at maximum |
 | `poll-delay` | `5s` | Delay after one poll finishes |
 | `exchange` / `queue` / `routing-key` | See above | Approved durable destination topology |
+| `permission-queue` / `permission-routing-key` | `vaultdrive.permission.activity` / `permission.activity` | Separate M5 destination; no consumer until M6 |
 
 Known failures schedule the next retry from the failure-recording database time. Claims also persist an abandoned-attempt retry deadline equal to lease expiration plus backoff. Recovery waits for both expiration and that retry time. Late success/failure updates are rejected after expiration or token replacement. Stable event IDs allow future consumers to recognize replay; lease tokens do not fence RabbitMQ sends, so paused publishers may overlap after expiry.
 

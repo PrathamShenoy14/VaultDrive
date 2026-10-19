@@ -34,7 +34,8 @@ class RabbitOutboxTransportTest {
     private final ObjectMapper mapper = new ObjectMapper();
     private final OutboxPublisherProperties properties = new OutboxPublisherProperties(
             false, 10, 20, Duration.ofSeconds(30), Duration.ofMillis(50),
-            Duration.ofSeconds(1), Duration.ofSeconds(60), "test.exchange", "test.queue", "test.route"
+            Duration.ofSeconds(1), Duration.ofSeconds(60), "test.exchange", "test.queue", "test.route",
+            "test.permission.queue", "test.permission.route"
     );
     private RabbitOutboxTransport transport;
     private ClaimedOutboxEvent event;
@@ -82,6 +83,29 @@ class RabbitOutboxTransportTest {
     void negativeConfirmIsFailure() {
         complete(false, false);
         assertThat(transport.publish(event)).isEqualTo(PublishResult.NACK);
+    }
+
+    @Test
+    void permissionActivityUsesOnlyItsDedicatedQueueAndRoutingKey() {
+        event = ClaimedOutboxEvent.from(OutboxEvent.permissionActivityRecorded(UUID.randomUUID(), Instant.now()));
+        event = new ClaimedOutboxEvent(event.id(), event.eventType(), event.aggregateType(), event.aggregateId(),
+                event.payloadVersion(), event.payload(), event.createdAt(), UUID.randomUUID(), 1);
+        complete(true, false);
+        assertThat(transport.publish(event)).isEqualTo(PublishResult.CONFIRMED);
+        verify(template).send(eq(properties.exchange()), eq(properties.permissionRoutingKey()), any(Message.class), any());
+        verify(admin).declareQueue(argThat(q -> q.getName().equals(properties.permissionQueue())));
+        verify(admin).declareBinding(argThat(b -> b.getDestination().equals(properties.permissionQueue())
+                && b.getRoutingKey().equals(properties.permissionRoutingKey())));
+        verify(template, never()).send(anyString(), eq(properties.routingKey()), any(Message.class), any());
+    }
+
+    @Test
+    void unsupportedEventNeverFallsBackToPurgeRouting() {
+        event = new ClaimedOutboxEvent(event.id(), "UNKNOWN", event.aggregateType(), event.aggregateId(),
+                event.payloadVersion(), event.payload(), event.createdAt(), event.claimToken(), 1);
+        assertThat(transport.publish(event)).isEqualTo(PublishResult.SERIALIZATION_ERROR);
+        verifyNoInteractions(admin);
+        verify(template, never()).send(anyString(), anyString(), any(Message.class), any());
     }
 
     @Test

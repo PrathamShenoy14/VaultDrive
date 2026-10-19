@@ -91,7 +91,8 @@ class RabbitPurgeConsumerIntegrationTest {
         String suffix = UUID.randomUUID().toString();
         properties = new OutboxPublisherProperties(false, 3, 20, Duration.ofSeconds(30), Duration.ofSeconds(10),
                 Duration.ofSeconds(1), Duration.ofSeconds(60), "vaultdrive.outbox.events.test." + suffix,
-                "vaultdrive.purge.requests.test." + suffix, "purge.requested");
+                "vaultdrive.purge.requests.test." + suffix, "purge.requested",
+                "vaultdrive.permission.activity.test." + suffix, "permission.activity");
         admin.declareExchange(new org.springframework.amqp.core.DirectExchange(properties.exchange(), true, false));
         admin.declareQueue(org.springframework.amqp.core.QueueBuilder.durable(properties.queue()).quorum().build());
         admin.declareBinding(new org.springframework.amqp.core.Binding(properties.queue(),

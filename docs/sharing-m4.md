@@ -2,7 +2,8 @@
 
 Implemented under the [approved sharing design](sharing-permissions-design.md).
 M4 adds file-only bearer capabilities. Activity, notifications, frontend work and
-legacy upload retirement remain outside this milestone.
+legacy upload retirement remain outside this milestone. [M5](sharing-m5.md) now
+adds owner-visible permission activity; notifications remain planned.
 
 ## Migration and secret contract
 

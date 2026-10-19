@@ -53,6 +53,20 @@ The delivery contract is at least once: only committed outbox rows may be publis
 
 Existing pending-purge requests predating V12 are not backfilled by this migration. Recovery/backfill and event retention remain future tasks. Phase 1B added no broker execution; Phase 1C below supplies publication only. Phase 2B separately handles notification ingestion and quarantines unknown versions; Phase 2D.1 below supplies file byte deletion without changing v1 events.
 
+## Sharing M5 permission activity routing
+
+Sharing M5 adds `PERMISSION_ACTIVITY_RECORDED` (aggregate `PERMISSION_ACTIVITY`,
+payload v1 `activityEventId`) using the activity UUID as both event and aggregate
+identity. Mutation/activity/outbox commit atomically. The existing publisher sends
+this type to the separate durable quorum queue `vaultdrive.permission.activity`
+with routing key `permission.activity`, configurable via publisher
+`permission-queue`/`permission-routing-key`. Queue/key collisions with purge are
+rejected. Unknown event types fail publication; they never default to purge.
+Missing-purge-job scan/ingest exclude permission events. At-least-once replay
+preserves one activity identity and never creates a purge job. There is no
+permission consumer or notification persistence in M5; messages remain queued
+when publication is enabled. See [schema, visibility and tests](../sharing-m5.md).
+
 ## Deferred decisions
 
 Broad legacy-intent backfill, outbox/job/quarantine retention, ordering guarantees and operational tuning remain open. Phase 2E.4 below resolves only aged-PUBLISHED missing-job recovery. Standalone metadata finalization is supplied by Phase 2D.2 Slice 2 below. The Phase 1B event contract remains unchanged. Publisher, job, consumer, worker foundation and file-purge choices are recorded separately below.

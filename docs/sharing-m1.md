@@ -4,8 +4,9 @@ Implemented on 2026-10-19 under the [approved design](sharing-permissions-design
 This records the M1 boundary, where `EDITOR` initially permitted the same reads as
 `VIEWER`. [M2](sharing-m2.md) now adds Editor folder creation, rename and conditional
 trash. [M3](sharing-m3.md) adds delegated multipart; synchronous upload stays
-owner-only. [M4](sharing-m4.md) adds secure file Viewer links. Activity events,
-notifications and frontend changes remain planned.
+owner-only. [M4](sharing-m4.md) adds secure file Viewer links and
+[M5](sharing-m5.md) adds owner-visible permission activity. Notifications and
+frontend changes remain planned.
 
 ## Schema and resolution
 
@@ -138,5 +139,6 @@ The 47 skips are explicitly opt-in checks, not evidence of passing those scenari
 
 No performance or production-scale claim is made: recursive per-entry resolution,
 materialized page filtering and offset pagination have not been benchmarked.
-M3-M6 and existing multipart browser, clock and uncertain-writer limits remain.
+M2-M5 now have their own implementation contracts. M6 and existing multipart
+browser, clock and uncertain-writer limits remain.
 M2 verification is recorded separately in [its contract](sharing-m2.md).

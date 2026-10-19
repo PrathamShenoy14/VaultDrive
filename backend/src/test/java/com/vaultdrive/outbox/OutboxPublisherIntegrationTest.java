@@ -143,7 +143,7 @@ class OutboxPublisherIntegrationTest {
             }).when(template).send(anyString(), anyString(), any(org.springframework.amqp.core.Message.class),
                     any(org.springframework.amqp.rabbit.connection.CorrelationData.class));
             var properties = new OutboxPublisherProperties(false, 3, 20, Duration.ofSeconds(30),
-                    Duration.ofSeconds(10), Duration.ofSeconds(1), Duration.ofSeconds(2), "test", "test", "test");
+                    Duration.ofSeconds(10), Duration.ofSeconds(1), Duration.ofSeconds(2), "test", "test", "test", "pq", "pr");
             var transport = new RabbitOutboxTransport(template,
                     mock(org.springframework.amqp.rabbit.core.RabbitAdmin.class),
                     new tools.jackson.databind.ObjectMapper(), properties);

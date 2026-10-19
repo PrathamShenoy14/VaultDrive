@@ -103,4 +103,12 @@ class OutboxPublisherConfigurationTest {
                 "vaultdrive.outbox.publisher.confirm-timeout=2s")
                 .run(context -> assertThat(context).hasFailed());
     }
+
+    @Test
+    void rejectsPermissionQueueOrRoutingKeyThatCollidesWithPurge() {
+        for (String property : new String[]{"permission-queue=vaultdrive.purge.requests", "permission-routing-key=purge.requested"}) {
+            runner.withPropertyValues("vaultdrive.outbox.publisher." + property)
+                    .run(context -> assertThat(context).hasFailed());
+        }
+    }
 }
