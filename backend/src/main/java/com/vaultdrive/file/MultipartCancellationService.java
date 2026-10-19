@@ -19,26 +19,35 @@ public class MultipartCancellationService {
         this.transactions = transactions; this.storage = storage;
     }
 
-    public Cancellation cancel(UUID owner, UUID id) { return advance(owner, transactions.cancel(owner, id)); }
-    public Cancellation recover(UUID owner, UUID id) { return advance(owner, transactions.authorizeRecovery(owner, id)); }
-    public Cancellation get(UUID owner, UUID id) { return transactions.authorizeRecovery(owner, id); }
+    public Cancellation cancel(UUID actor, UUID id) {
+        Cancellation result = advance(actor, transactions.cancel(actor, id));
+        transactions.authorizeResponse(actor, id);
+        return result;
+    }
+    public Cancellation recover(UUID actor, UUID id) {
+        Cancellation result = advance(actor, transactions.authorizeRecovery(actor, id));
+        transactions.authorizeResponse(actor, id);
+        return result;
+    }
+    public Cancellation get(UUID actor, UUID id) { return transactions.authorizeRecovery(actor, id); }
 
-    private Cancellation advance(UUID owner, Cancellation retained) {
+    private Cancellation advance(UUID actor, Cancellation retained) {
+        UUID resourceOwner = retained.session().ownerId();
         Permit permit;
-        try { permit = transactions.claim(owner, retained.session().id()); }
+        try { permit = transactions.claim(actor, retained.session().id()); }
         catch (RuntimeException uncertainPermissionCommit) {
             // Intent is already durable. A lost claim acknowledgement confers no ephemeral permission.
-            try { return transactions.retained(owner, retained.session().id()); }
+            try { return transactions.retained(resourceOwner, retained.session().id()); }
             catch (RuntimeException stillUnavailable) { return retained; }
         }
         if (!permit.permitted()) return permit.cancellation();
         try {
             storage.abortMultipart(permit.target(), permit.cancellation().session().uploadId());
-            return transactions.acknowledge(owner, permit);
+            return transactions.acknowledge(resourceOwner, permit);
         } catch (RuntimeException uncertain) {
-            try { return transactions.unavailable(owner, retained.session().id()); }
+            try { return transactions.unavailable(resourceOwner, retained.session().id()); }
             catch (RuntimeException databaseUnavailable) {
-                try { return transactions.retained(owner, retained.session().id()); }
+                try { return transactions.retained(resourceOwner, retained.session().id()); }
                 catch (RuntimeException stillUnavailable) { return permit.cancellation(); }
             }
         }

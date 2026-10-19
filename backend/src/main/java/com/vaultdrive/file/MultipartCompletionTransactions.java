@@ -31,8 +31,8 @@ public class MultipartCompletionTransactions {
     public record Permit(Snapshot snapshot, boolean permitted) { }
     public enum Evidence { COMPLETE_HEAD, HEAD_RECOVERY }
 
-    public Snapshot authorize(UUID owner, UUID id) {
-        Session session = sessions.get(owner, id); // Public owner/access check before external observations.
+    public Snapshot authorize(UUID actor, UUID id) {
+        Session session = sessions.get(actor, id); // Public actor/access check before external observations.
         require(List.of("OPEN", "COMPLETION_DECIDED").contains(session.state()));
         Snapshot snapshot = snapshot(session);
         if (session.state().equals("OPEN")) {
@@ -42,8 +42,8 @@ public class MultipartCompletionTransactions {
         return snapshot;
     }
 
-    public Snapshot freeze(UUID owner, Snapshot expected, List<ManifestPart> manifest) {
-        Session current = sessions.get(owner, expected.session().id());
+    public Snapshot freeze(UUID actor, Snapshot expected, List<ManifestPart> manifest) {
+        Session current = sessions.get(actor, expected.session().id());
         Snapshot fresh = snapshot(current);
         // Concurrent identical HTTP requests observe the first permanent decision/manifest.
         if (current.state().equals("COMPLETION_DECIDED")) { return fresh; }
@@ -51,16 +51,18 @@ public class MultipartCompletionTransactions {
                 && fresh.target().equals(expected.target()) && binding.matches(fresh.target())
                 && fresh.registered().equals(expected.registered()) && live(current.id()));
         UUID decision = UUID.randomUUID();
-        sessions.decide(owner, current.id(), current.revision(), Decision.COMPLETE, decision);
+        sessions.decide(actor, current.id(), current.revision(), Decision.COMPLETE, decision);
         em.createNativeQuery("INSERT INTO multipart_completions(session_id, decision_id, garage_upload_id, manifest) "
                 + "VALUES (:id,:decision,:upload,cast(:manifest AS jsonb))")
                 .setParameter("id", current.id()).setParameter("decision", decision).setParameter("upload", current.uploadId())
                 .setParameter("manifest", mapper.writeValueAsString(manifest)).executeUpdate();
-        return snapshot(sessions.lockForEvidence(owner, current.id()));
+        return snapshot(sessions.lockForEvidence(current.ownerId(), current.id()));
     }
 
     /** A newly committed single-assignment dispatch ID is the only permission to call Complete. */
-    public Permit claim(UUID owner, UUID id) {
+    public Permit claim(UUID actor, UUID id) {
+        Session admitted = sessions.authorizeCaller(actor, id);
+        UUID owner = admitted.ownerId();
         Snapshot s = locked(owner, id);
         if (s.manifest().isEmpty() || s.session().completion().receiptRecorded()
                 || s.session().completion().dispatchId() != null) { return new Permit(s, false); }
@@ -76,7 +78,9 @@ public class MultipartCompletionTransactions {
     }
 
     /** Repeatable read-only provider probe permission; it never confers completion dispatch authority. */
-    public Permit probe(UUID owner, UUID id) {
+    public Permit probe(UUID actor, UUID id) {
+        Session admitted = sessions.authorizeCaller(actor, id);
+        UUID owner = admitted.ownerId();
         Snapshot s = locked(owner, id);
         if (s.manifest().isEmpty() || s.session().completion().receiptRecorded()
                 || s.session().completion().dispatchId() == null) { return new Permit(s, false); }
@@ -138,6 +142,8 @@ public class MultipartCompletionTransactions {
 
     /** Result reload for a request authorized before a concurrent folder barrier; no new capability. */
     public Session retained(UUID owner, UUID id) { return sessions.lockForEvidence(owner, id); }
+
+    public void authorizeResponse(UUID actor, UUID id) { sessions.authorizeCaller(actor, id); }
 
     public static boolean matches(Snapshot s, CompletedObject o) {
         return o != null && o.size() == s.session().declaredSize() && Objects.equals(o.sha256(), s.expectedSha256())

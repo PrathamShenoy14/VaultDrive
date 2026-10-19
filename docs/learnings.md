@@ -581,3 +581,22 @@ concurrent move can invalidate inheritance, and a stale writer must conflict.
 Mutation responses need parent redaction even for no-op renames. Deterministic
 PostgreSQL tests inspect real lock waits and final rows for revocation, downgrade,
 subtree moves/trash and same-file conflicts.
+
+## Sharing M3: delegation needs two identities and two authorization boundaries
+
+An upload actor does not own the destination's file or storage allocation. Keeping
+immutable initiator identity on sessions avoids changing the V26 whole-file cleanup
+snapshot while retaining owner authority and actor-scoped idempotency. A fresh
+Editor check at reservation is insufficient: manifest freeze and completion dispatch
+are separate commits, as are cancellation intent and abort dispatch. Grant mutation
+must serialize with each admission using the existing owner hierarchy lock.
+
+Revocation blocks new authority, while exact results from already admitted calls
+remain facts. Evidence recording therefore uses retained owner identity; public
+responses reauthorize outside uncertainty handlers so denial is not swallowed or
+mistaken for permission to retry storage. Presigning needs a final permission and
+revision check after signing; previously issued URLs remain Garage bearer capabilities.
+A populated upgrade test exposed PostgreSQL's deferred-trigger-event restriction
+on ALTER TABLE: flush the allocation/session pair check after backfill before
+restoring the identity trigger. No retained evidence needs rewriting. See
+[the M3 contract and verification](sharing-m3.md).

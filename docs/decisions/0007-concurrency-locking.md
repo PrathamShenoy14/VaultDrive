@@ -53,6 +53,17 @@ is introduced. PostgreSQL tests observe actual advisory/row waits and assert bot
 winner orders and persisted results. See [M2](../sharing-m2.md). Owner-only paths,
 namespace constraints, restore ordering and storage/lifecycle protocols remain.
 
+Sharing M3 resolves immutable session/destination owner before coordination, then
+uses the same shared owner hierarchy -> fresh file -> allocation -> session ->
+parts -> completion/cancellation/receipt order. The owner/key reservation advisory
+lock is retained while uniqueness includes immutable initiator identity. Original
+initiators require current Editor on the destination; other Editors have no session
+authority. Grant changes serialize with admission, manifest freeze, separate
+Create/Complete/Abort dispatch permission and recovery probes. Post-signing and
+post-storage response checks use fresh caller authority. Trusted evidence recording
+uses retained owner identity after permitted calls, even following revocation;
+READY still revalidates lifecycle. No lock spans storage. See [Sharing M3](../sharing-m3.md).
+
 M4 cancellation and expiry reuse shared hierarchy → fresh file → allocation →
 session, followed by cancellation progress. Abandonment and intent commit
 atomically; completion cannot consume the same decision. A separate commit grants

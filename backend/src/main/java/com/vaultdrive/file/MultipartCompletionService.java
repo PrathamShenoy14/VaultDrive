@@ -21,42 +21,46 @@ public class MultipartCompletionService {
         this.transactions = transactions; this.storage = storage;
     }
 
-    public Session complete(UUID owner, UUID id) {
-        Snapshot s = transactions.authorize(owner, id);
-        if (s.session().state().equals("OPEN")) { s = transactions.freeze(owner, s, validateManifest(s)); }
-        return advance(owner, s, false);
+    public Session complete(UUID actor, UUID id) {
+        Snapshot s = transactions.authorize(actor, id);
+        if (s.session().state().equals("OPEN")) { s = transactions.freeze(actor, s, validateManifest(s)); }
+        Session result = advance(actor, s, false);
+        transactions.authorizeResponse(actor, id);
+        return result;
     }
 
-    public Session recover(UUID owner, UUID id) {
-        Snapshot s = transactions.authorize(owner, id);
+    public Session recover(UUID actor, UUID id) {
+        Snapshot s = transactions.authorize(actor, id);
         if (!s.session().state().equals("COMPLETION_DECIDED")) { throw new MultipartConflictException(); }
-        return advance(owner, s, true);
+        Session result = advance(actor, s, true);
+        transactions.authorizeResponse(actor, id);
+        return result;
     }
 
-    private Session advance(UUID owner, Snapshot initial, boolean recover) {
+    private Session advance(UUID actor, Snapshot initial, boolean recover) {
         UUID id = initial.session().id();
         if (initial.manifest().isEmpty()) { return initial.session(); } // Old M1 decision supplies no M3 dispatch authority.
-        if (initial.session().completion().receiptRecorded()) { return finalizeReady(owner, initial.session()); }
-        Permit permit = transactions.claim(owner, id);
+        if (initial.session().completion().receiptRecorded()) { return finalizeReady(initial.session().ownerId(), initial.session()); }
+        Permit permit = transactions.claim(actor, id);
         Snapshot s = permit.snapshot();
-        if (s.session().completion().receiptRecorded()) { return finalizeReady(owner, s.session()); }
+        if (s.session().completion().receiptRecorded()) { return finalizeReady(s.session().ownerId(), s.session()); }
         if (permit.permitted()) {
             CompletionAck ack;
             try { ack = storage.completeMultipart(s.target(), s.session().uploadId(), s.manifest(), s.expectedSha256()); }
-            catch (RuntimeException uncertain) { return pending(owner, s.session(), "UNKNOWN", "STORAGE_UNAVAILABLE"); }
+            catch (RuntimeException uncertain) { return pending(s.session().ownerId(), s.session(), "UNKNOWN", "STORAGE_UNAVAILABLE"); }
             if (ack == null || ack.etag() == null || ack.etag().isBlank()
                     || !Objects.equals(ack.sha256(), s.expectedSha256()) || !"COMPOSITE".equals(ack.checksumType())) {
-                return pending(owner, s.session(), "BLOCKED", "EVIDENCE_MISMATCH");
+                return pending(s.session().ownerId(), s.session(), "BLOCKED", "EVIDENCE_MISMATCH");
             }
-            return observe(owner, s, Evidence.COMPLETE_HEAD, ack.etag());
+            return observe(s.session().ownerId(), s, Evidence.COMPLETE_HEAD, ack.etag());
         }
         if (!recover || s.session().completion().dispatchId() == null) { return s.session(); }
-        Permit probe = transactions.probe(owner, id);
+        Permit probe = transactions.probe(actor, id);
         if (!probe.permitted()) {
             return probe.snapshot().session().completion().receiptRecorded()
-                    ? finalizeReady(owner, probe.snapshot().session()) : probe.snapshot().session();
+                    ? finalizeReady(probe.snapshot().session().ownerId(), probe.snapshot().session()) : probe.snapshot().session();
         }
-        return observe(owner, probe.snapshot(), Evidence.HEAD_RECOVERY, null);
+        return observe(probe.snapshot().session().ownerId(), probe.snapshot(), Evidence.HEAD_RECOVERY, null);
     }
 
     private Session observe(UUID owner, Snapshot s, Evidence kind, String acknowledgedEtag) {

@@ -52,6 +52,7 @@ class GarageMultipartCompletionIntegrationTest {
     @Autowired MultipartCompletionTransactions transactions;
     @Autowired FileService files;
     @Autowired FolderService folders;
+    @Autowired com.vaultdrive.sharing.GrantService grants;
     @Autowired UserRepository users;
     @Autowired JdbcTemplate jdbc;
     @Autowired DataSource source;
@@ -121,6 +122,37 @@ class GarageMultipartCompletionIntegrationTest {
         assertReady(completions.complete(owner, session.id())); assertReady(completions.recover(owner, session.id()));
         verifyNoInteractions(s3);
         assertThat(jdbc.queryForMap("SELECT * FROM multipart_completion_receipts WHERE session_id = ?", session.id())).isEqualTo(receipt);
+    }
+
+    @Test void delegatedEditorUsesRealSignedPartsAndOwnerRecoversAfterRevocation() throws Exception {
+        var editor = users.saveAndFlush(new User(UUID.randomUUID() + "@example.com", "fixture", "Editor"));
+        UUID folder = folders.createFolder(owner, null, UUID.randomUUID().toString());
+        var grant = grants.create(owner, true, folder, editor.getEmail(), com.vaultdrive.sharing.ResourceRole.EDITOR);
+        var reserved = sessions.reserve(editor.getId(), UUID.randomUUID().toString(),
+                new Request(folder, UUID.randomUUID().toString(), first.length + last.length, "application/octet-stream"));
+        var session = transfers.initiate(editor.getId(), reserved.id());
+        assertThat(session.ownerId()).isEqualTo(owner);
+        assertThat(session.initiatorUserId()).isEqualTo(editor.getId());
+        var urls = transfers.partUrls(editor.getId(), session.id(), List.of(
+                new PartExpectation(1, first.length, sha(first)), new PartExpectation(2, last.length, sha(last))));
+        grants.revoke(owner, true, folder, grant.id());
+        // Outstanding Garage URLs remain bearer capabilities after revocation.
+        for (int number = 0; number < 2; number++) {
+            var signed = wire(urls.get(number).upload());
+            assertThat(f.send(signed, signed.url().toURI(), number == 0 ? first : last).status()).isEqualTo(200);
+        }
+        assertThatThrownBy(() -> completions.complete(editor.getId(), session.id()))
+                .isInstanceOf(com.vaultdrive.file.exception.FileNotFoundException.class);
+        verify(s3, never()).completeMultipartUpload(any(CompleteMultipartUploadRequest.class));
+        assertReady(completions.complete(owner, session.id()));
+        assertCompletedBytes(session);
+        try (var stream = files.downloadFile(owner, session.fileId()).inputStream()) {
+            assertThat(Arrays.equals(stream.readAllBytes(), expected())).isTrue();
+        }
+        assertThatThrownBy(() -> files.downloadFile(editor.getId(), session.fileId()))
+                .isInstanceOf(com.vaultdrive.file.exception.FileNotFoundException.class);
+        verify(s3, times(1)).completeMultipartUpload(any(CompleteMultipartUploadRequest.class));
+        f.event("SHARING_M3", "delegated signed parts accepted after revoke; new Editor authority denied; owner completed exact bytes");
     }
 
     @Test void realPaginatedListPartsProvidesTheOrderedCompletionManifest() throws Exception {

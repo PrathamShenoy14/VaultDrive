@@ -15,7 +15,7 @@ public enum ResourceRole {
                               "PURGE", "MANAGE_GRANTS");
         }
         if (this == EDITOR) {
-            return folder ? List.of("READ_METADATA", "LIST_CHILDREN", "CREATE_FOLDER", "RENAME", "TRASH")
+            return folder ? List.of("READ_METADATA", "LIST_CHILDREN", "CREATE_FOLDER", "UPLOAD", "RENAME", "TRASH")
                     : List.of("READ_METADATA", "DOWNLOAD", "RENAME", "TRASH");
         }
         return folder ? List.of("READ_METADATA", "LIST_CHILDREN") : List.of("READ_METADATA", "DOWNLOAD");

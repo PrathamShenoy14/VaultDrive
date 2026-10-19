@@ -31,18 +31,18 @@ public class MultipartSessionController {
     @PostMapping
     public ResponseEntity<Session> reserve(@AuthenticationPrincipal Jwt jwt,
             @RequestHeader("Idempotency-Key") String key, @RequestBody Request request) {
-        Session session = sessions.reserve(owner(jwt), key, request);
+        Session session = sessions.reserve(actor(jwt), key, request);
         return ResponseEntity.created(URI.create("/api/v1/upload-sessions/" + session.id())).body(session);
     }
 
     @GetMapping("/{id}")
     public Session get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return sessions.get(owner(jwt), id);
+        return sessions.get(actor(jwt), id);
     }
 
     @PostMapping("/{id}/initiate")
     public ResponseEntity<Session> initiate(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        Session result = transfers.initiate(owner(jwt), id);
+        Session result = transfers.initiate(actor(jwt), id);
         return ResponseEntity.status(result.state().equals("OPEN") ? 200 : 202)
                 .header("Location", "/api/v1/upload-sessions/" + id).body(result);
     }
@@ -53,23 +53,23 @@ public class MultipartSessionController {
     public ResponseEntity<List<MultipartTransferService.PartUrl>> parts(@AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID id, @RequestBody PartRequest request) {
         return ResponseEntity.ok().header("Cache-Control", "no-store")
-                .body(transfers.partUrls(owner(jwt), id, request.parts()));
+                .body(transfers.partUrls(actor(jwt), id, request.parts()));
     }
 
     @GetMapping("/{id}/parts")
     public com.vaultdrive.storage.MultipartStorage.Page list(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
             @RequestParam(defaultValue = "0") int marker, @RequestParam(defaultValue = "100") int limit) {
-        return transfers.list(owner(jwt), id, marker, limit);
+        return transfers.list(actor(jwt), id, marker, limit);
     }
 
     @PostMapping("/{id}/complete")
     public ResponseEntity<Session> complete(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return completionResult(completions.complete(owner(jwt), id));
+        return completionResult(completions.complete(actor(jwt), id));
     }
 
     @PostMapping("/{id}/recover")
     public ResponseEntity<Session> recover(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return completionResult(completions.recover(owner(jwt), id));
+        return completionResult(completions.recover(actor(jwt), id));
     }
 
     private static ResponseEntity<Session> completionResult(Session session) {
@@ -79,17 +79,17 @@ public class MultipartSessionController {
 
     @PostMapping("/{id}/cancel")
     public ResponseEntity<MultipartCancellationTransactions.Cancellation> cancel(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return cancellationResult(cancellations.cancel(owner(jwt), id));
+        return cancellationResult(cancellations.cancel(actor(jwt), id));
     }
 
     @PostMapping("/{id}/cancel/recover")
     public ResponseEntity<MultipartCancellationTransactions.Cancellation> recoverCancellation(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return cancellationResult(cancellations.recover(owner(jwt), id));
+        return cancellationResult(cancellations.recover(actor(jwt), id));
     }
 
     @GetMapping("/{id}/cancellation")
     public MultipartCancellationTransactions.Cancellation cancellation(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return cancellations.get(owner(jwt), id);
+        return cancellations.get(actor(jwt), id);
     }
 
     private static ResponseEntity<MultipartCancellationTransactions.Cancellation> cancellationResult(MultipartCancellationTransactions.Cancellation result) {
@@ -112,5 +112,5 @@ public class MultipartSessionController {
         return ResponseEntity.status(503).body(new ApiError(503, "SERVICE_UNAVAILABLE", "Multipart storage outcome unavailable"));
     }
 
-    private static UUID owner(Jwt jwt) { return UUID.fromString(jwt.getSubject()); }
+    private static UUID actor(Jwt jwt) { return UUID.fromString(jwt.getSubject()); }
 }

@@ -478,7 +478,7 @@ class SharingIntegrationTest {
     }
 
     @Test
-    void editorStillCannotMoveRestorePurgeManageGrantsUploadOrReadOwnersTrash() throws Exception {
+    void editorCanReserveMultipartButCannotUseOwnerOnlyOperationsOrLegacyUpload() throws Exception {
         grant(true, shared.getId(), ResourceRole.EDITOR);
         for (String path : new String[]{"/api/v1/files/" + file.getId() + "/move", "/api/v1/folders/" + child.getId() + "/move"}) {
             mvc.perform(patch(path).with(as(viewer)).contentType(MediaType.APPLICATION_JSON).content("{}"))
@@ -500,8 +500,11 @@ class SharingIntegrationTest {
         mvc.perform(post("/api/v1/upload-sessions").with(as(viewer)).header("Idempotency-Key", UUID.randomUUID().toString())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"folderId\":\"" + child.getId()
                         + "\",\"name\":\"no.txt\",\"size\":1,\"contentType\":\"text/plain\"}"))
-                .andExpect(status().isNotFound());
-        assertThat(reads.folder(viewer, child.getId()).allowedCapabilities()).doesNotContain("UPLOAD", "MOVE", "RESTORE", "PURGE", "MANAGE_GRANTS");
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.ownerId").value(owner.toString()))
+                .andExpect(jsonPath("$.initiatorUserId").value(viewer.toString()));
+        assertThat(reads.folder(viewer, child.getId()).allowedCapabilities()).contains("UPLOAD")
+                .doesNotContain("MOVE", "RESTORE", "PURGE", "MANAGE_GRANTS");
     }
 
     @Test

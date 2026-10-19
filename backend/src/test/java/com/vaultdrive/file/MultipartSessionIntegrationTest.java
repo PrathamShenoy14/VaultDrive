@@ -307,8 +307,8 @@ class MultipartSessionIntegrationTest {
             assertThatThrownBy(() -> sessions.decide(owner, r.id(), 2, decision, UUID.randomUUID())).isInstanceOf(FileNotFoundException.class);
         }
         assertThat(jdbc.queryForObject("SELECT revision FROM upload_sessions WHERE id = ?", Long.class, r.id())).isEqualTo(2);
-        // Idempotency replay is identity lookup, never renewed authorization.
-        assertThat(sessions.reserve(owner, "key", request(folder, "a")).state()).isEqualTo("OPEN");
+        // Sharing M3 reauthorizes even identical reservation retries against current lifecycle.
+        assertThatThrownBy(() -> sessions.reserve(owner, "key", request(folder, "a"))).isInstanceOf(RuntimeException.class);
     }
 
     @Test void directSqlCannotSkipRevisionOpenOrReverseDecision() {

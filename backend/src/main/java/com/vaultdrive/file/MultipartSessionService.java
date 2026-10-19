@@ -9,6 +9,9 @@ import com.vaultdrive.storage.StorageKeyGenerator;
 import com.vaultdrive.storage.StorageBinding;
 import com.vaultdrive.storage.StorageTarget;
 import com.vaultdrive.user.UserRepository;
+import com.vaultdrive.sharing.ResourceAccessRepository;
+import com.vaultdrive.sharing.ResourceRole;
+import org.springframework.security.access.AccessDeniedException;
 import jakarta.persistence.EntityManager;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
@@ -45,10 +48,12 @@ public class MultipartSessionService {
     private final FileStorageIdentityService allocations;
     private final StorageKeyGenerator keys;
     private final StorageBinding binding;
+    private final ResourceAccessRepository access;
 
     public MultipartSessionService(EntityManager em, HierarchyCoordinator hierarchy, UserRepository users,
             FolderAccessValidator folders, FileNameValidator names, StoredFileRepository files,
-            FileStorageIdentityService allocations, StorageKeyGenerator keys, StorageBinding binding) {
+            FileStorageIdentityService allocations, StorageKeyGenerator keys, StorageBinding binding,
+            ResourceAccessRepository access) {
         this.em = em;
         this.hierarchy = hierarchy;
         this.users = users;
@@ -58,12 +63,14 @@ public class MultipartSessionService {
         this.allocations = allocations;
         this.keys = keys;
         this.binding = binding;
+        this.access = access;
     }
 
     public record Request(UUID folderId, String name, long size, String contentType) { }
     public record Session(UUID id, UUID fileId, String state, long revision, UUID initiationId,
             String uploadId, UUID decisionId, Instant createdAt, Instant expiresAt,
-            long declaredSize, int partSize, int partCount, CompletionInfo completion) { }
+            long declaredSize, int partSize, int partCount, CompletionInfo completion,
+            UUID ownerId, UUID initiatorUserId) { }
     public record CompletionInfo(String disposition, long revision, UUID dispatchId, boolean receiptRecorded, String reason) {
         public boolean ready() { return disposition.equals("READY"); }
     }
@@ -74,23 +81,23 @@ public class MultipartSessionService {
             List<RegisteredPart> parts) { }
     public record Dispatch(Transfer transfer, boolean permitted) { }
 
-    public Session get(UUID owner, UUID id) { return lock(owner, id); }
+    public Session get(UUID actor, UUID id) { return lock(actor, id); }
 
     /** Only the caller that commits this new record receives an ephemeral dispatch permit. */
-    public Dispatch claimInitiation(UUID owner, UUID id) {
-        Session session = lock(owner, id);
+    public Dispatch claimInitiation(UUID actor, UUID id) {
+        Session session = lock(actor, id);
         Transfer transfer = transfer(session, List.of()); // Also reject binding drift before consuming permission.
         if (!session.state().equals("RESERVED")) { return new Dispatch(transfer, false); }
         requireLive(session);
         UUID initiation = UUID.randomUUID();
-        session = beginInitiation(owner, id, session.revision(), initiation);
+        session = beginInitiation(actor, id, session.revision(), initiation);
         em.createNativeQuery("INSERT INTO multipart_initiation_dispatches(session_id, initiation_id) VALUES (:id, :init)")
                 .setParameter("id", id).setParameter("init", initiation).executeUpdate();
         return new Dispatch(transfer(session, List.of()), true);
     }
 
-    public Transfer authorizeParts(UUID owner, UUID id, List<PartExpectation> requested) {
-        Session session = lock(owner, id);
+    public Transfer authorizeParts(UUID actor, UUID id, List<PartExpectation> requested) {
+        Session session = lock(actor, id);
         requireOpen(session);
         if (requested == null || requested.isEmpty() || requested.size() > 100) {
             throw new IllegalArgumentException("Part batch must contain 1 through 100 parts");
@@ -128,8 +135,8 @@ public class MultipartSessionService {
         return transfer(session, List.copyOf(registered));
     }
 
-    public Transfer authorizeListing(UUID owner, UUID id, int marker, int limit) {
-        Session session = lock(owner, id);
+    public Transfer authorizeListing(UUID actor, UUID id, int marker, int limit) {
+        Session session = lock(actor, id);
         requireOpen(session);
         if (marker < 0 || marker > session.partCount() || limit < 1 || limit > 100) {
             throw new IllegalArgumentException("Invalid part marker or page size (1 through 100)");
@@ -138,8 +145,8 @@ public class MultipartSessionService {
     }
 
     /** Final response authorization after signing, so a cancellation/expiry that won during signing rejects the batch. */
-    public void validatePartAuthorization(UUID owner, UUID id, long revision) {
-        Session session = lock(owner, id);
+    public void validatePartAuthorization(UUID actor, UUID id, long revision) {
+        Session session = lock(actor, id);
         requireOpen(session);
         require(session.revision() == revision);
     }
@@ -172,8 +179,8 @@ public class MultipartSessionService {
         } catch (IllegalArgumentException invalid) { return false; }
     }
 
-    public Session reserve(UUID owner, String idempotencyKey, Request request) {
-        Objects.requireNonNull(owner);
+    public Session reserve(UUID actor, String idempotencyKey, Request request) {
+        Objects.requireNonNull(actor);
         Objects.requireNonNull(request);
         if (idempotencyKey == null || !idempotencyKey.matches("[!-~]{1,128}")) {
             throw new IllegalArgumentException("Invalid idempotency key");
@@ -187,22 +194,30 @@ public class MultipartSessionService {
                 || !MediaType.parseMediaType(type).isConcrete()) {
             throw new IllegalArgumentException("Invalid declared content type");
         }
-        String fingerprint = fingerprint(request.folderId(), name, request.size(), type);
+        UUID owner = request.folderId() == null ? actor : access.owner(true, request.folderId());
+        String fingerprint = fingerprint(owner, request.folderId(), name, request.size(), type);
         bounds();
         hierarchy.acquireShared(owner);
         if (!users.existsById(owner)) { throw absent(); }
+        if (request.folderId() != null) {
+            var destination = access.require(actor, true, request.folderId(), false);
+            if (destination.role() == ResourceRole.VIEWER) {
+                throw new AccessDeniedException("Editor permission required");
+            }
+        }
         // Separate two-int advisory namespace, acquired only before creating resource rows.
         // Collisions conservatively serialize reservations; no existing-resource path takes this lock.
         em.createNativeQuery("SELECT pg_advisory_xact_lock(1297109833, hashtext(:identity))")
                 .setParameter("identity", owner + ":" + idempotencyKey).getSingleResult();
         List<?> existing = em.createNativeQuery("SELECT id, request_fingerprint FROM upload_sessions "
-                + "WHERE owner_id = :owner AND idempotency_key = :key")
-                .setParameter("owner", owner).setParameter("key", idempotencyKey).getResultList();
+                + "WHERE owner_id = :owner AND initiator_user_id = :actor AND idempotency_key = :key")
+                .setParameter("owner", owner).setParameter("actor", actor).setParameter("key", idempotencyKey).getResultList();
         if (!existing.isEmpty()) {
             Object[] row = (Object[]) existing.getFirst();
-            if (!fingerprint.equals(row[1])) { throw conflict(); }
-            // Replay retains its original identity/deadline even if expired or ancestry changed.
-            return read((UUID) row[0]);
+            // Preserve pre-M3 fingerprints without rewriting retained session evidence.
+            if (!fingerprint.equals(row[1]) && !(actor.equals(owner)
+                    && fingerprint(null, request.folderId(), name, request.size(), type).equals(row[1]))) { throw conflict(); }
+            return lock(actor, (UUID) row[0]);
         }
         if (request.folderId() != null) { folders.requireAccessibleFolder(owner, request.folderId()); }
         folders.requireNoPendingPurgeInAncestry(owner, request.folderId());
@@ -220,13 +235,13 @@ public class MultipartSessionService {
         allocations.reserveMultipart(file);
         UUID id = UUID.randomUUID();
         em.createNativeQuery("""
-                INSERT INTO upload_sessions(id, file_id, owner_id, original_folder_id, original_file_version,
+                INSERT INTO upload_sessions(id, file_id, owner_id, initiator_user_id, original_folder_id, original_file_version,
                     storage_key, storage_namespace, endpoint, region, bucket, file_name, declared_size,
                     declared_type, part_size, part_count, idempotency_key, request_fingerprint)
-                SELECT :id, file_id, owner_id, :folder, :version, storage_key, storage_namespace,
+                SELECT :id, file_id, owner_id, :actor, :folder, :version, storage_key, storage_namespace,
                     endpoint, region, bucket, :name, :size, :type, :partSize, :count, :key, :fingerprint
                 FROM file_storage_objects WHERE file_id = :file
-                """).setParameter("id", id).setParameter("file", fileId).setParameter("folder", request.folderId())
+                """).setParameter("id", id).setParameter("actor", actor).setParameter("file", fileId).setParameter("folder", request.folderId())
                 .setParameter("version", file.getVersion()).setParameter("name", name)
                 .setParameter("size", request.size()).setParameter("type", type).setParameter("partSize", PART_SIZE)
                 .setParameter("count", (request.size() + PART_SIZE - 1) / PART_SIZE)
@@ -234,9 +249,9 @@ public class MultipartSessionService {
         return read(id);
     }
 
-    public Session beginInitiation(UUID owner, UUID id, long revision, UUID initiationId) {
+    public Session beginInitiation(UUID actor, UUID id, long revision, UUID initiationId) {
         Objects.requireNonNull(initiationId);
-        Session session = lock(owner, id);
+        Session session = lock(actor, id);
         if (initiationId.equals(session.initiationId())) { return session; }
         require(session.revision() == revision && session.state().equals("RESERVED"));
         em.createNativeQuery("UPDATE file_storage_objects SET write_started = true WHERE file_id = :file")
@@ -252,7 +267,7 @@ public class MultipartSessionService {
         if (uploadId == null || uploadId.isBlank() || uploadId.length() > 2048) {
             throw new IllegalArgumentException("Invalid upload identity");
         }
-        Session session = lock(owner, id);
+        Session session = lockForEvidence(owner, id);
         require(Objects.equals(session.initiationId(), initiationId) && initiationId != null);
         if (uploadId.equals(session.uploadId())) { return session; }
         require(session.revision() == revision && session.state().equals("INITIATING"));
@@ -262,10 +277,10 @@ public class MultipartSessionService {
         return read(id);
     }
 
-    public Session decide(UUID owner, UUID id, long revision, Decision decision, UUID decisionId) {
+    public Session decide(UUID actor, UUID id, long revision, Decision decision, UUID decisionId) {
         Objects.requireNonNull(decision);
         Objects.requireNonNull(decisionId);
-        Session session = lock(owner, id);
+        Session session = lock(actor, id);
         String state = decision == Decision.COMPLETE ? "COMPLETION_DECIDED" : "ABANDONMENT_DECIDED";
         if (session.state().equals(state) && decisionId.equals(session.decisionId())) { return session; }
         require(session.decisionId() == null && session.revision() == revision);
@@ -276,10 +291,27 @@ public class MultipartSessionService {
         return read(id);
     }
 
-    private Session lock(UUID owner, UUID id) {
-        Session session = lockForEvidence(owner, id);
+    private Session lock(UUID actor, UUID id) {
+        Session session = authorizeCaller(actor, id);
         if (!(Boolean) em.createNativeQuery("SELECT multipart_session_eligible(s) OR multipart_ready_accessible(s) "
                 + "FROM upload_sessions s WHERE id = :id").setParameter("id", id).getSingleResult()) { throw absent(); }
+        return session;
+    }
+
+    /** Public admission/response boundary. Only immutable owner identity precedes coordination.
+     * Evidence methods deliberately use the owner identity instead of reauthorizing an actor. */
+    public Session authorizeCaller(UUID actor, UUID id) {
+        List<?> owners = em.createNativeQuery("SELECT owner_id FROM upload_sessions WHERE id = :id")
+                .setParameter("id", id).getResultList();
+        if (owners.isEmpty()) { throw absent(); }
+        Session session = lockForEvidence((UUID) owners.getFirst(), id);
+        if (actor.equals(session.ownerId())) { return session; }
+        if (!actor.equals(session.initiatorUserId())) { throw absent(); }
+        List<?> roles = em.createNativeQuery("SELECT effective_role FROM upload_sessions s "
+                + "CROSS JOIN LATERAL resolve_resource_access(:actor, NULL, s.original_folder_id) a "
+                + "WHERE s.id = :id AND s.original_folder_id IS NOT NULL AND a.owner_id = s.owner_id")
+                .setParameter("actor", actor).setParameter("id", id).getResultList();
+        if (roles.isEmpty() || !roles.getFirst().equals("EDITOR")) { throw absent(); }
         return session;
     }
 
@@ -304,14 +336,15 @@ public class MultipartSessionService {
         Object[] r = (Object[]) em.createNativeQuery("""
                 SELECT s.id, file_id, state, s.revision, initiation_id, s.garage_upload_id, s.decision_id, s.created_at, expires_at,
                     declared_size, part_size, part_count, c.disposition, c.revision, c.dispatch_id,
-                    EXISTS (SELECT 1 FROM multipart_completion_receipts WHERE session_id = s.id), c.reason
+                    EXISTS (SELECT 1 FROM multipart_completion_receipts WHERE session_id = s.id), c.reason,
+                    s.owner_id, s.initiator_user_id
                 FROM upload_sessions s LEFT JOIN multipart_completions c ON c.session_id = s.id WHERE s.id = :id
                 """).setParameter("id", id).getSingleResult();
         return new Session((UUID) r[0], (UUID) r[1], (String) r[2], ((Number) r[3]).longValue(),
                 (UUID) r[4], (String) r[5], (UUID) r[6], instant(r[7]), instant(r[8]),
                 ((Number) r[9]).longValue(), ((Number) r[10]).intValue(), ((Number) r[11]).intValue(),
                 r[12] == null ? null : new CompletionInfo((String) r[12], ((Number) r[13]).longValue(),
-                        (UUID) r[14], (Boolean) r[15], (String) r[16]));
+                        (UUID) r[14], (Boolean) r[15], (String) r[16]), (UUID) r[17], (UUID) r[18]);
     }
 
     private static Instant instant(Object value) {
@@ -320,9 +353,14 @@ public class MultipartSessionService {
         return ((java.sql.Timestamp) value).toInstant();
     }
 
-    private static String fingerprint(UUID folder, String name, long size, String type) {
+    private static String fingerprint(UUID owner, UUID folder, String name, long size, String type) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            if (owner != null) {
+                byte[] identity = owner.toString().getBytes(StandardCharsets.UTF_8);
+                digest.update(ByteBuffer.allocate(4).putInt(identity.length).array());
+                digest.update(identity);
+            }
             for (String field : List.of("DIRECT_MULTIPART:M1:8388608:24h", String.valueOf(folder), name,
                     Long.toString(size), type)) {
                 byte[] bytes = field.getBytes(StandardCharsets.UTF_8);

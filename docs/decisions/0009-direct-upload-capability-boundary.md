@@ -83,3 +83,12 @@ that allocation and receipt with unresolved reclamation; never repeat Complete o
 Abort, infer safety from age/absence/abort acknowledgement, or automatically upgrade
 logical proof. Garage block GC, quiescence, multi-node behavior and cleanup repair
 remain outside the established guarantee. No autonomous defaults change.
+
+## Sharing M3 delegated authority
+
+[Sharing M3](../sharing-m3.md) supersedes owner-only session authorization. Immutable
+initiators and destination-derived ownership keep collaboration separate from
+storage identity. Revocation blocks new admissions/dispatch and signed-URL responses;
+already admitted calls can retain exact evidence and finalize eligible owner files.
+Outstanding part URLs cannot be recalled. This changes no Garage capability,
+uncertain-dispatch, lifecycle, writer-quiescence or physical reclamation guarantee.

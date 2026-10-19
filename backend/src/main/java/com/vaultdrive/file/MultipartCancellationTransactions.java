@@ -30,14 +30,14 @@ public class MultipartCancellationTransactions {
     public record Candidate(UUID owner, UUID id) { }
     public record Expiry(UUID id, String disposition, String reason) { }
 
-    public Cancellation cancel(UUID owner, UUID id) {
-        Session s = sessions.get(owner, id); // Same fresh owner/ancestry barrier as all session APIs.
+    public Cancellation cancel(UUID actor, UUID id) {
+        Session s = sessions.get(actor, id); // Same fresh actor/ancestry barrier as all session APIs.
         require(!s.state().equals("COMPLETION_DECIDED"));
-        return decide(owner, s, "CANCEL");
+        return decide(actor, s, "CANCEL");
     }
 
-    public Cancellation authorizeRecovery(UUID owner, UUID id) {
-        Session s = sessions.get(owner, id);
+    public Cancellation authorizeRecovery(UUID actor, UUID id) {
+        Session s = sessions.get(actor, id);
         require(s.state().equals("ABANDONMENT_DECIDED"));
         // Adopt old M1 abandonment only through cancel(), never invent a completion/cancellation decision here.
         require(hasIntent(id));
@@ -65,9 +65,9 @@ public class MultipartCancellationTransactions {
         return new Expiry(s.id(), result.disposition(), result.reason());
     }
 
-    private Cancellation decide(UUID owner, Session s, String cause) {
+    private Cancellation decide(UUID actor, Session s, String cause) {
         if (hasIntent(s.id())) { releaseName(s); return read(s); }
-        if (s.decisionId() == null) { s = sessions.decide(owner, s.id(), s.revision(), Decision.ABANDON, UUID.randomUUID()); }
+        if (s.decisionId() == null) { s = sessions.decide(actor, s.id(), s.revision(), Decision.ABANDON, UUID.randomUUID()); }
         require(s.state().equals("ABANDONMENT_DECIDED"));
         em.createNativeQuery("INSERT INTO multipart_cancellations(session_id,decision_id,initiation_id,garage_upload_id,storage_identity,cause) "
                 + "SELECT id,decision_id,initiation_id,garage_upload_id,multipart_storage_identity(s),:cause FROM upload_sessions s WHERE id = :id")
@@ -86,8 +86,8 @@ public class MultipartCancellationTransactions {
     }
 
     /** Only a new, independently committed dispatch UUID grants an ephemeral abort permit. */
-    public Permit claim(UUID owner, UUID id) {
-        Session s = sessions.lockForEvidence(owner, id);
+    public Permit claim(UUID actor, UUID id) {
+        Session s = sessions.authorizeCaller(actor, id);
         require(s.state().equals("ABANDONMENT_DECIDED") && hasIntent(id));
         em.createNativeQuery("SELECT session_id FROM multipart_cancellations WHERE session_id = :id FOR UPDATE")
                 .setParameter("id", id).getSingleResult();
@@ -122,6 +122,8 @@ public class MultipartCancellationTransactions {
     }
 
     public Cancellation retained(UUID owner, UUID id) { return read(sessions.lockForEvidence(owner, id)); }
+
+    public void authorizeResponse(UUID actor, UUID id) { sessions.authorizeCaller(actor, id); }
 
     private boolean hasIntent(UUID id) {
         return (Boolean) em.createNativeQuery("SELECT EXISTS (SELECT 1 FROM multipart_cancellations WHERE session_id = :id)")

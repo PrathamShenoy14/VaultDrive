@@ -1,5 +1,9 @@
 # Multipart completion and explicit recovery — Phase 3E / M3
 
+Current authorization extension: [Sharing M3](sharing-m3.md) adds owner/initiator
+separation and delegated Editor sessions, superseding owner-only authorization
+statements in this historical milestone record. Storage/lifecycle guarantees remain.
+
 Current lifecycle extension: [M5 purge compatibility](multipart-purge-compatibility.md)
 supersedes the historical blanket multipart purge fence and retained active-name
 reservation described in this milestone record. It separates logical disposal

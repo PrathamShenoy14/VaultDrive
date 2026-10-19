@@ -3,8 +3,8 @@
 Implemented on 2026-10-19 under the [approved design](sharing-permissions-design.md).
 This records the M1 boundary, where `EDITOR` initially permitted the same reads as
 `VIEWER`. [M2](sharing-m2.md) now adds Editor folder creation, rename and conditional
-trash. Uploads and multipart sessions remain owner-only. There are no
-delegated sessions, links, activity events, notifications or frontend changes.
+trash. [M3](sharing-m3.md) adds delegated multipart; synchronous upload stays
+owner-only. Links, activity events, notifications and frontend changes remain planned.
 
 ## Schema and resolution
 

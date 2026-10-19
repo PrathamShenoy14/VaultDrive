@@ -44,17 +44,29 @@ Editors create subfolders owned by the destination owner, rename directly or
 inherited editable resources, and trash content only when its immediate parent
 is editable. Root creation/listing/Trash remains actor-scoped; directly shared
 entry points cannot be trashed from a private or null parent. Moves, restore,
-purge, grants and both upload protocols remain owner-only. Mutation DTOs redact
-private parents and expose Editor capabilities without delegated uploads.
+purge, grants and legacy upload remain owner-only. Mutation DTOs redact
+private parents; Sharing M3 below extends Editor capabilities with multipart upload.
 
 Mutations use the resource owner's existing exclusive folder/shared file hierarchy
 lock. Fresh scalar permission resolution occurs inside the mutation transaction;
 file entities are refreshed before authorization and retain optimistic version
 checks against concurrent moves/writes. Folder writes refresh the managed target
 under exclusive coordination. Grant revocation/downgrade serializes with mutations.
-No migration, storage identity or multipart lifecycle change is needed. Delegated
-multipart, links, activity and notifications remain planned.
+M2 requires no migration, storage identity or multipart lifecycle change. Links,
+activity and notifications remain planned.
 See [M2 behavior, races and verification limits](sharing-m2.md).
+
+### Sharing M3: delegated multipart uploads
+
+V33 backfills immutable session initiators and scopes idempotency to owner,
+initiator and key. Editors reserve into effectively editable folders; files,
+allocations and keys belong to the destination owner. Only the owner and currently
+authorized original initiator may manage each session. Fresh owner-hierarchy
+coordination gates every admission/dispatch and post-storage response, including
+post-signing authorization. Already admitted storage facts are retained under owner
+identity despite revocation; existing receipt/lifecycle guards still control READY.
+No uncertain Create/Complete/Abort is repeated, and no physical cleanup proof is
+inferred. See [behavior, migration and verification](sharing-m3.md).
 
 ### Multipart purge compatibility — M5
 
@@ -413,7 +425,7 @@ recovery](folder-purge-design.md#slice-6-bottom-up-metadata-removal-and-durable-
 - Historical admitted stale `UPLOADING`, `FAILED` and orphan cleanup remain unresolved. B2 implements never-admitted expiry; B3 recovers only freshly eligible UPLOADING with durable success receipts. PUT success before receipt commit remains unknown after a crash.
 - Audited legacy storage-identity recovery and verified quiescence for admitted
   uncertain upload writers; these files still block automatic folder finalization.
-- Sharing M3-M6 (delegated multipart, links, activity and notifications), versioning, client integration for direct/resumable transfers, quotas, malware scanning, audit logs, observability, and client applications.
+- Sharing M4-M6 (links, activity and notifications), versioning, client integration for direct/resumable transfers, quotas, malware scanning, audit logs, observability, and client applications.
 - Production deployment, backup/restore, retention, encryption/key-management, and service-level objectives.
 
 No benchmark, scale limit, or production-readiness claim has been established.

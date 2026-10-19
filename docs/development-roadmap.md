@@ -175,7 +175,8 @@ Exit criteria: correctness tests remain green and measured contention improves f
   [implementation and verification contract](sharing-m1.md).
 - [x] Sharing M2: owner-owned subfolder creation, rename, immediate-parent-authorized
   trash and revocation/downgrade races. See [M2](sharing-m2.md).
-- [ ] Sharing M3: delegated multipart with initiator authority and revocation races.
+- [x] Sharing M3: delegated multipart with initiator authority and revocation races;
+  [M3 contract](sharing-m3.md).
 - [ ] Sharing M4-M6: Viewer links/expiry, permission activity and notifications.
 - Threat-model enumeration, confused-deputy, and link-token risks.
 

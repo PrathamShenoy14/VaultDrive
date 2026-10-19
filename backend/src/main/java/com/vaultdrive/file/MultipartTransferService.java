@@ -21,37 +21,42 @@ public class MultipartTransferService {
         this.storage = storage;
     }
 
-    public Session initiate(UUID owner, UUID id) {
-        Dispatch dispatch = sessions.claimInitiation(owner, id); // Permit committed before Garage I/O.
+    public Session initiate(UUID actor, UUID id) {
+        Dispatch dispatch = sessions.claimInitiation(actor, id); // Permit committed before Garage I/O.
         Session session = dispatch.transfer().session();
         if (!dispatch.permitted()) {
             if (!List.of("INITIATING", "OPEN").contains(session.state())) { throw new MultipartConflictException(); }
+            sessions.authorizeCaller(actor, id);
             return session;
         }
         try {
             String upload = storage.initiateMultipart(dispatch.transfer().target(), id, session.initiationId(),
                     dispatch.transfer().contentType());
-            return sessions.recordUploadId(owner, id, session.revision(), session.initiationId(), upload);
+            session = sessions.recordUploadId(session.ownerId(), id, session.revision(), session.initiationId(), upload);
         } catch (RuntimeException uncertain) {
             // Includes result commit loss, expiry and ancestry changes. Never retry Create or compensate.
-            return session;
+            // Retain the prior snapshot; response authorization is outside this catch.
         }
+        sessions.authorizeCaller(actor, id);
+        return session;
     }
 
     public record PartUrl(RegisteredPart part, MultipartStorage.SignedPart upload) {
         @Override public String toString() { return "PartUrl[REDACTED]"; }
     }
 
-    public List<PartUrl> partUrls(UUID owner, UUID id, List<PartExpectation> parts) {
-        Transfer transfer = sessions.authorizeParts(owner, id, parts); // Expectations committed before signing.
+    public List<PartUrl> partUrls(UUID actor, UUID id, List<PartExpectation> parts) {
+        Transfer transfer = sessions.authorizeParts(actor, id, parts); // Expectations committed before signing.
         List<PartUrl> signed = transfer.parts().stream().map(p -> new PartUrl(p, storage.signPart(transfer.target(),
                 transfer.session().uploadId(), p.partNumber(), p.length(), p.sha256(), transfer.authorizationDeadline()))).toList();
-        sessions.validatePartAuthorization(owner, id, transfer.session().revision());
+        sessions.validatePartAuthorization(actor, id, transfer.session().revision());
         return signed;
     }
 
-    public MultipartStorage.Page list(UUID owner, UUID id, int marker, int limit) {
-        Transfer transfer = sessions.authorizeListing(owner, id, marker, limit);
-        return storage.listParts(transfer.target(), transfer.session().uploadId(), marker, limit);
+    public MultipartStorage.Page list(UUID actor, UUID id, int marker, int limit) {
+        Transfer transfer = sessions.authorizeListing(actor, id, marker, limit);
+        var page = storage.listParts(transfer.target(), transfer.session().uploadId(), marker, limit);
+        sessions.validatePartAuthorization(actor, id, transfer.session().revision());
+        return page;
     }
 }
