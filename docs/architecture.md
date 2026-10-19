@@ -52,8 +52,8 @@ lock. Fresh scalar permission resolution occurs inside the mutation transaction;
 file entities are refreshed before authorization and retain optimistic version
 checks against concurrent moves/writes. Folder writes refresh the managed target
 under exclusive coordination. Grant revocation/downgrade serializes with mutations.
-M2 requires no migration, storage identity or multipart lifecycle change. Links,
-activity and notifications remain planned.
+M2 requires no migration, storage identity or multipart lifecycle change. M4 below
+adds links; activity and notifications remain planned.
 See [M2 behavior, races and verification limits](sharing-m2.md).
 
 ### Sharing M3: delegated multipart uploads
@@ -67,6 +67,20 @@ post-signing authorization. Already admitted storage facts are retained under ow
 identity despite revocation; existing receipt/lifecycle guards still control READY.
 No uncertain Create/Complete/Abort is repeated, and no physical cleanup proof is
 inferred. See [behavior, migration and verification](sharing-m3.md).
+
+### Sharing M4: secure file Viewer links
+
+V34 adds immutable file/owner-bound links with unique SHA-256 secret hashes,
+required bounded expiry and permanent revocation. Owners create/list/revoke links;
+the secret is returned once. Two dedicated header-authenticated public GETs expose
+minimal file metadata or a backend attachment stream. Every request resolves
+current READY/lifecycle/ancestry and link validity after owner hierarchy coordination.
+Trash suspends access; restore reactivates only eligible links. Public responses
+redact private identity/hierarchy, use no-store headers and issue no presigned GETs.
+Public rate/concurrency admission uses fixed-memory per-process bounds. Storage and
+synchronous streaming occur after authorization commits; admitted streams may finish
+after revocation. No storage, multipart or purge protocol changes are introduced.
+See [API, security, admission and verification limits](sharing-m4.md).
 
 ### Multipart purge compatibility — M5
 
@@ -225,10 +239,10 @@ enablement is added. See [eligibility, state machine, invocation and limits](kno
 
 - Registration normalizes email addresses, enforces BCrypt's 72-byte input limit, hashes passwords, and relies on a case-insensitive PostgreSQL unique index.
 - Login verifies BCrypt hashes and issues HS256 JWT access tokens. The configured default lifetime is 15 minutes.
-- The API is stateless. Registration, login, and health are public; all other endpoints require a valid bearer token.
+- The API is stateless. Registration, login and health are public. Sharing M4 adds two narrowly public file-link GETs using a dedicated secret header and separate security chain. Other endpoints require a valid bearer JWT.
 - JWT subjects are user UUIDs. Issuer, signature, and expiration are validated.
 
-Not implemented: refresh tokens, logout/revocation, account-state checks, rate limiting, key rotation, or asymmetric signing.
+Not implemented: refresh tokens, JWT logout/revocation, account-state checks, general API rate limiting, key rotation, or asymmetric signing. Share-link revocation and per-process public-link rate/concurrency limits are implemented; deployment still requires HTTPS, secret-safe proxy logging and edge timeouts.
 
 ### Folder namespace — Committed
 
@@ -425,7 +439,7 @@ recovery](folder-purge-design.md#slice-6-bottom-up-metadata-removal-and-durable-
 - Historical admitted stale `UPLOADING`, `FAILED` and orphan cleanup remain unresolved. B2 implements never-admitted expiry; B3 recovers only freshly eligible UPLOADING with durable success receipts. PUT success before receipt commit remains unknown after a crash.
 - Audited legacy storage-identity recovery and verified quiescence for admitted
   uncertain upload writers; these files still block automatic folder finalization.
-- Sharing M4-M6 (links, activity and notifications), versioning, client integration for direct/resumable transfers, quotas, malware scanning, audit logs, observability, and client applications.
+- Sharing M5-M6 (activity and notifications), versioning, client integration for direct/resumable transfers, quotas, malware scanning, audit logs, observability, and client applications.
 - Production deployment, backup/restore, retention, encryption/key-management, and service-level objectives.
 
 No benchmark, scale limit, or production-readiness claim has been established.

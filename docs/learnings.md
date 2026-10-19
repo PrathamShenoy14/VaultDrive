@@ -600,3 +600,22 @@ A populated upgrade test exposed PostgreSQL's deferred-trigger-event restriction
 on ALTER TABLE: flush the allocation/session pair check after backfill before
 restoring the identity trigger. No retained evidence needs rewriting. See
 [the M3 contract and verification](sharing-m3.md).
+
+## Sharing M4: a file capability has its own admission boundary
+
+A random link secret authorizes metadata and downloads for one file, independently
+of JWT user identity or direct grants. Store only its SHA-256 hash, require a finite deadline,
+return the secret once and keep it out of list/public DTOs and diagnostic strings.
+Immutable file/owner binding and irreversible revocation belong in PostgreSQL too.
+An expiry check before a lock wait is stale: validate at the fresh statement time
+after owner coordination. The same snapshot must bind the link to current file
+location, readiness and ancestry because compatible file moves can overlap reads.
+
+Revocation prevents the next admission; it cannot retract bytes already authorized
+for a stream. Releasing the shared hierarchy transaction before opening storage
+lets an exclusive revocation commit during I/O. A fixed token bucket plus semaphores
+can bound the public surface without an attacker-sized identity map. Synchronous
+streaming makes the download permit cover storage open through response closure,
+including client disconnect, without queueing async work. These are local capacity
+bounds, with no measured throughput or distributed fairness claim. See
+[the M4 API, security and verification contract](sharing-m4.md).

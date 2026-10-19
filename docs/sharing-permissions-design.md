@@ -1,10 +1,10 @@
 # Sharing and permissions design
 
-Status: Approved design; **M1 (grants and Viewer access), M2 (Editor content operations) and M3 (delegated multipart) are implemented**. M4-M6 remain planned.
+Status: Approved design; **M1 (grants and Viewer access), M2 (Editor content operations), M3 (delegated multipart) and M4 (file Viewer links) are implemented**. M5-M6 remain planned.
 
 Source: Revised sharing/permissions plan in `Pasted text(9).txt` from the "VaultDrive Day One Plan" conversation, recorded on 2026-10-19. This document preserves that plan and the decision to retire legacy synchronous upload.
 
-Scope: Approved six-milestone implementation boundary. See [the M1 implementation contract](sharing-m1.md) for V32, implemented routes, concurrency guarantees and verification limits. See [the M2 contract](sharing-m2.md) for Editor mutations and verification. See [the M3 contract](sharing-m3.md) for delegated multipart. Links, activity and notifications below remain design only.
+Scope: Approved six-milestone implementation boundary. See [the M1 implementation contract](sharing-m1.md) for V32, implemented routes, concurrency guarantees and verification limits. See [the M2 contract](sharing-m2.md) for Editor mutations and verification. See [the M3 contract](sharing-m3.md) for delegated multipart and [the M4 contract](sharing-m4.md) for secure file Viewer links. Activity and notifications below remain design only.
 
 The revised MVP keeps **PostgreSQL direct grants, downward inheritance, and the strongest applicable permission**. Editors upload directly to Garage through the existing multipart protocol. Ownership, sharing control, moves, restore, and permanent deletion remain with the resource owner.
 
@@ -281,7 +281,7 @@ The existing transport publishes everything to the purge queue, whose consumer r
 | 1. Grants and Viewer access — implemented | Constraints, resolver, owner grant APIs, inherited reads/list/download, shared entry points, parent redaction |
 | 2. Editor content operations (implemented) | Owner-assigned folder creation, rename, conditional trash, and owner-only move/restore/purge |
 | 3. Delegated multipart (implemented) | Initiator migration, actor-scoped idempotency, all session authorization gates, revocation races, owner recovery |
-| 4. File Viewer links | Expiry, permanent revocation, lifecycle blocking, token secrecy, backend streaming |
+| 4. File Viewer links (implemented) | Expiry, permanent revocation, lifecycle blocking, token secrecy, backend streaming; [M4 contract](sharing-m4.md) |
 | 5. Permission activity | Atomic mutation/activity/outbox persistence and isolated event routing |
 | 6. Sharing notifications | Idempotent in-app delivery, stale-event handling, recipient privacy |
 

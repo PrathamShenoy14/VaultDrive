@@ -2,7 +2,8 @@
 
 Implemented under the [approved sharing design](sharing-permissions-design.md).
 This extends [M1 grants](sharing-m1.md), [M2 Editor mutations](sharing-m2.md)
-and the existing multipart lifecycle; sharing M4-M6 remain planned.
+and the existing multipart lifecycle. [M4](sharing-m4.md) subsequently adds secure
+file Viewer links; sharing M5-M6 remain planned.
 
 ## API and ownership
 
@@ -136,3 +137,4 @@ Of the 48 default-suite skips, 27 passed in that supplemental run. The remaining
 Those harnesses retain their separate resource/protocol review requirements.
 Existing browser, HTTPS/CORS, clock-skew, late-writer and physical reclamation limits remain.
 Sharing M4-M6, zero-byte protocol changes and legacy upload retirement are outside M3.
+M4 implementation and verification are recorded separately in [its contract](sharing-m4.md).

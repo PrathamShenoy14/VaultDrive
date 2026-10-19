@@ -64,6 +64,19 @@ post-storage response checks use fresh caller authority. Trusted evidence record
 uses retained owner identity after permitted calls, even following revocation;
 READY still revalidates lifecycle. No lock spans storage. See [Sharing M3](../sharing-m3.md).
 
+Sharing M4 uses exclusive owner hierarchy coordination for link creation and
+permanent revocation, and shared coordination for owner listing/public admission.
+Only immutable link/resource owner identity precedes the lock. One fresh scalar
+statement afterwards binds hash/revocation/expiry to READY, current file location
+and complete accessible ancestry through the existing resolver. Expiry uses the
+post-lock statement time. Compatible file moves cannot split that snapshot.
+Pending purge freezes link management; Trash permits owner inspection/revocation.
+Authorization commits before any storage open or response streaming; admitted
+streams may finish after revocation. No file/allocation/session locks, versions,
+storage evidence or existing mutation ordering change. Real PostgreSQL tests cover
+both revoke/read, create/Trash and revoke/purge orders and expiry while waiting.
+See [Sharing M4](../sharing-m4.md).
+
 M4 cancellation and expiry reuse shared hierarchy → fresh file → allocation →
 session, followed by cancellation progress. Abandonment and intent commit
 atomically; completion cannot consume the same decision. A separate commit grants

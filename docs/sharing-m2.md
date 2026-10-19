@@ -2,7 +2,8 @@
 
 Implemented on 2026-10-19 under the [approved matrix](sharing-permissions-design.md).
 M2 extends [M1](sharing-m1.md). [M3](sharing-m3.md) subsequently adds delegated
-multipart; M4-M6 remain planned. Owner-only multipart statements below record the M2 boundary.
+multipart; [M4](sharing-m4.md) adds file Viewer links. M5-M6 remain planned.
+Owner-only multipart statements below record the M2 boundary.
 
 ## Behavior and ownership
 

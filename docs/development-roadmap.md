@@ -177,7 +177,9 @@ Exit criteria: correctness tests remain green and measured contention improves f
   trash and revocation/downgrade races. See [M2](sharing-m2.md).
 - [x] Sharing M3: delegated multipart with initiator authority and revocation races;
   [M3 contract](sharing-m3.md).
-- [ ] Sharing M4-M6: Viewer links/expiry, permission activity and notifications.
+- [x] Sharing M4: secure expiring/revocable file-only Viewer links and backend streams;
+  [M4 contract](sharing-m4.md).
+- [ ] Sharing M5-M6: permission activity and notifications.
 - Threat-model enumeration, confused-deputy, and link-token risks.
 
 ## Phase 6 — Transfer scalability

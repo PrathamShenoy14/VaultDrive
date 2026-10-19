@@ -2,6 +2,7 @@ package com.vaultdrive.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 
 import org.springframework.http.HttpMethod;
 
@@ -17,7 +18,22 @@ import org.springframework.security.web.access.AccessDeniedHandlerImpl;
 @EnableWebSecurity
 public class SecurityConfig {
 
+    /** Link secrets never become authentication and JWTs confer no authority on this surface. */
     @Bean
+    @Order(1)
+    public SecurityFilterChain publicShareLinks(HttpSecurity http) throws Exception {
+        return http.securityMatcher("/api/v1/public/share-links/**")
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(HttpMethod.GET, "/api/v1/public/share-links/{id}",
+                                "/api/v1/public/share-links/{id}/download").permitAll()
+                        .anyRequest().denyAll())
+                .build();
+    }
+
+    @Bean
+    @Order(2)
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http
     ) throws Exception {
