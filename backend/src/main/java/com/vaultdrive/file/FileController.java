@@ -144,12 +144,12 @@ public class FileController {
             @PathVariable UUID fileId,
             @RequestBody RenameFileRequest request
     ) {
-        UUID ownerId =
+        UUID actorId =
                 UUID.fromString(jwt.getSubject());
 
         FileResponse response =
                 fileService.renameFile(
-                        ownerId,
+                        actorId,
                         fileId,
                         request.name()
                 );
@@ -181,11 +181,11 @@ public class FileController {
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID fileId
     ) {
-        UUID ownerId =
+        UUID actorId =
                 UUID.fromString(jwt.getSubject());
     
         fileService.trashFile(
-                ownerId,
+                actorId,
                 fileId
         );
     

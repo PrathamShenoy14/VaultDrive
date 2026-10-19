@@ -38,6 +38,10 @@ public class ResourceAccessRepository {
         return map((Object[]) rows.getFirst());
     }
 
+    public void refreshForMutation(Object entity) {
+        entityManager.refresh(entity);
+    }
+
     public Query query(String sql) {
         return entityManager.createNativeQuery(sql);
     }

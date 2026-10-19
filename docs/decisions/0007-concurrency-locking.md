@@ -38,6 +38,21 @@ Deterministic PostgreSQL tests cover both grant/trash, grant/move, revoke/read,
 revoke/purge and revoke/restore orders, stale updates and cached-state rejection.
 See [M1](../sharing-m1.md). Existing mutation lock ordering is unchanged.
 
+Sharing M2 uses the immutable resource/destination owner, distinct from the JWT
+actor, for the same exclusive folder/shared file lock. Creation authorizes the
+destination after locking and assigns its owner to the new row. Rename requires
+effective Editor on the target; trash additionally requires Editor on its immediate
+non-null parent. Fresh scalar authorization runs inside the mutation transaction,
+after coordination. Folder targets are refreshed before writes; file targets are
+refreshed before authorization, retaining their loaded optimistic version. A
+compatible concurrent file move or write conflicts at flush rather than committing
+a mutation authorized for an old location. Collaborator file responses use the
+authorization snapshot's visible parent, including no-ops. Revocation and downgrade
+serialize through the existing exclusive owner lock; no shared-to-exclusive upgrade
+is introduced. PostgreSQL tests observe actual advisory/row waits and assert both
+winner orders and persisted results. See [M2](../sharing-m2.md). Owner-only paths,
+namespace constraints, restore ordering and storage/lifecycle protocols remain.
+
 M4 cancellation and expiry reuse shared hierarchy → fresh file → allocation →
 session, followed by cancellation progress. Abandonment and intent commit
 atomically; completion cannot consume the same decision. A separate commit grants

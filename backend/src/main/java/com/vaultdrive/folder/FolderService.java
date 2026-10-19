@@ -9,6 +9,7 @@ import com.vaultdrive.folder.exception.FolderNotFoundException;
 import com.vaultdrive.folder.exception.InvalidFolderMoveException;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
 import com.vaultdrive.sharing.ResourceReadService;
+import com.vaultdrive.sharing.ResourceAccess;
 import com.vaultdrive.outbox.OutboxEvent;
 import com.vaultdrive.outbox.OutboxWriter;
 import com.vaultdrive.worker.FolderPurgeRunService;
@@ -58,13 +59,14 @@ public class FolderService {
 
     @Transactional
     public UUID createFolder(
-            UUID ownerId,
+            UUID actorId,
             UUID parentFolderId,
             String name
     ) {
 
-        if (parentFolderId != null) resourceReads.requireOwner(ownerId, true, parentFolderId);
+        UUID ownerId = parentFolderId == null ? actorId : resourceReads.owner(true, parentFolderId);
         lockFolderNamespace(ownerId);
+        if (parentFolderId != null) resourceReads.requireEditor(actorId, true, parentFolderId, false);
         
         String normalizedName =
                 folderNameValidator.validateAndNormalize(name);
@@ -122,13 +124,14 @@ public class FolderService {
 
     @Transactional
     public FolderResponse renameFolder(
-            UUID ownerId,
+            UUID actorId,
             UUID folderId,
             String newName
     ) {
 
-        resourceReads.requireOwner(ownerId, true, folderId);
+        UUID ownerId = resourceReads.owner(true, folderId);
         lockFolderNamespace(ownerId);
+        ResourceAccess permission = resourceReads.requireEditor(actorId, true, folderId, false);
         
         // Validate and normalize the requested name.
         String normalizedName =
@@ -141,9 +144,11 @@ public class FolderService {
                         folderId
                 );
 
+        resourceReads.refreshForMutation(folder);
+
         // Renaming to the existing name is a successful no-op.
         if (folder.getName().equals(normalizedName)) {
-            return toResponse(folder);
+            return toResponse(folder, permission);
         }
 
         // Check for duplicates within the same parent.
@@ -176,7 +181,7 @@ public class FolderService {
         // Flush now so database uniqueness violations surface here.
         folderRepository.flush();
 
-        return toResponse(folder);
+        return toResponse(folder, permission);
     }
 
     @Transactional
@@ -278,10 +283,10 @@ public class FolderService {
     }
 
     @Transactional
-    public void deleteFolder(UUID ownerId, UUID folderId) {
-        resourceReads.requireOwner(ownerId, true, folderId);
-
+    public void deleteFolder(UUID actorId, UUID folderId) {
+        UUID ownerId = resourceReads.owner(true, folderId);
         lockFolderNamespace(ownerId);
+        resourceReads.requireEditor(actorId, true, folderId, true);
     
         Folder folder =
                 folderAccessValidator.requireAccessibleFolder(
@@ -289,6 +294,7 @@ public class FolderService {
                         folderId
                 );
     
+        resourceReads.refreshForMutation(folder);
         folder.softDelete();
         folderRepository.flush();
     }
@@ -495,6 +501,12 @@ public class FolderService {
                         parentFolderId,
                         name
                 );
+    }
+
+    private FolderResponse toResponse(Folder folder, ResourceAccess permission) {
+        return new FolderResponse(folder.getId(), folder.getName(),
+                permission.parentVisible() ? folder.getParentFolderId() : null,
+                folder.getCreatedAt(), folder.getUpdatedAt(), permission.role(), permission.role().capabilities(true));
     }
 
     // Convert our JPA entity into a public API response.

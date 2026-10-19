@@ -35,10 +35,10 @@ public class FolderController {
             @Valid @RequestBody CreateFolderRequest request
     ) {
 
-        UUID ownerId = UUID.fromString(jwt.getSubject());
+        UUID actorId = UUID.fromString(jwt.getSubject());
 
         UUID folderId = folderService.createFolder(
-                ownerId,
+                actorId,
                 request.parentFolderId(),
                 request.name()
         );
@@ -98,10 +98,10 @@ public class FolderController {
             @PathVariable UUID folderId,
             @Valid @RequestBody RenameFolderRequest request
     ) {
-        UUID ownerId = UUID.fromString(jwt.getSubject());
+        UUID actorId = UUID.fromString(jwt.getSubject());
     
         FolderResponse response = folderService.renameFolder(
-                ownerId,
+                actorId,
                 folderId,
                 request.name()
         );
@@ -131,9 +131,9 @@ public class FolderController {
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID folderId
     ) {
-        UUID ownerId = UUID.fromString(jwt.getSubject());
+        UUID actorId = UUID.fromString(jwt.getSubject());
     
-        folderService.deleteFolder(ownerId, folderId);
+        folderService.deleteFolder(actorId, folderId);
     
         return ResponseEntity.noContent().build();
     }

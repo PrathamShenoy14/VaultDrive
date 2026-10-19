@@ -3,7 +3,7 @@ package com.vaultdrive.file;
 import com.vaultdrive.folder.Folder;
 import com.vaultdrive.folder.FolderRepository;
 import com.vaultdrive.folder.FolderService;
-import com.vaultdrive.folder.exception.FolderNotFoundException;
+import com.vaultdrive.file.exception.FileNotFoundException;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
 import com.vaultdrive.outbox.OutboxEventRepository;
 import com.vaultdrive.user.User;
@@ -548,7 +548,7 @@ class FileHierarchyConcurrencyIntegrationTest {
             trash.get(5, TimeUnit.SECONDS);
 
             assertThatThrownBy(() -> rename.get(5, TimeUnit.SECONDS))
-                    .hasRootCauseInstanceOf(FolderNotFoundException.class);
+                    .hasRootCauseInstanceOf(FileNotFoundException.class);
 
             StoredFile persisted = storedFileRepository
                     .findById(fixture.fileId())

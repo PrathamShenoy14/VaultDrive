@@ -161,14 +161,14 @@ public class FileService {
 
     @Transactional
     public FileResponse renameFile(
-            UUID ownerId,
+            UUID actorId,
             UUID fileId,
             String newName
     ) {
         String normalizedRequestedName =
                 fileNameValidator.validateAndNormalize(newName);
 
-        resourceReads.requireOwner(ownerId, false, fileId);
+        UUID ownerId = resourceReads.owner(false, fileId);
         hierarchyCoordinator.acquireShared(ownerId);
 
         StoredFile storedFile =
@@ -181,6 +181,9 @@ public class FileService {
                         .orElseThrow(() ->
                                 new FileNotFoundException("File not found")
                         );
+
+        resourceReads.refreshForMutation(storedFile);
+        ResourceAccess permission = resourceReads.requireEditor(actorId, false, fileId, false);
 
         String resolvedName =
                 fileNameExtensionResolver.preserveExtension(
@@ -202,7 +205,7 @@ public class FileService {
                         finalName
                 );
     
-        return toFileResponse(renamedFile);
+        return toFileResponse(renamedFile, permission);
     }
 
     @Transactional
@@ -248,10 +251,10 @@ public class FileService {
 
     @Transactional
     public FileResponse trashFile(
-            UUID ownerId,
+            UUID actorId,
             UUID fileId
     ) {
-        resourceReads.requireOwner(ownerId, false, fileId);
+        UUID ownerId = resourceReads.owner(false, fileId);
         hierarchyCoordinator.acquireShared(ownerId);
 
         StoredFile storedFile =
@@ -265,6 +268,9 @@ public class FileService {
                                 new FileNotFoundException("File not found")
                         );
 
+        resourceReads.refreshForMutation(storedFile);
+        ResourceAccess permission = resourceReads.requireEditor(actorId, false, fileId, true);
+
         validateFolderAccess(
                 ownerId,
                 storedFile.getFolderId()
@@ -273,7 +279,7 @@ public class FileService {
         StoredFile trashedFile =
                 fileMetadataService.softDelete(storedFile);
     
-        return toFileResponse(trashedFile);
+        return toFileResponse(trashedFile, permission);
     }
 
     public FilePageResponse listTrash(
@@ -333,6 +339,14 @@ public class FileService {
                 ownerId,
                 fileId
         );
+    }
+
+    private FileResponse toFileResponse(StoredFile file, ResourceAccess permission) {
+        return new FileResponse(file.getId(), file.getName(),
+                permission.role() == com.vaultdrive.sharing.ResourceRole.OWNER ? file.getFolderId()
+                        : permission.parentVisible() ? permission.parentId() : null,
+                file.getContentType(), file.getSizeBytes(), file.getCreatedAt(), file.getUpdatedAt(),
+                permission.role(), permission.role().capabilities(false));
     }
 
     private FileResponse toFileResponse(

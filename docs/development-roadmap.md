@@ -173,7 +173,8 @@ Exit criteria: correctness tests remain green and measured contention improves f
 - [x] Sharing M1: PostgreSQL grants, strongest-role inheritance, owner management,
   Viewer metadata/list/download, redaction and paginated shared entry points;
   [implementation and verification contract](sharing-m1.md).
-- [ ] Sharing M2: Editor content operations.
+- [x] Sharing M2: owner-owned subfolder creation, rename, immediate-parent-authorized
+  trash and revocation/downgrade races. See [M2](sharing-m2.md).
 - [ ] Sharing M3: delegated multipart with initiator authority and revocation races.
 - [ ] Sharing M4-M6: Viewer links/expiry, permission activity and notifications.
 - Threat-model enumeration, confused-deputy, and link-token risks.

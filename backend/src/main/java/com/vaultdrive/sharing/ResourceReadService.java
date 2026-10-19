@@ -28,7 +28,7 @@ public class ResourceReadService {
         return locked(actor, false, id);
     }
 
-    /** M1 mutations stay owner-only; visible collaborators get 403, others get 404. */
+    /** Owner-only operations: visible collaborators get 403, others get 404. */
     public void requireOwner(UUID actor, boolean folder, UUID id) {
         UUID owner = access.owner(folder, id);
         if (!owner.equals(actor)) {
@@ -37,6 +37,33 @@ public class ResourceReadService {
             throw new AccessDeniedException("Owner permission required");
         }
         // The mutation still locks and freshly reads its owned row after this immutable identity check.
+    }
+
+    public UUID owner(boolean folder, UUID id) {
+        return access.owner(folder, id);
+    }
+
+    /** Called after the owner hierarchy lock. File callers refresh before the authorization
+     * snapshot and retain this version for their optimistic write. */
+    public void refreshForMutation(Object entity) {
+        access.refreshForMutation(entity);
+    }
+
+    /** Caller holds exclusive folder/shared file owner coordination in its mutation transaction. */
+    public ResourceAccess requireEditor(UUID actor, boolean folder, UUID id, boolean trash) {
+        ResourceAccess resource = access.require(actor, folder, id, false);
+        if (resource.role() == ResourceRole.OWNER) return resource;
+        if (resource.role() != ResourceRole.EDITOR) {
+            throw new AccessDeniedException("Editor permission required");
+        }
+        if (trash) {
+            // Authorize the target first. A private parent must produce 403 without exposing it.
+            if (resource.parentId() == null || !resource.parentVisible()
+                    || access.require(actor, true, resource.parentId(), false).role() == ResourceRole.VIEWER) {
+                throw new AccessDeniedException("Editor permission on parent required");
+            }
+        }
+        return resource;
     }
 
     public FolderResponse folder(UUID actor, UUID id) {

@@ -1,10 +1,10 @@
 # Sharing and permissions design
 
-Status: Approved design; **M1 (grants and Viewer access) is implemented**. M2-M6 remain planned.
+Status: Approved design; **M1 (grants and Viewer access) and M2 (Editor content operations) are implemented**. M3-M6 remain planned.
 
 Source: Revised sharing/permissions plan in `Pasted text(9).txt` from the "VaultDrive Day One Plan" conversation, recorded on 2026-10-19. This document preserves that plan and the decision to retire legacy synchronous upload.
 
-Scope: Approved six-milestone implementation boundary. See [the M1 implementation contract](sharing-m1.md) for V32, implemented routes, concurrency guarantees and verification limits. Multipart delegation, links, activity and notifications below remain design only.
+Scope: Approved six-milestone implementation boundary. See [the M1 implementation contract](sharing-m1.md) for V32, implemented routes, concurrency guarantees and verification limits. See [the M2 contract](sharing-m2.md) for Editor mutations and verification. Multipart delegation, links, activity and notifications below remain design only.
 
 The revised MVP keeps **PostgreSQL direct grants, downward inheritance, and the strongest applicable permission**. Editors upload directly to Garage through the existing multipart protocol. Ownership, sharing control, moves, restore, and permanent deletion remain with the resource owner.
 
@@ -279,7 +279,7 @@ The existing transport publishes everything to the purge queue, whose consumer r
 | Milestone | Testable acceptance boundary |
 |---|---|
 | 1. Grants and Viewer access — implemented | Constraints, resolver, owner grant APIs, inherited reads/list/download, shared entry points, parent redaction |
-| 2. Editor content operations | Owner-assigned folder creation, rename, conditional trash, and owner-only move/restore/purge |
+| 2. Editor content operations (implemented) | Owner-assigned folder creation, rename, conditional trash, and owner-only move/restore/purge |
 | 3. Delegated multipart | Initiator migration, actor-scoped idempotency, all session authorization gates, revocation races, owner recovery |
 | 4. File Viewer links | Expiry, permanent revocation, lifecycle blocking, token secrecy, backend streaming |
 | 5. Permission activity | Atomic mutation/activity/outbox persistence and isolated event routing |

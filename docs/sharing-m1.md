@@ -1,8 +1,9 @@
 # Sharing M1: grants and Viewer access
 
 Implemented on 2026-10-19 under the [approved design](sharing-permissions-design.md).
-Only M1 is implemented. `EDITOR` grants currently permit the same reads as `VIEWER`;
-content mutations, uploads and multipart sessions remain owner-only. There are no
+This records the M1 boundary, where `EDITOR` initially permitted the same reads as
+`VIEWER`. [M2](sharing-m2.md) now adds Editor folder creation, rename and conditional
+trash. Uploads and multipart sessions remain owner-only. There are no
 delegated sessions, links, activity events, notifications or frontend changes.
 
 ## Schema and resolution
@@ -136,4 +137,5 @@ The 47 skips are explicitly opt-in checks, not evidence of passing those scenari
 
 No performance or production-scale claim is made: recursive per-entry resolution,
 materialized page filtering and offset pagination have not been benchmarked.
-M2-M6 and existing multipart browser, clock and uncertain-writer limits remain.
+M3-M6 and existing multipart browser, clock and uncertain-writer limits remain.
+M2 verification is recorded separately in [its contract](sharing-m2.md).

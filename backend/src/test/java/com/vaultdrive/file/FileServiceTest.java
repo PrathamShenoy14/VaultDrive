@@ -80,6 +80,10 @@ class FileServiceTest {
 
     @BeforeEach
     void setUp() {
+        lenient().when(resourceReads.requireEditor(any(), anyBoolean(), any(), anyBoolean()))
+                .thenAnswer(i -> new com.vaultdrive.sharing.ResourceAccess(i.getArgument(2), i.getArgument(0),
+                        null, "", null, 0, null, java.time.Instant.now(), java.time.Instant.now(),
+                        com.vaultdrive.sharing.ResourceRole.OWNER, true, true));
         fileNameExtensionResolver =
                     new FileNameExtensionResolver();
         
@@ -679,6 +683,7 @@ class FileServiceTest {
     @Test
     void shouldRenameReadyRootFile() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
         UUID fileId = UUID.randomUUID();
     
         StoredFile storedFile = new StoredFile(
@@ -767,6 +772,7 @@ class FileServiceTest {
     @Test
     void shouldRenameReadyFileInsideAccessibleFolder() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
         UUID fileId = UUID.randomUUID();
         UUID folderId = UUID.randomUUID();
     
@@ -831,6 +837,7 @@ class FileServiceTest {
     @Test
     void shouldRejectRenameWhenFileIsNotVisible() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
         UUID fileId = UUID.randomUUID();
     
         when(fileNameValidator
@@ -868,6 +875,7 @@ class FileServiceTest {
     @Test
     void shouldNotRenameWhenFolderIsInaccessible() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
         UUID fileId = UUID.randomUUID();
         UUID folderId = UUID.randomUUID();
     
@@ -920,6 +928,7 @@ class FileServiceTest {
     @Test
     void shouldPreserveExistingExtensionWhenRenamingWithoutExtension() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
         UUID fileId = UUID.randomUUID();
     
         StoredFile storedFile = new StoredFile(
@@ -989,6 +998,7 @@ class FileServiceTest {
     @Test
     void shouldRejectRenameWhenExtensionIsChanged() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
         UUID fileId = UUID.randomUUID();
     
         StoredFile storedFile = new StoredFile(
@@ -1041,6 +1051,7 @@ class FileServiceTest {
     @Test
     void shouldAllowSameExtensionWithDifferentCase() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
         UUID fileId = UUID.randomUUID();
     
         StoredFile storedFile = new StoredFile(
@@ -1102,6 +1113,7 @@ class FileServiceTest {
     @Test
     void shouldRejectRenameWhenPreservedExtensionMakesFinalNameInvalid() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
         UUID fileId = UUID.randomUUID();
     
         String requestedName = "a".repeat(254);
@@ -1506,6 +1518,7 @@ class FileServiceTest {
     @Test
     void shouldTrashReadyRootFile() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
     
         StoredFile storedFile =
                 createReadyFile(
@@ -1558,6 +1571,7 @@ class FileServiceTest {
     @Test
     void shouldTrashReadyFileInsideAccessibleFolder() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
         UUID folderId = UUID.randomUUID();
     
         StoredFile storedFile =
@@ -1611,6 +1625,7 @@ class FileServiceTest {
     @Test
     void shouldRejectTrashWhenFileIsNotVisible() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
         UUID fileId = UUID.randomUUID();
     
         when(storedFileRepository
@@ -1643,6 +1658,7 @@ class FileServiceTest {
     @Test
     void shouldRejectTrashWhenParentFolderIsInaccessible() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
         UUID folderId = UUID.randomUUID();
     
         StoredFile storedFile =

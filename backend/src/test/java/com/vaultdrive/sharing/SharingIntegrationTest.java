@@ -316,26 +316,23 @@ class SharingIntegrationTest {
     }
 
     @Test
-    void viewerAndEditorCannotMutateContentOrInspectOwnerTrash() throws Exception {
-        var grant = grant(true, shared.getId(), ResourceRole.VIEWER);
-        for (ResourceRole role : new ResourceRole[]{ResourceRole.VIEWER, ResourceRole.EDITOR}) {
-            if (role == ResourceRole.EDITOR) grants.update(owner, true, shared.getId(), grant.id(), role, 0L);
-            mvc.perform(patch("/api/v1/files/{id}/name", file.getId()).with(as(viewer))
-                    .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"changed.txt\"}"))
-                    .andExpect(status().isForbidden());
-            mvc.perform(patch("/api/v1/files/{id}/move", file.getId()).with(as(viewer))
-                    .contentType(MediaType.APPLICATION_JSON).content("{\"folderId\":null}"))
-                    .andExpect(status().isForbidden());
-            mvc.perform(delete("/api/v1/files/{id}", file.getId()).with(as(viewer))).andExpect(status().isForbidden());
-            mvc.perform(post("/api/v1/files/{id}/restore", file.getId()).with(as(viewer))).andExpect(status().isForbidden());
-            mvc.perform(delete("/api/v1/files/{id}/permanent", file.getId()).with(as(viewer))).andExpect(status().isForbidden());
-            mvc.perform(delete("/api/v1/folders/{id}", child.getId()).with(as(viewer))).andExpect(status().isForbidden());
-            mvc.perform(post("/api/v1/folders").with(as(viewer)).contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"name\":\"new\",\"parentFolderId\":\"" + shared.getId() + "\"}"))
-                    .andExpect(status().isForbidden());
-            mvc.perform(get("/api/v1/files/trash").with(as(viewer))).andExpect(status().isOk())
-                    .andExpect(jsonPath("$.content").isEmpty());
-        }
+    void viewerCannotMutateContentOrInspectOwnerTrash() throws Exception {
+        grant(true, shared.getId(), ResourceRole.VIEWER);
+        mvc.perform(patch("/api/v1/files/{id}/name", file.getId()).with(as(viewer))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"changed.txt\"}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(patch("/api/v1/files/{id}/move", file.getId()).with(as(viewer))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"folderId\":null}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(delete("/api/v1/files/{id}", file.getId()).with(as(viewer))).andExpect(status().isForbidden());
+        mvc.perform(post("/api/v1/files/{id}/restore", file.getId()).with(as(viewer))).andExpect(status().isForbidden());
+        mvc.perform(delete("/api/v1/files/{id}/permanent", file.getId()).with(as(viewer))).andExpect(status().isForbidden());
+        mvc.perform(delete("/api/v1/folders/{id}", child.getId()).with(as(viewer))).andExpect(status().isForbidden());
+        mvc.perform(post("/api/v1/folders").with(as(viewer)).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"new\",\"parentFolderId\":\"" + shared.getId() + "\"}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/files/trash").with(as(viewer))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty());
         em.refresh(file);
         assertThat(file.getName()).isEqualTo("file.txt");
         assertThat(file.getFolderId()).isEqualTo(child.getId());
@@ -383,6 +380,218 @@ class SharingIntegrationTest {
         mvc.perform(get("/api/v1/shared-with-me").with(as(viewer))).andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].resource.parentFolderId").isEmpty())
                 .andExpect(jsonPath("$.content[0].resource.effectiveRole").value("VIEWER"));
+    }
+
+
+    @Test
+    void editorCreatesOwnerOwnedFoldersWithInheritedAccessButNoIndependentCreatorGrant() throws Exception {
+        var source = grant(true, shared.getId(), ResourceRole.EDITOR);
+        UUID created = folderService.createFolder(viewer, child.getId(), "editor-created");
+        Folder persisted = folders.findById(created).orElseThrow();
+        assertThat(persisted.getOwnerId()).isEqualTo(owner);
+        assertThat(persisted.getParentFolderId()).isEqualTo(child.getId());
+        assertThat(reads.folder(viewer, created).effectiveRole()).isEqualTo(ResourceRole.EDITOR);
+        assertThat(grants.list(owner, true, created).direct()).isEmpty();
+        assertThat(reads.folders(viewer, null)).isEmpty();
+        mvc.perform(post("/api/v1/folders").with(as(viewer)).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"http-created\",\"parentFolderId\":\"" + shared.getId() + "\"}"))
+                .andExpect(status().isCreated());
+        assertThat(folders.findByOwnerIdAndParentFolderIdAndDeletedAtIsNull(owner, shared.getId()))
+                .extracting(Folder::getName).contains("http-created");
+        grants.revoke(owner, true, shared.getId(), source.id());
+        mvc.perform(get("/api/v1/folders/{id}", created).with(as(viewer))).andExpect(status().isNotFound());
+        assertThat(reads.folder(owner, created).name()).isEqualTo("editor-created");
+    }
+
+    @Test
+    void directlySharedEditorsRenameWithoutLeakingPrivateParentsAndCannotTrashEntryPoints() throws Exception {
+        grant(false, file.getId(), ResourceRole.EDITOR);
+        grant(true, shared.getId(), ResourceRole.EDITOR);
+        // The file has inherited Editor as well; use an independent private file for direct-only access.
+        StoredFile direct = ready(sibling.getId(), "direct.txt");
+        grant(false, direct.getId(), ResourceRole.EDITOR);
+        String key = direct.getStorageKey();
+        long initialVersion = direct.getVersion();
+        mvc.perform(patch("/api/v1/files/{id}/name", direct.getId()).with(as(viewer))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"changed\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("changed.txt"))
+                .andExpect(jsonPath("$.folderId").isEmpty()).andExpect(jsonPath("$.effectiveRole").value("EDITOR"));
+        mvc.perform(patch("/api/v1/folders/{id}", shared.getId()).with(as(viewer))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"renamed\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.parentFolderId").isEmpty())
+                .andExpect(jsonPath("$.allowedCapabilities").value(org.hamcrest.Matchers.hasItem("CREATE_FOLDER")));
+        // No-op responses must also redact private ancestry.
+        assertThat(fileService.renameFile(viewer, direct.getId(), "changed").folderId()).isNull();
+        assertThat(folderService.renameFolder(viewer, shared.getId(), "renamed").parentFolderId()).isNull();
+        em.refresh(direct);
+        assertThat(direct.getStorageKey()).isEqualTo(key);
+        assertThat(direct.getVersion()).isEqualTo(initialVersion + 1);
+        mvc.perform(delete("/api/v1/files/{id}", direct.getId()).with(as(viewer))).andExpect(status().isForbidden());
+        mvc.perform(delete("/api/v1/folders/{id}", shared.getId()).with(as(viewer))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/folders/{id}", sibling.getId()).with(as(viewer))).andExpect(status().isNotFound());
+        mvc.perform(get("/api/v1/folders/{id}/children", privateParent.getId()).with(as(viewer)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void trashRequiresImmediateParentEditorEvenForDirectEditorsAndRootIsOwnerOnly() throws Exception {
+        grant(true, child.getId(), ResourceRole.VIEWER);
+        grant(false, file.getId(), ResourceRole.EDITOR);
+        mvc.perform(delete("/api/v1/files/{id}", file.getId()).with(as(viewer))).andExpect(status().isForbidden());
+        grant(true, shared.getId(), ResourceRole.VIEWER);
+        grant(true, sibling.getId(), ResourceRole.EDITOR);
+        mvc.perform(delete("/api/v1/folders/{id}", sibling.getId()).with(as(viewer))).andExpect(status().isForbidden());
+        StoredFile rootFile = ready(null, "root.txt");
+        Folder rootFolder = folder(null, "root");
+        grant(false, rootFile.getId(), ResourceRole.EDITOR);
+        grant(true, rootFolder.getId(), ResourceRole.EDITOR);
+        mvc.perform(delete("/api/v1/files/{id}", rootFile.getId()).with(as(viewer))).andExpect(status().isForbidden());
+        mvc.perform(delete("/api/v1/folders/{id}", rootFolder.getId()).with(as(viewer))).andExpect(status().isForbidden());
+        // Null destination means the actor's root; a collaborator cannot select the owner's root.
+        UUID ownRoot = folderService.createFolder(viewer, null, "own-root");
+        assertThat(folders.findById(ownRoot).orElseThrow().getOwnerId()).isEqualTo(viewer);
+        assertThat(reads.folders(viewer, null)).extracting("id").containsExactly(ownRoot);
+    }
+
+    @Test
+    void inheritedEditorRenamesAndTrashesContentIncludingOtherCreatorsAndRetainsOwnerRecovery() throws Exception {
+        grant(true, shared.getId(), ResourceRole.EDITOR);
+        long initialVersion = file.getVersion();
+        grant(false, file.getId(), ResourceRole.VIEWER); // Strongest inherited role wins.
+        mvc.perform(patch("/api/v1/files/{id}/name", file.getId()).with(as(viewer))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"edited\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.folderId").value(child.getId().toString()));
+        mvc.perform(patch("/api/v1/folders/{id}", child.getId()).with(as(viewer))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"edited-child\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.effectiveRole").value("EDITOR"));
+        mvc.perform(delete("/api/v1/files/{id}", file.getId()).with(as(viewer))).andExpect(status().isNoContent());
+        mvc.perform(post("/api/v1/files/{id}/restore", file.getId()).with(as(viewer))).andExpect(status().isNotFound());
+        mvc.perform(delete("/api/v1/files/{id}/permanent", file.getId()).with(as(viewer))).andExpect(status().isNotFound());
+        fileService.restoreFile(owner, file.getId());
+        mvc.perform(delete("/api/v1/folders/{id}", child.getId()).with(as(viewer))).andExpect(status().isNoContent());
+        assertThat(file.getStorageKey()).isNotBlank();
+        mvc.perform(get("/api/v1/files/{id}", file.getId()).with(as(viewer))).andExpect(status().isNotFound());
+        folderService.restoreFolder(owner, child.getId());
+        assertThat(reads.file(viewer, file.getId()).role()).isEqualTo(ResourceRole.EDITOR);
+        em.refresh(file);
+        assertThat(file.getVersion()).isEqualTo(initialVersion + 3); // rename, trash, restore
+    }
+
+    @Test
+    void editorStillCannotMoveRestorePurgeManageGrantsUploadOrReadOwnersTrash() throws Exception {
+        grant(true, shared.getId(), ResourceRole.EDITOR);
+        for (String path : new String[]{"/api/v1/files/" + file.getId() + "/move", "/api/v1/folders/" + child.getId() + "/move"}) {
+            mvc.perform(patch(path).with(as(viewer)).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                    .andExpect(status().isForbidden());
+        }
+        for (String path : new String[]{"/api/v1/files/" + file.getId(), "/api/v1/trash/folders/" + child.getId()}) {
+            mvc.perform(post(path + "/restore").with(as(viewer))).andExpect(status().isForbidden());
+            mvc.perform(delete(path + "/permanent").with(as(viewer))).andExpect(status().isForbidden());
+        }
+        for (String path : new String[]{"/api/v1/files/" + file.getId(), "/api/v1/folders/" + child.getId()}) {
+            mvc.perform(get(path + "/grants").with(as(viewer))).andExpect(status().isForbidden());
+        }
+        mvc.perform(get("/api/v1/files/trash").with(as(viewer))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty());
+        mvc.perform(get("/api/v1/trash/folders").with(as(viewer))).andExpect(status().isOk())
+                .andExpect(jsonPath("$").isEmpty());
+        mvc.perform(multipart("/api/v1/files").file(new org.springframework.mock.web.MockMultipartFile("file", "no.txt", "text/plain", new byte[]{1})).param("folderId", child.getId().toString())
+                .with(as(viewer))).andExpect(status().isNotFound());
+        mvc.perform(post("/api/v1/upload-sessions").with(as(viewer)).header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"folderId\":\"" + child.getId()
+                        + "\",\"name\":\"no.txt\",\"size\":1,\"contentType\":\"text/plain\"}"))
+                .andExpect(status().isNotFound());
+        assertThat(reads.folder(viewer, child.getId()).allowedCapabilities()).doesNotContain("UPLOAD", "MOVE", "RESTORE", "PURGE", "MANAGE_GRANTS");
+    }
+
+    @Test
+    void strangerAndUnauthenticatedMutationsDoNotRevealResources() throws Exception {
+        for (UUID actor : new UUID[]{stranger, null}) {
+            // Requests without authentication are built separately so no JWT is accidentally attached.
+            int expected = actor == null ? 401 : 404;
+            var create = post("/api/v1/folders").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"name\":\"no\",\"parentFolderId\":\"" + child.getId() + "\"}");
+            if (actor != null) create.with(as(actor));
+            mvc.perform(create).andExpect(status().is(expected));
+            for (String path : new String[]{"/api/v1/files/" + file.getId(), "/api/v1/folders/" + child.getId()}) {
+                var rename = patch(path + (path.contains("files") ? "/name" : ""))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"no\"}");
+                var trash = delete(path);
+                if (actor != null) { rename.with(as(actor)); trash.with(as(actor)); }
+                mvc.perform(rename).andExpect(status().is(expected));
+                mvc.perform(trash).andExpect(status().is(expected));
+            }
+        }
+    }
+
+    @Test
+    void editorMutationsRespectCurrentFolderMovesAndLifecycleBarriers() throws Exception {
+        grant(true, shared.getId(), ResourceRole.EDITOR);
+        // Moving the entire subtree recomputes inherited access.
+        folderService.moveFolder(owner, child.getId(), sibling.getId());
+        mvc.perform(patch("/api/v1/files/{id}/name", file.getId()).with(as(viewer))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"no\"}"))
+                .andExpect(status().isNotFound());
+        mvc.perform(post("/api/v1/folders").with(as(viewer)).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"no\",\"parentFolderId\":\"" + child.getId() + "\"}"))
+                .andExpect(status().isNotFound());
+        // An independent direct grant survives the move, but cannot authorize trash in the private parent.
+        grant(false, file.getId(), ResourceRole.EDITOR);
+        assertThat(fileService.renameFile(viewer, file.getId(), "direct").folderId()).isNull();
+        mvc.perform(delete("/api/v1/files/{id}", file.getId()).with(as(viewer))).andExpect(status().isForbidden());
+        folderService.moveFolder(owner, child.getId(), shared.getId());
+        folderService.deleteFolder(owner, shared.getId());
+        assertEditorBarriers();
+        folderService.requestPermanentDeletion(owner, shared.getId());
+        assertEditorBarriers();
+        assertThat(files.findById(file.getId()).orElseThrow().getName()).isEqualTo("direct.txt");
+    }
+
+
+    @Test
+    void editorNamespaceConflictsRemainOwnerScopedAndIncompleteFilesStayInaccessible() throws Exception {
+        grant(true, shared.getId(), ResourceRole.EDITOR);
+        folderService.createFolder(owner, child.getId(), "occupied");
+        mvc.perform(post("/api/v1/folders").with(as(viewer)).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"occupied\",\"parentFolderId\":\"" + child.getId() + "\"}"))
+                .andExpect(status().isConflict());
+        folder(shared.getId(), "occupied");
+        mvc.perform(patch("/api/v1/folders/{id}", child.getId()).with(as(viewer))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"occupied\"}"))
+                .andExpect(status().isConflict());
+        ready(child.getId(), "occupied.txt");
+        mvc.perform(patch("/api/v1/files/{id}/name", file.getId()).with(as(viewer))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"occupied\"}"))
+                .andExpect(status().isConflict());
+        for (FileStatus state : new FileStatus[]{FileStatus.UPLOADING, FileStatus.FAILED}) {
+            StoredFile incomplete = new StoredFile(UUID.randomUUID(), owner, child.getId(), state.name() + ".txt",
+                    UUID.randomUUID().toString(), "text/plain", 1);
+            if (state == FileStatus.FAILED) incomplete.markFailed();
+            incomplete = files.saveAndFlush(incomplete);
+            mvc.perform(patch("/api/v1/files/{id}/name", incomplete.getId()).with(as(viewer))
+                    .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"no\"}"))
+                    .andExpect(status().isNotFound());
+            mvc.perform(delete("/api/v1/files/{id}", incomplete.getId()).with(as(viewer)))
+                    .andExpect(status().isNotFound());
+            em.refresh(incomplete);
+            assertThat(incomplete.getStatus()).isEqualTo(state);
+            assertThat(incomplete.getDeletedAt()).isNull();
+        }
+        em.refresh(file);
+        assertThat(file.getName()).isEqualTo("file.txt");
+        assertThat(child.getName()).isEqualTo("child");
+    }
+
+    private void assertEditorBarriers() throws Exception {
+        mvc.perform(post("/api/v1/folders").with(as(viewer)).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"no\",\"parentFolderId\":\"" + child.getId() + "\"}"))
+                .andExpect(status().isNotFound());
+        for (String path : new String[]{"/api/v1/files/" + file.getId(), "/api/v1/folders/" + child.getId()}) {
+            mvc.perform(patch(path + (path.contains("files") ? "/name" : "")).with(as(viewer))
+                    .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"no\"}"))
+                    .andExpect(status().isNotFound());
+            mvc.perform(delete(path).with(as(viewer))).andExpect(status().isNotFound());
+        }
     }
 
     private UUID user(String name) {

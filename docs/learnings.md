@@ -565,3 +565,19 @@ DELETE safe. An accepted late part returned 200 after deletion in the M5 live te
 the completed key stayed absent in that interleaving. This establishes neither
 physical block reclamation nor a universal multi-node guarantee. Preserve the
 boundary in APIs, SQL proof guards and operations documentation. See [M5](multipart-purge-compatibility.md).
+
+## Sharing M2: separate actor, owner and the permission boundary
+
+An Editor creating a subfolder acts as a collaborator; the destination's immutable
+owner still owns the row and supplies the hierarchy lock key. Creator identity
+adds no grant. Target Editor permission authorizes rename, but trash authorizes
+the immediate parent too, so a directly shared entry cannot be removed from a
+private namespace. A Viewer ancestor plus a direct Editor target is insufficient.
+
+Exclusive grant changes serialize with existing folder/file hierarchy locks.
+Shared file locks still permit owner moves, so refreshing the managed file before
+scalar permission resolution and retaining its optimistic version matters: a
+concurrent move can invalidate inheritance, and a stale writer must conflict.
+Mutation responses need parent redaction even for no-op renames. Deterministic
+PostgreSQL tests inspect real lock waits and final rows for revocation, downgrade,
+subtree moves/trash and same-file conflicts.

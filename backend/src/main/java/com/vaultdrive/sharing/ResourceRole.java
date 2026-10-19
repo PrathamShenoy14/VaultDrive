@@ -5,7 +5,7 @@ import java.util.List;
 public enum ResourceRole {
     VIEWER, EDITOR, OWNER;
 
-    // M1 deliberately gives Editor the same read capabilities as Viewer.
+    // Role privileges; TRASH additionally requires an editable immediate parent.
     public List<String> capabilities(boolean folder) {
         if (this == OWNER) {
             return folder
@@ -13,6 +13,10 @@ public enum ResourceRole {
                               "MOVE", "TRASH", "RESTORE", "PURGE", "MANAGE_GRANTS")
                     : List.of("READ_METADATA", "DOWNLOAD", "RENAME", "MOVE", "TRASH", "RESTORE",
                               "PURGE", "MANAGE_GRANTS");
+        }
+        if (this == EDITOR) {
+            return folder ? List.of("READ_METADATA", "LIST_CHILDREN", "CREATE_FOLDER", "RENAME", "TRASH")
+                    : List.of("READ_METADATA", "DOWNLOAD", "RENAME", "TRASH");
         }
         return folder ? List.of("READ_METADATA", "LIST_CHILDREN") : List.of("READ_METADATA", "DOWNLOAD");
     }

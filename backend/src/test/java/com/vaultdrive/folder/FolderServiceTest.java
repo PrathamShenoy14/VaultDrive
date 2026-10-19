@@ -21,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
 
@@ -64,6 +65,10 @@ class FolderServiceTest {
     @BeforeEach
     void setUp() {
 
+        lenient().when(resourceReads.requireEditor(any(), anyBoolean(), any(), anyBoolean()))
+                .thenAnswer(i -> new com.vaultdrive.sharing.ResourceAccess(i.getArgument(2), i.getArgument(0),
+                        null, "", null, 0, null, java.time.Instant.now(), java.time.Instant.now(),
+                        com.vaultdrive.sharing.ResourceRole.OWNER, true, true));
         folderNameValidator = new FolderNameValidator();
         folderAccessValidator = new FolderAccessValidator(folderRepository);
 
@@ -89,6 +94,7 @@ class FolderServiceTest {
     void shouldCreateRootFolderSuccessfully() {
 
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
 
         when(
             folderRepository
@@ -140,6 +146,7 @@ class FolderServiceTest {
     void shouldCreateNestedFolderSuccessfully() {
 
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
 
         Folder parentFolder = new Folder(
                 ownerId,
@@ -199,10 +206,9 @@ class FolderServiceTest {
 
         UUID parentFolderId = parentFolder.getId();
 
-        when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNull(
-                parentFolderId,
-                alice
-        )).thenReturn(Optional.empty());
+        when(resourceReads.owner(true, parentFolderId)).thenReturn(bob);
+        when(resourceReads.requireEditor(alice, true, parentFolderId, false))
+                .thenThrow(new FolderNotFoundException("Parent folder not found"));
 
         assertThatThrownBy(() ->
                 folderService.createFolder(
@@ -224,6 +230,7 @@ class FolderServiceTest {
     void shouldRejectFolderCreationWhenAncestorIsDeleted() {
 
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
 
         Folder documents = new Folder(
                 ownerId,
@@ -277,6 +284,7 @@ class FolderServiceTest {
     void shouldRejectDuplicateRootFolderName() {
 
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
 
         when(
             folderRepository
@@ -303,6 +311,7 @@ class FolderServiceTest {
     @Test
     void shouldRejectBlankFolderName() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
 
         assertThatThrownBy(() ->
                 folderService.createFolder(ownerId, null, "   ")
@@ -315,6 +324,7 @@ class FolderServiceTest {
     @Test
     void shouldRejectFolderNameExceeding255Characters() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
         String longName = "A".repeat(256);
 
         assertThatThrownBy(() ->
@@ -328,6 +338,7 @@ class FolderServiceTest {
     @Test
     void shouldTrimFolderNameBeforeSaving() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
 
         folderService.createFolder(
                 ownerId,
@@ -347,6 +358,7 @@ class FolderServiceTest {
 
         // Arrange
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
 
         UUID folderAId = UUID.randomUUID();
         UUID folderBId = UUID.randomUUID();
@@ -407,6 +419,7 @@ class FolderServiceTest {
     @Test
     void shouldRenameFolderSuccessfully() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
         Folder folder = new Folder(ownerId, null, "Documents");
 
         Instant originalCreatedAt = folder.getCreatedAt();
@@ -431,6 +444,7 @@ class FolderServiceTest {
     @Test
     void shouldRejectRenamingAnotherUsersFolder() {
         UUID aliceId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(aliceId);
         UUID bobId = UUID.randomUUID();
 
         Folder bobFolder = new Folder(bobId, null, "Private");
@@ -451,6 +465,7 @@ class FolderServiceTest {
     @Test
     void shouldRejectDuplicateNameDuringRename() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
         Folder folder = new Folder(ownerId, null, "Documents");
 
         when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNull(
@@ -476,6 +491,7 @@ class FolderServiceTest {
     @Test
     void shouldNotModifyFolderWhenNameIsUnchanged() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
         Folder folder = new Folder(ownerId, null, "Documents");
 
         Instant originalUpdatedAt = folder.getUpdatedAt();
@@ -497,6 +513,7 @@ class FolderServiceTest {
     @Test
     void shouldRejectRenamingFolderWithDeletedAncestor() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
 
         Folder parent = new Folder(ownerId, null, "Documents");
         Folder child = new Folder(ownerId, parent.getId(), "Projects");
@@ -521,6 +538,7 @@ class FolderServiceTest {
     @Test
     void shouldNormalizeNameBeforeRenaming() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
         Folder folder = new Folder(ownerId, null, "Documents");
 
         when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNull(
@@ -786,6 +804,7 @@ class FolderServiceTest {
     @Test
     void shouldSoftDeleteFolderSuccessfully() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
         Folder folder = new Folder(ownerId, null, "Documents");
 
         when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNull(
@@ -803,6 +822,7 @@ class FolderServiceTest {
     @Test
     void shouldRejectDeletingAnotherUsersFolder() {
         UUID aliceId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(aliceId);
         UUID bobId = UUID.randomUUID();
 
         Folder bobFolder = new Folder(bobId, null, "Private");
@@ -821,6 +841,7 @@ class FolderServiceTest {
     @Test
     void shouldRejectDeletingAlreadyDeletedFolder() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
         Folder folder = new Folder(ownerId, null, "Documents");
 
         folder.softDelete();
@@ -839,6 +860,7 @@ class FolderServiceTest {
     @Test
     void shouldRejectDeletingFolderWithDeletedAncestor() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
 
         Folder parent = new Folder(ownerId, null, "Documents");
         Folder child = new Folder(ownerId, parent.getId(), "Projects");
@@ -863,6 +885,7 @@ class FolderServiceTest {
     @Test
     void shouldNotDirectlyDeleteDescendants() {
         UUID ownerId = UUID.randomUUID();
+        lenient().when(resourceReads.owner(anyBoolean(), any())).thenReturn(ownerId);
 
         Folder parent = new Folder(ownerId, null, "Documents");
         Folder child = new Folder(ownerId, parent.getId(), "Projects");

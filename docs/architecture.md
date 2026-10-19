@@ -29,15 +29,32 @@ PostgreSQL and Garage do not share a transaction. Code must make cross-system fa
 
 V32 adds immutable-target PostgreSQL Viewer/Editor grants, owner-only management
 and bounded current-state permission resolution. Direct and inherited folder
-grants use the strongest role; both collaborator roles currently support metadata,
-folder/file listings and backend READY downloads only. Shared with me filters
+grants use the strongest role; both collaborator roles support metadata,
+folder/file listings and backend READY downloads. Shared with me filters
 authorization before pagination, and resource responses redact inaccessible parent
 references. Exclusive owner hierarchy coordination serializes grant mutations with
 existing lifecycle paths; reads bind metadata, ancestry and grants in one statement
 snapshot. Trash suspends access, restore/move recompute inheritance, and pending
 purge blocks sharing changes. Storage evidence and worker defaults are unchanged.
-Editor mutations, delegated multipart, links, activity and notifications remain
-planned. See [M1 APIs, races, migration and verification limits](sharing-m1.md).
+See [M1 APIs, races, migration and verification limits](sharing-m1.md).
+
+### Sharing M2: Editor content operations
+
+Editors create subfolders owned by the destination owner, rename directly or
+inherited editable resources, and trash content only when its immediate parent
+is editable. Root creation/listing/Trash remains actor-scoped; directly shared
+entry points cannot be trashed from a private or null parent. Moves, restore,
+purge, grants and both upload protocols remain owner-only. Mutation DTOs redact
+private parents and expose Editor capabilities without delegated uploads.
+
+Mutations use the resource owner's existing exclusive folder/shared file hierarchy
+lock. Fresh scalar permission resolution occurs inside the mutation transaction;
+file entities are refreshed before authorization and retain optimistic version
+checks against concurrent moves/writes. Folder writes refresh the managed target
+under exclusive coordination. Grant revocation/downgrade serializes with mutations.
+No migration, storage identity or multipart lifecycle change is needed. Delegated
+multipart, links, activity and notifications remain planned.
+See [M2 behavior, races and verification limits](sharing-m2.md).
 
 ### Multipart purge compatibility — M5
 
@@ -396,7 +413,7 @@ recovery](folder-purge-design.md#slice-6-bottom-up-metadata-removal-and-durable-
 - Historical admitted stale `UPLOADING`, `FAILED` and orphan cleanup remain unresolved. B2 implements never-admitted expiry; B3 recovers only freshly eligible UPLOADING with durable success receipts. PUT success before receipt commit remains unknown after a crash.
 - Audited legacy storage-identity recovery and verified quiescence for admitted
   uncertain upload writers; these files still block automatic folder finalization.
-- Sharing M2-M6 (Editor mutations, delegated multipart, links, activity and notifications), versioning, client integration for direct/resumable transfers, quotas, malware scanning, audit logs, observability, and client applications.
+- Sharing M3-M6 (delegated multipart, links, activity and notifications), versioning, client integration for direct/resumable transfers, quotas, malware scanning, audit logs, observability, and client applications.
 - Production deployment, backup/restore, retention, encryption/key-management, and service-level objectives.
 
 No benchmark, scale limit, or production-readiness claim has been established.
