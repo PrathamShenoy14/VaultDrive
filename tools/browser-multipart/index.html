@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VaultDrive browser multipart probe</title>
+<link rel="stylesheet" href="/style.css">
+<script type="module" src="/app.mjs"></script>
+<main>
+  <h1>Browser multipart probe</h1>
+  <p>Disposable test files only. No automatic retries. Results contain no tokens or signed URLs.
+    Read <a href="/runbook">the runbook</a> before testing. Maximum file size: 32 MiB.</p>
+  <p id="environment"></p>
+  <fieldset><legend>Authentication</legend>
+    <label>Email <input id="email" type="email" autocomplete="username"></label>
+    <label>Password <input id="password" type="password" autocomplete="off"></label>
+    <button id="login">Log in</button>
+    <button id="auth-negative">Check missing client header</button>
+    <button id="csrf-negative">Check missing / wrong CSRF</button>
+    <button id="refresh">Refresh cookie</button>
+    <button id="refresh-burst">Check serialized refresh (3 callers)</button>
+    <button id="profile">Check bearer profile</button>
+    <button id="logout">Log out</button>
+  </fieldset>
+  <fieldset><legend>Upload and resume</legend>
+    <label>Destination folder UUID (empty for own root) <input id="folder"></label>
+    <label>Original file <input id="file" type="file"></label>
+    <button id="fixture">Use generated 3-part fixture</button>
+    <label>Session UUID <input id="session"></label>
+    <label>Idempotency key <input id="key"></label>
+    <button id="reserve">Reserve session</button>
+    <button id="read">Read session</button>
+    <button id="initiate">Initiate once</button>
+    <button id="first">Upload first missing part</button>
+    <button id="list">List parts (1 per page)</button>
+    <button id="resume">Resume missing parts</button>
+    <button id="refresh-url">Refresh first part URL</button>
+    <button id="negative">Check invalid signature / checksum</button>
+    <button id="expired-url">Try retained URL after expiry</button>
+    <button id="complete">Complete once</button>
+    <button id="recover">Recover completion explicitly</button>
+    <button id="download">Download and compare bytes</button>
+    <button id="cancel">Cancel once</button>
+    <button id="cancel-read">Read cancellation</button>
+    <button id="expired-session">Check expired session admissions</button>
+    <button id="revoked">Check revoked Editor admissions</button>
+  </fieldset>
+  <p>For Editor cases, use an existing editable shared folder. Revoke its grant from an
+    independent owner browser profile, then check admissions here. Existing URLs remain capabilities.</p>
+  <button id="export">Export sanitized results</button>
+  <pre id="results" role="log" aria-live="polite"></pre>
+</main>
+</html>

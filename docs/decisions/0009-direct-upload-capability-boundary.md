@@ -7,6 +7,13 @@
 
 ## Decision
 
+Browser milestone extension: [the bounded harness](../browser-multipart-interoperability.md)
+implements the client-side exact-body/signed-checksum contract and prepares
+explicit-origin Garage CORS with ETag/checksum exposure. Same-origin HTTPS API
+transport preserves cookie/CSRF security without backend CORS changes. No capability,
+dispatch, lifecycle or immutable identity requirement is relaxed. Actual browser
+execution remains blocked; the historical browser prerequisites below remain gates.
+
 Keep Garage 2.3.0 and the existing synchronous path. A future multipart path may
 presign only UploadPart, with immutable registered size and SHA-256 for each part.
 The backend retains initiation/completion/abort authority. Never permit concurrent

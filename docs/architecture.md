@@ -25,6 +25,18 @@ PostgreSQL and Garage do not share a transaction. Code must make cross-system fa
 
 ## Implemented components
 
+### Browser multipart interoperability harness
+
+A dependency-free browser harness now exercises the existing multipart/auth API
+through a local HTTPS same-origin proxy, with exact signed-body/checksum handling,
+serialized refresh, bounded resume, explicit lifecycle actions and sanitized
+results. An exact-origin Garage PUT CORS/exposed-header template is prepared but
+not applied. No production API, migration, storage binding, lock, lifecycle or
+legacy upload behavior changes. **Live browser interoperability remains unverified**:
+no browser surface was available; the inspected endpoint remains HTTP and the
+actual harness-origin preflight returned 403 without allowed checksum headers.
+See [scenarios, prerequisites and verification](browser-multipart-interoperability.md).
+
 ### Sharing M1 — grants and Viewer access
 
 V32 adds immutable-target PostgreSQL Viewer/Editor grants, owner-only management
@@ -282,7 +294,9 @@ See [endpoint contracts, security, operations and verification](authentication-s
 Not implemented: account-state controls, general API rate limiting, JWT key rotation,
 asymmetric signing or refresh-history retention cleanup. Share-link revocation and
 per-process public-link limits remain implemented; deployment requires HTTPS,
-secret-safe logging and edge timeouts. No frontend or multipart browser changes are included.
+secret-safe logging and edge timeouts. The authentication-session milestone added
+no frontend or multipart browser changes; the separate browser harness above now
+consumes this unchanged contract, with live browser verification still blocked.
 
 ### Folder namespace — Committed
 

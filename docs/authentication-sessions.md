@@ -2,6 +2,12 @@
 
 ## Contract defined before implementation
 
+The separate [browser multipart harness](browser-multipart-interoperability.md)
+now consumes this unchanged same-origin HTTPS contract. It includes client/CSRF
+admission checks, cookie rotation probes, one-flight refresh plus Web Locks and
+reauthentication after uncertain refresh. No backend cross-origin auth policy or
+cookie relaxation is introduced; actual browser cookie behavior remains unverified.
+
 Access tokens remain HS256 Authorization bearer JWTs with UUID subjects and now
 carry unique UUID `jti` claims. Login/refresh tokens also carry a session UUID
 `sid`. Access lifetime is 30 minutes; refresh families have a fixed seven-day

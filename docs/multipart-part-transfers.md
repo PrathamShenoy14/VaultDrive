@@ -1,5 +1,11 @@
 # Multipart part transfers — Phase 3D / M2A
 
+Current browser work: [the interoperability harness](browser-multipart-interoperability.md)
+consumes these unchanged endpoints through same-origin HTTPS, omits forbidden
+script-set Host/Content-Length while preserving exact body framing, and prepares
+Garage CORS/exposed headers. No live browser execution was available; browser
+interoperability remains unverified and deployment prerequisites remain open.
+
 Current authorization extension: [Sharing M3](sharing-m3.md) adds owner/initiator
 separation and delegated Editor sessions, superseding owner-only authorization
 statements in this historical milestone record. Storage/lifecycle guarantees remain.

@@ -2,6 +2,23 @@
 
 This is a living explanation of lessons demonstrated by committed VaultDrive code. It is not a claim that every production concern is solved.
 
+## Browser multipart protocol boundary
+
+Java SDK success does not prove a browser can set required headers, pass preflight
+or read storage receipts. Host/Content-Length must come from a fixed-size browser
+body and the signed authority; SHA-256 stays mandatory and script-set. Garage
+CORS must allow the actual HTTPS page origin/checksum header and expose ETag and
+SHA-256. Same-origin API proxying keeps refresh cookies and the CSRF response
+readable without opening credentialed cross-origin authentication.
+
+Refresh rotation also needs browser-side serialization: one promise coalesces tab
+callers and Web Locks serialize cooperating tabs. An uncertain rotation is not
+retry-safe; discard credentials and reauthenticate. The harness intentionally
+does not retry API mutations or infer storage outcomes from CORS/network errors.
+Node protocol/loopback tests and backend regressions are separate evidence from
+real browser execution, which remains blocked. See [the scenario matrix and
+deployment gates](browser-multipart-interoperability.md).
+
 ## Sharing M1: permission is a current-state decision
 
 Direct grants are entry points, not copies of a subtree's authorization. Resolving

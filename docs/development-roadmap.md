@@ -201,6 +201,13 @@ Exit criteria: correctness tests remain green and measured contention improves f
 - [ ] Unknown initiation reconciliation and multipart removal proof remain
   separate work. Autonomous cleanup is absent; browser release remains gated.
 
+- [x] Browser multipart harness and exact-origin Garage CORS template, with
+  protocol/proxy and backend regression verification;
+  [implementation and runbook](browser-multipart-interoperability.md).
+- [ ] Live browser interoperability: approved HTTPS/origin/CORS configuration,
+  actual browser execution of the full scenario matrix, and bounded clock skew.
+  Harness delivery does not establish browser release readiness.
+
 - Evaluate presigned transfers so application servers do not proxy all bytes.
 - Define multipart/resumable upload state, checksum verification, expiry, and cleanup.
 - Add versioning only after its retention and quota semantics are decided.

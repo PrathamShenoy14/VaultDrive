@@ -1,0 +1,7 @@
+:root { font-family: system-ui, sans-serif; color-scheme: light dark; }
+main { max-width: 1000px; margin: 2rem auto; padding: 0 1rem; }
+fieldset { margin: 1rem 0; border: 1px solid #888; border-radius: 6px; }
+label { display: block; margin: .7rem 0; }
+input { margin-left: .5rem; max-width: 95%; min-width: 18rem; padding: .35rem; }
+button { margin: .25rem; padding: .5rem; cursor: pointer; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1rem; background: #18232d; color: #eef3f8; }
