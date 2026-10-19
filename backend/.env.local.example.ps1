@@ -10,6 +10,7 @@ $env:RABBITMQ_PASSWORD="replace-with-local-rabbitmq-password"
 $env:RABBITMQ_VHOST="/"
 $env:OUTBOX_PUBLISHER_ENABLED="false"
 $env:PURGE_CONSUMER_ENABLED="false"
+$env:SHARING_NOTIFICATIONS_CONSUMER_ENABLED="false"
 $env:JOB_WORKER_ENABLED="false"
 $env:MISSING_JOB_RECONCILIATION_ENABLED="false"
 # Conservative published-event age before missing-job recovery (minimum 1m).

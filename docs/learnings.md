@@ -634,5 +634,23 @@ Mutation, activity and outbox must share one transaction even when the event ins
 has already flushed. Real PostgreSQL constraint-failure and outer-rollback tests
 verify this boundary. Broker retries replay the same activity pointer; they do not
 record another business mutation. Reusing the publisher also requires a separate
-queue/key and excluding permission pointers from purge missing-job scans. A future
-notification consumer is a separate milestone. See [the M5 contract](sharing-m5.md).
+queue/key and excluding permission pointers from purge missing-job scans. M6 now
+consumes these pointers separately. See [the M5 contract](sharing-m5.md).
+
+## Sharing M6: delivery facts and current visibility need different lifetimes
+
+Durable notifications reference immutable activity and deduplicate by event and
+recipient in PostgreSQL. Insertion must commit before ACK; a crash in that gap
+then replays harmlessly, including after the user marks the row read. A monotonic
+database update makes concurrent mark-read requests safe without a read/modify race.
+Bounded database retries followed by stopping unacked keep outages from becoming
+hot requeue loops. Poison messages need durable sanitized quarantine before ACK.
+
+Receiving an old grant event does not establish current access. Comparing the
+exact live direct grant UUID/revision suppresses obsolete actions after role
+changes and revoke/regrant; resolving current permission/ancestry/lifecycle in
+the same statement gates the event's resource snapshot. Retain generic history
+and unread counts after deletion, but omit private names and resource references.
+Opening still goes through ordinary authorization. This avoids copied names,
+descendant fan-out and a broader framework while preserving M5 mutation atomicity.
+See [the M6 contract](sharing-m6.md).

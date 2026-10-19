@@ -109,6 +109,9 @@ The following endpoints are currently implemented.
 | POST | `/api/v1/auth/login` | Public | Authenticate and receive a JWT |
 | GET | `/api/v1/users/me` | Required | Retrieve the authenticated user's UUID |
 | GET | `/api/v1/permission-activity` | Required | Owner permission history; [filters, pagination and visibility](docs/sharing-m5.md) |
+| GET | `/api/v1/notifications` | Required | Recipient sharing notifications; [filters, redaction and pagination](docs/sharing-m6.md) |
+| GET | `/api/v1/notifications/unread-count` | Required | Current recipient's unread count |
+| PATCH | `/api/v1/notifications/{id}/read` | Required | Mark own notification read; idempotent 204, unknown/other recipient 404 |
 | POST | `/api/v1/folders` | Required | Create a folder |
 | GET | `/api/v1/folders` | Required | List root folders |
 | GET | `/api/v1/folders/{folderId}` | Required | Retrieve a folder |

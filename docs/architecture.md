@@ -53,7 +53,7 @@ file entities are refreshed before authorization and retain optimistic version
 checks against concurrent moves/writes. Folder writes refresh the managed target
 under exclusive coordination. Grant revocation/downgrade serializes with mutations.
 M2 requires no migration, storage identity or multipart lifecycle change. M4 below
-adds links; M5 below adds activity and notifications remain planned.
+adds links; M5 below adds activity and M6 adds recipient notifications.
 See [M2 behavior, races and verification limits](sharing-m2.md).
 
 ### Sharing M3: delegated multipart uploads
@@ -95,8 +95,25 @@ optional exact resource/type/event filters and deterministic timestamp/UUID orde
 Collaborators and link holders see no history for another owner's resources;
 history supplies no current resource authority. No ancestry or link secrets enter
 events. Permission outbox events use a separate quorum queue/routing key and are
-excluded from purge recovery. M6 notifications remain planned; no consumer or
-frontend is added. See [schema, API, visibility and verification](sharing-m5.md).
+excluded from purge recovery. M6 below consumes this route. No frontend is added.
+See [schema, API, visibility and verification](sharing-m5.md).
+
+### Sharing M6: in-app recipient notifications
+
+V36 persists recipient-specific grant creation/change/revocation notifications
+referencing immutable M5 activity. Database uniqueness deduplicates event/recipient
+delivery, including concurrent consumers, and guards identity and monotonic read
+state. Owners and link holders receive no notifications; there is no descendant
+fan-out. A separately opt-in permission consumer validates the existing dedicated
+route, commits before manual ACK, retries database failures three times, and stops
+unacked on exhaustion. Poison messages commit sanitized quarantine before ACK.
+Permission mutations, purge/recovery routing and all worker defaults are unchanged.
+
+JWT APIs list/count/read only the caller's rows. Scope precedes filters/count/page;
+one statement snapshot gates display against the exact current direct grant
+revision and live resource permission/lifecycle. Obsolete or inaccessible events
+remain generic, including after revoke/regrant and resource deletion. Notifications
+never authorize resource access. See [migration, API, operations and verification](sharing-m6.md).
 
 ### Multipart purge compatibility — M5
 
@@ -455,7 +472,7 @@ recovery](folder-purge-design.md#slice-6-bottom-up-metadata-removal-and-durable-
 - Historical admitted stale `UPLOADING`, `FAILED` and orphan cleanup remain unresolved. B2 implements never-admitted expiry; B3 recovers only freshly eligible UPLOADING with durable success receipts. PUT success before receipt commit remains unknown after a crash.
 - Audited legacy storage-identity recovery and verified quiescence for admitted
   uncertain upload writers; these files still block automatic folder finalization.
-- Sharing M6 (notifications), versioning, client integration for direct/resumable transfers, quotas, malware scanning, general audit logs, observability, and client applications.
+- Notification retention/account erasure and replay tooling, versioning, client integration for direct/resumable transfers, quotas, malware scanning, general audit logs, observability, and client applications.
 - Production deployment, backup/restore, retention, encryption/key-management, and service-level objectives.
 
 No benchmark, scale limit, or production-readiness claim has been established.

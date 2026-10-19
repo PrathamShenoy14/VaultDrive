@@ -1,10 +1,10 @@
 # Sharing and permissions design
 
-Status: Approved design; **M1 (grants and Viewer access), M2 (Editor content operations), M3 (delegated multipart), M4 (file Viewer links) and M5 (permission activity) are implemented**. M6 notifications remain planned.
+Status: Approved design; **M1 (grants and Viewer access), M2 (Editor content operations), M3 (delegated multipart), M4 (file Viewer links), M5 (permission activity) and M6 (in-app notifications) are implemented**.
 
 Source: Revised sharing/permissions plan in `Pasted text(9).txt` from the "VaultDrive Day One Plan" conversation, recorded on 2026-10-19. This document preserves that plan and the decision to retire legacy synchronous upload.
 
-Scope: Approved six-milestone implementation boundary. See [the M1 implementation contract](sharing-m1.md) for V32, implemented routes, concurrency guarantees and verification limits. See [the M2 contract](sharing-m2.md) for Editor mutations and verification. See [the M3 contract](sharing-m3.md) for delegated multipart, [the M4 contract](sharing-m4.md) for secure file Viewer links and [the M5 contract](sharing-m5.md) for V35 activity, owner-only visibility and isolated outbox routing. Notifications remain design only.
+Scope: Approved six-milestone implementation boundary. See [the M1 implementation contract](sharing-m1.md) for V32, implemented routes, concurrency guarantees and verification limits. See [the M2 contract](sharing-m2.md) for Editor mutations and verification. See [the M3 contract](sharing-m3.md) for delegated multipart, [the M4 contract](sharing-m4.md) for secure file Viewer links, [the M5 contract](sharing-m5.md) for V35 activity, owner-only visibility and isolated outbox routing, and [the M6 contract](sharing-m6.md) for V36 notifications, recipient APIs and bounded delivery recovery.
 
 The revised MVP keeps **PostgreSQL direct grants, downward inheritance, and the strongest applicable permission**. Editors upload directly to Garage through the existing multipart protocol. Ownership, sharing control, moves, restore, and permanent deletion remain with the resource owner.
 
@@ -30,7 +30,7 @@ Authorization must distinguish `actorId`, derived from the JWT, from `ownerId`, 
 | Existing `upload_sessions` | Add immutable `initiator_user_id`; retain `owner_id` as the resource/storage owner |
 | `share_links` | `id`, `owner_id`, `file_id`, `token_hash`, `expires_at`, `revoked_at`, `version`, `created_at` |
 | `permission_activity_events` (V35) | Immutable event identity, actor/recipient/resource display snapshots, owner, resource, grant/link subject, old/new role, subject version, timestamp |
-| Later: `notifications` | `id`, `source_event_id`, `recipient_user_id`, `type`, `created_at`, `read_at` |
+| `sharing_notifications` (V36) | `id`, `source_event_id`, `recipient_user_id`, `event_type`, `created_at`, `read_at` |
 
 For grants, enforce:
 
@@ -262,7 +262,7 @@ Record one event at the changed source, not one per inherited descendant. No-op 
 
 M5 implements atomic permission mutation, activity and outbox persistence. Activity survives resource deletion and is owner-visible in this MVP. The authenticated owner feed filters ownership before count/pagination; collaborators and link holders cannot inspect another owner's historical recipients or permissions. See [the exact API and snapshot contract](sharing-m5.md).
 
-Sharing notifications should initially be **in-app notifications to the direct recipient** for grant creation, change, and revocation:
+M6 implements **in-app notifications to the direct recipient** for grant creation, change, and revocation. Owners receive no notifications for their own actions; link events do not fan out:
 
 - Deduplicate with `UNIQUE(source_event_id, recipient_user_id)`.
 - Acknowledge delivery only after notification persistence commits.
@@ -272,7 +272,7 @@ Sharing notifications should initially be **in-app notifications to the direct r
 - Keep historical content generic when the recipient no longer has access.
 - Defer email and inherited-descendant fan-out.
 
-M5 replaces the old all-events-to-purge transport with event-specific routing: permission activity uses a separate durable quorum queue/key and purge recovery excludes it. The existing at-least-once outbox machinery is reused. No permission consumer or notifications are implemented until M6.
+M5 replaces the old all-events-to-purge transport with event-specific routing: permission activity uses a separate durable quorum queue/key and purge recovery excludes it. M6 reuses the existing at-least-once outbox machinery and independently opt-in consumer policy; delivery never rolls back committed permission changes. See [API, privacy and operational contracts](sharing-m6.md).
 
 ## Implement this in six bounded milestones.
 
@@ -283,7 +283,7 @@ M5 replaces the old all-events-to-purge transport with event-specific routing: p
 | 3. Delegated multipart (implemented) | Initiator migration, actor-scoped idempotency, all session authorization gates, revocation races, owner recovery |
 | 4. File Viewer links (implemented) | Expiry, permanent revocation, lifecycle blocking, token secrecy, backend streaming; [M4 contract](sharing-m4.md) |
 | 5. Permission activity (implemented) | Atomic mutation/activity/outbox persistence, owner-visible filtered history and isolated routing; [M5 contract](sharing-m5.md) |
-| 6. Sharing notifications | Idempotent in-app delivery, stale-event handling, recipient privacy |
+| 6. Sharing notifications (implemented) | Idempotent in-app delivery, stale-event handling, recipient privacy; [M6 contract](sharing-m6.md) |
 
 Milestone 3 must cover both race orders at reservation, initiation permission, URL-response authorization, manifest freeze, completion dispatch, and cancellation. Also verify:
 
@@ -296,4 +296,4 @@ Milestone 3 must cover both race orders at reservation, initiation permission, U
 
 Run focused tests and the relevant full suite for each implementation slice, using real PostgreSQL for races and Garage for storage outcomes.
 
-The remaining implementation limits are the existing multipart size policy, browser/TLS/CORS/clock prerequisites, and the deferred notification milestone. M5 history retention and pagination limits are recorded in its contract.
+The remaining implementation limits include the existing multipart size policy, browser/TLS/CORS/clock prerequisites, retention/account erasure and operator replay tooling. M5 history and M6 notification limits are recorded in their contracts. Stop after M6; legacy synchronous upload retirement remains separate.

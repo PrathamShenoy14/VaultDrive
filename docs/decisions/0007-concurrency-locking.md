@@ -25,6 +25,15 @@ File restore and permanent-delete request acquire the shared hierarchy lock befo
 
 ## Consequences
 
+Sharing M6 does not change mutation locks or lock ordering. Notification ingestion
+reads immutable outbox/activity and inserts with database event/recipient uniqueness,
+without hierarchy/resource locks. Recipient list display uses one cross-owner
+statement snapshot for current grant revision, lifecycle, ancestry and permissions;
+counts/page scope are recipient-first. Concurrent read requests use one monotonic
+UPDATE scoped to recipient/id. All ACK/broker I/O follows transaction completion.
+Notifications never admit resource operations; ordinary APIs still coordinate
+and reauthorize. See [M6](../sharing-m6.md).
+
 Sharing M5 appends immutable permission activity and an outbox pointer after each
 successful source mutation under the existing exclusive owner hierarchy lock.
 Fresh resource names and subject role/version snapshots precede insertion in the

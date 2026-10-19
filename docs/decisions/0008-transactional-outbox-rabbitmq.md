@@ -65,7 +65,34 @@ rejected. Unknown event types fail publication; they never default to purge.
 Missing-purge-job scan/ingest exclude permission events. At-least-once replay
 preserves one activity identity and never creates a purge job. There is no
 permission consumer or notification persistence in M5; messages remain queued
-when publication is enabled. See [schema, visibility and tests](../sharing-m5.md).
+when publication is enabled in M5. M6 now supplies the consumer described below.
+See [schema, visibility and tests](../sharing-m5.md).
+
+## Sharing M6 permission notification consumer
+
+V36 adds recipient-specific notifications referencing immutable M5 activity,
+deduplicated by `(source_event_id, recipient_user_id)` in PostgreSQL. Only direct
+grant recipients receive creation/change/revocation notifications, never the acting
+owner or link holders. The permission listener uses the existing isolated queue,
+validates against committed outbox/activity, and ACKs only after notification
+persistence commits. Link events validate then ACK without fan-out. No permission
+mutation, purge job, reconciliation or storage protocol changes.
+
+The independent, disabled-by-default consumer follows the existing bounded
+ingestion policy: three database attempts with one-/two-second delays outside
+transactions; exhaustion/unexpected failure/uncertain ACK stops unacked until
+explicit restart. Invalid messages commit a sanitized existing quarantine row
+before ACK. No broker topology change, DLX or generic notification framework is
+introduced. Outbox/activity retention remains required for validation; operator
+replay is required for quarantine or broker-loss recovery. See [M6 operations and
+limits](../sharing-m6.md).
+
+Recipient APIs scope SQL before count/page and display resource snapshots only
+when the original direct grant/revision is still current and live authorization
+succeeds in the same statement snapshot. Revocation and obsolete history stay
+generic. Notification history is never authority and never supplies a bearer
+capability. Retention/account erasure and automatic notification reconciliation
+remain deferred.
 
 ## Deferred decisions
 

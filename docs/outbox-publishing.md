@@ -1,5 +1,11 @@
 # Outbox publishing development and recovery (Phase 1C)
 
+Sharing M6 separately consumes the dedicated permission route with manual ACK
+after notification commit. `SHARING_NOTIFICATIONS_CONSUMER_ENABLED` defaults false
+and is independent of this publisher and purge workers. See [recipient delivery,
+quarantine and explicit-restart recovery](sharing-m6.md). Publisher replay retains
+the original activity UUID; database event/recipient uniqueness preserves read state.
+
 ## Implementation boundary
 
 The backend now supplies a PostgreSQL leased outbox publisher and RabbitMQ confirm/return transport. It does not consume notifications, create durable purge jobs, delete Garage objects, or backfill old purge intents. PostgreSQL remains authoritative; `PUBLISHED` describes notification acceptance, not deletion. [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md) records the protocol, payload versioning, topology, and failure trade-offs.

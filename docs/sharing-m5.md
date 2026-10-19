@@ -1,6 +1,8 @@
 # Sharing M5: permission activity history
 
 Implemented under the [approved sharing design](sharing-permissions-design.md).
+M6 now consumes this activity through [in-app recipient notifications](sharing-m6.md);
+the descriptions of M5-only boundaries below remain historical milestone scope.
 M5 records durable activity for owners. Notifications, email, frontend work,
 recipient feeds and inherited-descendant fan-out remain outside this milestone.
 
