@@ -36,20 +36,26 @@ public class JwtService {
     }
 
     public String generateAccessToken(UUID userId) {
+        return generateAccessToken(userId, null);
+    }
+
+    public String generateAccessToken(UUID userId, UUID sessionId) {
 
         Instant now = Instant.now();
 
-        JwtClaimsSet claims = JwtClaimsSet.builder()
+        JwtClaimsSet.Builder builder = JwtClaimsSet.builder()
                 .issuer(issuer)
                 .subject(userId.toString())
+                .id(UUID.randomUUID().toString())
                 .issuedAt(now)
                 .expiresAt(
                         now.plus(
                                 accessTokenMinutes,
                                 ChronoUnit.MINUTES
                         )
-                )
-                .build();
+                );
+        if (sessionId != null) builder.claim("sid", sessionId.toString());
+        JwtClaimsSet claims = builder.build();
 
         JwsHeader header = JwsHeader
                 .with(MacAlgorithm.HS256)

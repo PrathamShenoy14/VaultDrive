@@ -6,6 +6,13 @@ import com.vaultdrive.auth.dto.RegisterRequest;
 import com.vaultdrive.auth.dto.RegisterResponse;
 
 import com.vaultdrive.security.JwtService;
+import com.vaultdrive.security.AuthTransportFilter;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.server.ResponseStatusException;
 
 import jakarta.validation.Valid;
 
@@ -22,15 +29,19 @@ public class AuthController {
     private final RegistrationService registrationService;
     private final AuthenticationService authenticationService;
     private final JwtService jwtService;
+    private final SessionService sessions;
+    public static final String REFRESH_COOKIE = "__Host-vaultdrive-refresh";
 
     public AuthController(
             RegistrationService registrationService,
             AuthenticationService authenticationService,
-            JwtService jwtService
+            JwtService jwtService,
+            SessionService sessions
     ) {
         this.registrationService = registrationService;
         this.authenticationService = authenticationService;
         this.jwtService = jwtService;
+        this.sessions = sessions;
     }
 
     @PostMapping("/register")
@@ -55,14 +66,53 @@ public class AuthController {
     ) {
         UUID userId = authenticationService.authenticate(request);
 
-        String accessToken = jwtService.generateAccessToken(userId);
+        return issued(sessions.create(userId));
+    }
 
-        LoginResponse response = new LoginResponse(
-                accessToken,
-                "Bearer",
-                jwtService.getAccessTokenExpiresInSeconds()
-        );
+    @PostMapping("/refresh")
+    public ResponseEntity<LoginResponse> refresh(HttpServletRequest request,
+            @RequestHeader(AuthTransportFilter.CSRF_HEADER) String csrf) {
+        return issued(sessions.refresh(refreshCookie(request), csrf));
+    }
 
-        return ResponseEntity.ok(response);
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(@AuthenticationPrincipal Jwt jwt, HttpServletRequest request,
+            @RequestHeader(AuthTransportFilter.CSRF_HEADER) String csrf) {
+        sessions.logout(jwt, refreshCookie(request), csrf);
+        return ResponseEntity.noContent().header(HttpHeaders.SET_COOKIE, cookie("", 0)).build();
+    }
+
+    private ResponseEntity<LoginResponse> issued(SessionService.IssuedSession session) {
+        return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .header(HttpHeaders.SET_COOKIE, cookie(session.refreshToken(), session.refreshSeconds()))
+                .header(AuthTransportFilter.CSRF_HEADER, session.csrfToken())
+                .body(new LoginResponse(session.accessToken(), "Bearer", jwtService.getAccessTokenExpiresInSeconds()));
+    }
+
+    private static String cookie(String value, long seconds) {
+        return ResponseCookie.from(REFRESH_COOKIE, value).secure(true).httpOnly(true)
+                .sameSite("Strict").path("/").maxAge(seconds).build().toString();
+    }
+
+    private static String refreshCookie(HttpServletRequest request) {
+        String found = null;
+        if (request.getCookies() != null) {
+            for (var cookie : request.getCookies()) {
+                if (REFRESH_COOKIE.equals(cookie.getName())) {
+                    if (found != null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid authentication session");
+                    found = cookie.getValue();
+                }
+            }
+        }
+        return found;
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<com.vaultdrive.common.exception.ApiError> sessionFailure(ResponseStatusException failure) {
+        // Write the response directly: servlet error redispatch must not replace a 403/503 with a 401.
+        int status = failure.getStatusCode().value();
+        return ResponseEntity.status(status).header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .body(new com.vaultdrive.common.exception.ApiError(status,
+                        HttpStatus.valueOf(status).name(), failure.getReason()));
     }
 }

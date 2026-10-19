@@ -294,6 +294,7 @@ class AsyncPurgeEndToEndTest {
 
     String request(String method, String path, String body, int status) throws Exception {
         var builder = builder(path);
+        if (path.equals("/auth/login")) builder.header("X-VaultDrive-Client", "1");
         if (body != null) { builder.header("Content-Type", "application/json"); }
         var response = http.send(builder.method(method, body == null ? HttpRequest.BodyPublishers.noBody()
                 : HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());

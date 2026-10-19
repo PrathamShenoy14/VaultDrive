@@ -265,17 +265,23 @@ enablement is added. See [eligibility, state machine, invocation and limits](kno
 ### Platform and persistence — Committed
 
 - Java 21, Spring Boot 4.1.1, Maven wrapper, Spring MVC, Spring Data JPA, validation, and Spring Security.
-- PostgreSQL schema managed by append-only Flyway migrations V1-V30. Hibernate validates the schema (`ddl-auto=validate`) rather than creating it.
+- PostgreSQL schema managed by append-only Flyway migrations V1-V37. Hibernate validates the schema (`ddl-auto=validate`) rather than creating it.
 - Configuration comes from properties and environment variables. Secrets are not intended for source control.
 
-### Authentication and security — Committed
+### Authentication sessions, logout and profile
 
 - Registration normalizes email addresses, enforces BCrypt's 72-byte input limit, hashes passwords, and relies on a case-insensitive PostgreSQL unique index.
-- Login verifies BCrypt hashes and issues HS256 JWT access tokens. The configured default lifetime is 15 minutes.
-- The API is stateless. Registration, login and health are public. Sharing M4 adds two narrowly public file-link GETs using a dedicated secret header and separate security chain. Other endpoints require a valid bearer JWT.
-- JWT subjects are user UUIDs. Issuer, signature, and expiration are validated.
+- Login verifies BCrypt hashes and issues 30-minute HS256 access JWTs with unique UUID `jti` and session `sid` claims.
+- V37 stores refresh families, SHA-256 refresh/CSRF hashes, consumed-token history and indexed expiring jti revocations in PostgreSQL. Secure HttpOnly SameSite=Strict cookies carry 256-bit opaque refresh tokens; session-bound synchronizer headers protect refresh/logout and a custom login header prevents simple-request login CSRF.
+- Family row locks serialize rotation, replay and logout across instances. Reuse revokes only its family; logout atomically revokes the family and presented access JWT. Every JWT request checks PostgreSQL and fails closed when state is unavailable. Explicit cleanup removes bounded expired jti batches.
+- No server HTTP session is maintained. Registration, login, refresh and health are public routes with their documented credential/CSRF contracts. Sharing M4 retains its isolated public file-link GETs. Other endpoints require a valid bearer JWT.
+- JWT subjects are user UUIDs. Issuer, signature and expiration remain validated. Authenticated profile GET/PATCH use explicit safe DTOs and validated display names.
 
-Not implemented: refresh tokens, JWT logout/revocation, account-state checks, general API rate limiting, key rotation, or asymmetric signing. Share-link revocation and per-process public-link rate/concurrency limits are implemented; deployment still requires HTTPS, secret-safe proxy logging and edge timeouts.
+See [endpoint contracts, security, operations and verification](authentication-sessions.md).
+Not implemented: account-state controls, general API rate limiting, JWT key rotation,
+asymmetric signing or refresh-history retention cleanup. Share-link revocation and
+per-process public-link limits remain implemented; deployment requires HTTPS,
+secret-safe logging and edge timeouts. No frontend or multipart browser changes are included.
 
 ### Folder namespace — Committed
 

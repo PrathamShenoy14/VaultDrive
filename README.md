@@ -32,7 +32,7 @@ For opt-in leased RabbitMQ publication, local connectivity, and recovery, see [O
 ### Authentication
 - BCrypt password hashing
 - JWT authentication (HS256)
-- Stateless authentication using bearer tokens
+- Bearer access JWTs with PostgreSQL refresh sessions and immediate revocation
 
 ### Testing
 - JUnit 5
@@ -67,10 +67,10 @@ For opt-in leased RabbitMQ publication, local connectivity, and recovery, see [O
 
 - JWT access token generation
 - HS256 token signing
-- Configurable token expiration
+- Thirty-minute access tokens with unique jti claims
 - Token signature verification
 - Issuer and expiration validation
-- Stateless authentication using Spring Security
+- PostgreSQL refresh rotation, reuse detection and fail-closed revocation checks
 - Bearer token authentication
 - Protected REST endpoints
 - Automated JWT and Spring Security integration tests
@@ -106,8 +106,11 @@ The following endpoints are currently implemented.
 |--------|----------|----------------|-------------|
 | GET | `/api/v1/health` | Public | Check API health |
 | POST | `/api/v1/auth/register` | Public | Register a new user |
-| POST | `/api/v1/auth/login` | Public | Authenticate and receive a JWT |
-| GET | `/api/v1/users/me` | Required | Retrieve the authenticated user's UUID |
+| POST | `/api/v1/auth/login` | Credentials + client header | Receive access JWT, refresh cookie and CSRF header |
+| POST | `/api/v1/auth/refresh` | Refresh cookie + CSRF header | Rotate refresh credential and issue access JWT |
+| POST | `/api/v1/auth/logout` | JWT + matching cookie + CSRF header | Revoke current family and access JWT |
+| GET | `/api/v1/users/me` | JWT | Retrieve authenticated profile |
+| PATCH | `/api/v1/users/me` | JWT | Update validated display name |
 | GET | `/api/v1/permission-activity` | Required | Owner permission history; [filters, pagination and visibility](docs/sharing-m5.md) |
 | GET | `/api/v1/notifications` | Required | Recipient sharing notifications; [filters, redaction and pagination](docs/sharing-m6.md) |
 | GET | `/api/v1/notifications/unread-count` | Required | Current recipient's unread count |
@@ -132,12 +135,16 @@ The following endpoints are currently implemented.
 
 ### Authentication Flow
 
+See [authentication sessions](docs/authentication-sessions.md) for cookie/CSRF
+headers, errors, concurrency, security guarantees and operations.
+
 1. A user registers using an email, password, and display name.
 2. The password is hashed using BCrypt before being stored.
-3. The user logs in using their registered credentials.
-4. After successful authentication, the backend generates a signed JWT.
+3. The user logs in using their registered credentials and `X-VaultDrive-Client: 1`.
+4. The backend returns a signed JWT, secure refresh cookie and `X-VaultDrive-CSRF` header.
 5. The client includes the JWT in the `Authorization` header when accessing protected endpoints.
-6. Spring Security validates the JWT before allowing access.
+6. Spring Security validates the JWT and checks PostgreSQL revocation state before allowing access.
+7. Refresh rotates the cookie with the session CSRF header; logout revokes that family and access token.
 
 Example authorization header:
 
@@ -145,7 +152,7 @@ Example authorization header:
 Authorization: Bearer <access_token>
 ```
 
-Access tokens currently expire after 15 minutes by default.
+Access tokens expire after 30 minutes by default; refresh families expire after 30 days.
 
 ## Getting Started
 
@@ -330,7 +337,7 @@ backend/
 
 - Authentication rate limiting
 - Account-state validation
-- Token revocation and logout strategy
+- Refresh-session history retention policy
 - Secret rotation
 - Additional authorization and security testing
 

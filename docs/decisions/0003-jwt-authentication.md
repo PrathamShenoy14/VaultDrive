@@ -1,6 +1,6 @@
-# ADR-0003: Stateless JWT authentication
+# ADR-0003: JWT authentication with PostgreSQL session revocation
 
-- Status: Accepted and implemented for access tokens
+- Status: Accepted; extended by the authentication-session milestone on 2026-10-19
 - Date: 2026-10-09 (retrospective record)
 
 ## Context
@@ -9,14 +9,14 @@ The API needs authentication usable by future web and mobile clients without ser
 
 ## Decision
 
-Hash passwords with BCrypt. After credential verification, issue short-lived HS256 JWT access tokens whose subject is the user's UUID. Validate signature, issuer, and expiry with Spring Security's OAuth2 resource-server support. Keep the API stateless and accept bearer tokens in the `Authorization` header.
+Hash passwords with BCrypt. After credential verification, issue short-lived HS256 JWT access tokens whose subject is the user's UUID. Validate signature, issuer, and expiry with Spring Security's OAuth2 resource-server support. Accept bearer tokens in the `Authorization` header without server HTTP sessions; PostgreSQL now supplies revocation state as described below.
 
 ## Consequences
 
-- API instances do not need shared session state for access-token validation.
+- API instances now share PostgreSQL refresh-session and revocation state for access-token validation (see the extension below).
 - A symmetric signing secret is operationally simple but every verifier capable of validating the token also holds signing material.
-- Tokens remain valid until expiry; logout, revocation, refresh tokens, and account-state invalidation are not implemented.
-- The current 15-minute lifetime limits but does not eliminate the revocation gap.
+- The original implementation used 15-minute access tokens without refresh/logout. The session extension below supersedes that behavior.
+- Account-state controls remain deferred.
 - Secret generation, storage, and rotation are deployment responsibilities still to be designed.
 
 ## Alternatives considered
@@ -41,4 +41,28 @@ through the backend without presigned GETs. A token bucket and semaphores bound
 public request rate, concurrent requests and full download lifetimes per process.
 Production HTTPS, proxy/APM/header/body redaction, edge timeouts and multi-instance
 admission remain deployment responsibilities. JWT lifetime/revocation behavior
-above is unchanged.
+is independent of these file capabilities.
+
+## Authentication-session extension (2026-10-19)
+
+Keep bearer JWT transport, BCrypt and existing authorization. Issue 30-minute
+access tokens with unique jti values; login/refresh also bind sid to a PostgreSQL
+family. Every JWT request checks indexed jti revocation plus family revocation
+when sid is present, failing closed on missing/unavailable state. This knowingly
+adds a PostgreSQL availability dependency to authentication. Pre-milestone JWTs
+without jti require login again on rollout.
+
+Use 256-bit SecureRandom opaque refresh credentials and SHA-256 hashes, with
+30-day absolute family expiry. Retain consumed hashes to detect reuse. Lock the
+family, then freshly read its state and token, consume and replace in one
+transaction. Commit family revocation before returning a replay error. No
+in-process mutex or grace window: concurrent refresh and lost-response retries
+have the same strict replay outcome. This follows the rotation trade-off in
+[RFC 9700 section 4.14](https://www.rfc-editor.org/rfc/rfc9700.html#section-4.14).
+
+Use host-only Secure HttpOnly Strict cookies, a session-bound synchronizer header
+and custom-header login admission with CORS disabled. Logout atomically revokes
+the matching family and presented jti; family checks invalidate its other access
+tokens too. Revocation expiry includes JWT clock tolerance; bounded explicit
+cleanup uses SKIP LOCKED. No Redis, HTTP session, browser UI, key-management or
+general rate-limit feature is added. See [the complete contract and runbook](../authentication-sessions.md).

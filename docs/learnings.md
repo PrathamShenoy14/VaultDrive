@@ -654,3 +654,23 @@ and unread counts after deletion, but omit private names and resource references
 Opening still goes through ordinary authorization. This avoids copied names,
 descendant fan-out and a broader framework while preserving M5 mutation atomicity.
 See [the M6 contract](sharing-m6.md).
+
+## Authentication sessions: commit the security outcome before returning an error
+
+Rotation requires a retained token history and one database lock per family,
+followed by fresh reads after acquisition. A unique partial index also prevents
+two unconsumed tokens in a family. Reuse is an authentication error with an
+intentional database effect: returning a denial from the transaction and throwing
+after it commits preserves family revocation. Throwing inside a rollback-only
+transaction would silently undo the protection. Concurrent legitimate refreshes
+cannot be distinguished from theft, so strict reuse handling trades retry
+convenience for revocation; clients serialize requests and reauthenticate after
+lost-response retries.
+
+JWT signature verification alone cannot implement immediate logout. Persisting
+jti revocations and checking family state on every authenticated admission makes
+logout/replay visible across instances, with PostgreSQL availability as a stated
+cost. Cleanup must retain records through the decoder's clock tolerance. Fault
+injection verifies atomic logout and rotation rollback. Real HTTP also exposed
+servlet error redispatch changing intended 403/503 statuses to 401; direct auth
+exception responses preserve the documented contract. See [the session contract](authentication-sessions.md).

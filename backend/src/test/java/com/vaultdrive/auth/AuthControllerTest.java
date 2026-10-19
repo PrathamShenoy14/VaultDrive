@@ -35,6 +35,7 @@ class AuthControllerTest {
     private RegistrationService registrationService;
     private AuthenticationService authenticationService;
     private JwtService jwtService;    
+    private SessionService sessions;
     private ObjectMapper objectMapper;
 
     @BeforeEach
@@ -43,12 +44,14 @@ class AuthControllerTest {
         registrationService = mock(RegistrationService.class);
         authenticationService = mock(AuthenticationService.class);
         jwtService = mock(JwtService.class);
+        sessions = mock(SessionService.class);
 
         AuthController controller =
                 new AuthController(
                     registrationService, 
                     authenticationService,
-                    jwtService
+                    jwtService,
+                    sessions
                 );
 
         mockMvc = MockMvcBuilders
@@ -214,8 +217,8 @@ class AuthControllerTest {
         when(authenticationService.authenticate(any(LoginRequest.class)))
                 .thenReturn(userId);
     
-        when(jwtService.generateAccessToken(userId))
-                .thenReturn("test-signed-jwt");
+        when(sessions.create(userId)).thenReturn(new SessionService.IssuedSession(
+                "refresh", "csrf", "test-signed-jwt", SessionService.REFRESH_SECONDS));
     
         String request = """
                 {
@@ -237,8 +240,7 @@ class AuthControllerTest {
         verify(authenticationService)
                 .authenticate(any(LoginRequest.class));
     
-        verify(jwtService)
-                .generateAccessToken(userId);
+        verify(sessions).create(userId);
     }
 
     @Test

@@ -26,6 +26,7 @@ class SecurityIntegrationTest {
 
     @Autowired
     private JwtService jwtService;
+    @Autowired private com.vaultdrive.user.UserRepository users;
 
     @Test
     void shouldRejectRequestWithoutJwt() throws Exception {
@@ -50,9 +51,11 @@ class SecurityIntegrationTest {
     }
 
     @Test
+    @org.springframework.transaction.annotation.Transactional
     void shouldAllowRequestWithValidJwt() throws Exception {
 
-        UUID userId = UUID.randomUUID();
+        UUID userId = users.saveAndFlush(new com.vaultdrive.user.User(
+                UUID.randomUUID() + "@example.com", "fixture-hash", "Security fixture")).getId();
 
         String token = jwtService.generateAccessToken(userId);
 

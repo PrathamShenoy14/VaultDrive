@@ -218,7 +218,7 @@ Exit criteria: correctness tests remain green and measured contention improves f
 - Broad legacy/blocked-intent recovery, operational tuning and event/job/quarantine retention within ADR-0008. Phase 2E.4 resolves bounded aged-PUBLISHED missing-job creation; file/folder purge execution is implemented. Publisher policy is decided in Phase 1C; job identity/states/fencing/retries in Phase 2A; consumer disposition in Phase 2B; bounded scheduling/renewal/shutdown in Phase 2C.
 - Granular lock mechanism and namespace key.
 - Hard-delete retention delay and user-visible cancellation policy.
-- Refresh-token/logout design and JWT key evolution.
+- JWT key evolution, account-state controls and refresh-history retention policy.
 - Later sharing milestones, quota model, deployment platform, and performance targets.
 
 ## Phase 2E.4 bounded missing-job reconciliation
@@ -242,3 +242,16 @@ late outcome retention and deterministic completion/purge ordering. See [M5 guar
 and verification](multipart-purge-compatibility.md). Physical multipart block reclamation,
 unknown-allocation repair, browser release and autonomous cleanup remain deferred.
 M5 ends here; no later milestone is implemented by this change.
+
+## Authentication sessions, logout and profile MVP
+
+- [x] Thirty-minute access JWTs with unique jti and session identity.
+- [x] PostgreSQL hashed refresh families, transactional rotation and family-scoped reuse revocation.
+- [x] Refresh/logout APIs, secure cookie and CSRF contract, immediate access revocation and bounded jti cleanup.
+- [x] Authenticated profile GET/PATCH with validated display names and secret-free DTOs.
+- [x] PostgreSQL/HTTP concurrency, replay, isolation, failure, transport and profile checks.
+- [x] [API, security, rollout and operational contract](authentication-sessions.md).
+
+No frontend, browser multipart release or additional authentication features are
+included. General rate limiting, account-state features, JWT key evolution and
+refresh-history retention remain separate work.

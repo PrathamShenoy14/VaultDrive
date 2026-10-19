@@ -13,6 +13,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
 import org.springframework.security.web.access.AccessDeniedHandlerImpl;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 
 @Configuration
 @EnableWebSecurity
@@ -44,9 +45,10 @@ public class SecurityConfig {
         accessDeniedHandler.setErrorPage(null);
 
         http
-                // Our API authenticates using Authorization headers,
-                // not automatically transmitted session cookies.
+                // Cookie endpoints use session-bound synchronizer CSRF checks and custom-header admission.
+                // Other APIs remain bearer-only.
                 .csrf(csrf -> csrf.disable())
+                .addFilterBefore(new AuthTransportFilter(), BearerTokenAuthenticationFilter.class)
 
                 // Do not maintain authentication using HTTP sessions.
                 .sessionManagement(session ->
@@ -65,7 +67,8 @@ public class SecurityConfig {
                         .requestMatchers(
                                 HttpMethod.POST,
                                 "/api/v1/auth/register",
-                                "/api/v1/auth/login"
+                                "/api/v1/auth/login",
+                                "/api/v1/auth/refresh"
                         ).permitAll()
 
                         .requestMatchers(

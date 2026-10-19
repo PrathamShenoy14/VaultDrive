@@ -12,6 +12,7 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
@@ -46,7 +47,8 @@ public class JwtConfig {
     @Bean
     public JwtDecoder jwtDecoder(
             SecretKey jwtSecretKey,
-            @Value("${vaultdrive.jwt.issuer}") String issuer
+            @Value("${vaultdrive.jwt.issuer}") String issuer,
+            AccessTokenState accessTokenState
     ) {
         NimbusJwtDecoder decoder = NimbusJwtDecoder
                 .withSecretKey(jwtSecretKey)
@@ -54,7 +56,7 @@ public class JwtConfig {
                 .build();
 
         decoder.setJwtValidator(
-                JwtValidators.createDefaultWithIssuer(issuer)
+                new DelegatingOAuth2TokenValidator<>(JwtValidators.createDefaultWithIssuer(issuer), accessTokenState)
         );
 
         return decoder;

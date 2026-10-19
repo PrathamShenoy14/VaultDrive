@@ -59,6 +59,11 @@ public class User {
         return displayName;
     }
 
+    public void updateDisplayName(String displayName) {
+        this.displayName = displayName;
+        this.updatedAt = Instant.now();
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }

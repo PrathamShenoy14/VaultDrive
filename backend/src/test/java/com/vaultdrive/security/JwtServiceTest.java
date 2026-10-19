@@ -15,6 +15,8 @@ import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.*;
+import static org.mockito.Mockito.*;
+import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 
 class JwtServiceTest {
 
@@ -37,13 +39,13 @@ class JwtServiceTest {
 
         jwtDecoder = jwtConfig.jwtDecoder(
                 secretKey,
-                "https://vaultdrive.local"
+                "https://vaultdrive.local", allowedState()
         );
 
         jwtService = new JwtService(
                 jwtEncoder,
                 "https://vaultdrive.local",
-                15
+                30
         );
     }
 
@@ -58,6 +60,8 @@ class JwtServiceTest {
 
         assertThat(decodedToken.getSubject())
                 .isEqualTo(userId.toString());
+        assertThat(decodedToken.getId()).isNotBlank();
+        assertThat(jwtDecoder.decode(jwtService.generateAccessToken(userId)).getId()).isNotEqualTo(decodedToken.getId());
 
         assertThat(decodedToken.getIssuer().toString())
                 .isEqualTo("https://vaultdrive.local");
@@ -72,7 +76,7 @@ class JwtServiceTest {
         assertThat(expiresAt).isNotNull();
 
         assertThat(Duration.between(issuedAt, expiresAt))
-                .isEqualTo(Duration.ofMinutes(15));
+                .isEqualTo(Duration.ofMinutes(30));
     }
 
     @Test
@@ -119,7 +123,7 @@ class JwtServiceTest {
                 jwtConfig.jwtEncoder(secretKey);
 
         JwtDecoder decoder =
-                jwtConfig.jwtDecoder(secretKey, "https://vaultdrive.local");
+                jwtConfig.jwtDecoder(secretKey, "https://vaultdrive.local", allowedState());
 
         Instant now = Instant.now();
 
@@ -140,5 +144,11 @@ class JwtServiceTest {
 
         assertThatThrownBy(() -> decoder.decode(expiredToken))
                 .isInstanceOf(JwtException.class);
+    }
+
+    private static AccessTokenState allowedState() {
+        AccessTokenState state = mock(AccessTokenState.class);
+        when(state.validate(any())).thenReturn(OAuth2TokenValidatorResult.success());
+        return state;
     }
 }
