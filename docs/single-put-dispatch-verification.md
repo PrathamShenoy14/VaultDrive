@@ -1,5 +1,7 @@
 # Trusted single-PUT dispatch verification (Phase 2E.5B4A)
 
+Consolidation update: [the backend audit](backend-consolidation.md) retires synchronous upload admission/PUT and foreground receipt creation. New uploads use direct multipart only. Earlier flow descriptions, commands and verification totals below are historical milestone evidence; retained historical readers/receipts/expiry/cleanup remain supported where stated in the audit.
+
 Follow-up: [restricted B4B cleanup](known-success-upload-cleanup.md) now relies on
 this verified contract. The B4A scope and execution record below remain historical.
 
@@ -50,10 +52,10 @@ when changing SDK versions, HTTP clients, retry configuration or upload paths.
 
 ## Controlled receiver and evidence
 
-[SinglePutDispatchIntegrationTest](../backend/src/test/java/com/vaultdrive/storage/SinglePutDispatchIntegrationTest.java)
+`SinglePutDispatchIntegrationTest` (historical source retired by consolidation)
 uses the production Spring services, adapter, SDK factory and transport. All
 storage requests go to a raw loopback HTTP/1.1
-[controlled receiver](../backend/src/test/java/com/vaultdrive/storage/ControlledPutServer.java)
+`controlled receiver` (historical source retired by consolidation)
 using synthetic credentials. A second independently listening receiver is the
 redirect destination. Neither receiver implements DELETE or contacts Garage.
 

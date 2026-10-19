@@ -1,5 +1,7 @@
 # Never-admitted reservation expiry (Phase 2E.5B2)
 
+Consolidation update: [the backend audit](backend-consolidation.md) retires synchronous upload admission/PUT and foreground receipt creation. New uploads use direct multipart only. Earlier flow descriptions, commands and verification totals below are historical milestone evidence; retained historical readers/receipts/expiry/cleanup remain supported where stated in the audit.
+
 B2 adds an explicit PostgreSQL-only operation under the
 [recovery audit](stale-upload-recovery-audit.md). It releases stale upload names
 only after permanently excluding application write admission. It performs no

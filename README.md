@@ -92,7 +92,7 @@ For opt-in leased RabbitMQ publication, local connectivity, and recovery, see [O
 ### 6. Folder and File Management
 
 - Owner-scoped folder hierarchy with create, list, rename, move, soft-delete, trash, and restore
-- S3-compatible file upload and streaming download through Garage
+- Direct multipart file upload and backend streaming download through Garage
 - Paginated file listing, rename, move, trash, and restore
 - PostgreSQL metadata separated from immutable object-storage keys
 - Upload lifecycle states (`UPLOADING`, `READY`, `FAILED`)
@@ -304,66 +304,13 @@ backend/
 └── pom.xml
 ```
 
-## Planned Features
+## Current backend and remaining work
 
-### File Management
+Implemented: authentication sessions/logout/profile; owner-scoped metadata and Trash/restore; direct multipart uploads and backend downloads; grants, Editor collaboration, file Viewer links, activity and notifications; transactional outbox, durable jobs and file/folder purge with retained receipts and bounded recovery. Synchronous POST `/api/v1/files` is retired. New uploads use `/api/v1/upload-sessions`.
 
-- Recursive folder purge, file metadata finalization and audited legacy purge recovery
-- Reconciliation for stale uploads and orphaned objects
-- Presigned and resumable transfers
-- File versioning and quotas
+The [current architecture](docs/architecture.md), [consolidation audit and verification](docs/backend-consolidation.md), and [roadmap](docs/development-roadmap.md) are the authoritative status map. Historical ADRs/milestone records retain their original evidence. All production asynchronous components remain opt-in.
 
-### Sharing and Permissions
-
-- Secure file-sharing links
-- User-based sharing
-- File and folder permissions
-- Access control and ownership validation
-
-### Performance and Background Processing
-
-- Redis caching
-- Idempotent RabbitMQ consumers and durable purge jobs
-- Asynchronous background processing
-- Notifications
-- Activity logging
-
-### Frontend and Mobile
-
-- Next.js web application
-- React Native mobile application using the same backend APIs
-
-### Additional Security
-
-- Authentication rate limiting
-- Account-state validation
-- Refresh-session history retention policy
-- Secret rotation
-- Additional authorization and security testing
-
-These features are planned and have not yet been implemented.
-
-## Development Status
-
-**Completed:**
-- Backend project setup
-- PostgreSQL integration
-- Flyway migrations
-- User registration
-- User login
-- JWT generation and validation
-- Spring Security authentication
-- Protected endpoint implementation
-- Authentication and security tests
-- Folder management, Trash, and restoration
-- File upload/download/list/rename/move/Trash/restore
-- Garage S3-compatible storage adapter
-- Pending-purge schema and lifecycle state
-- Durable permanent-delete request endpoint
-
-**Current milestone:**
-
-File byte purge now uses durable immutable targets and bounded retries under the accepted [trusted-writer contract](docs/file-purge.md). Folder purge, metadata finalization and legacy recovery remain planned. A granular concurrency refactor remains planned after the current behavior is protected by database-backed concurrency tests.
+Live browser HTTPS/CORS/clock interoperability, unknown multipart reclamation, broad historical repair, retention/erasure, zero-byte upload policy, quotas/versioning, general rate limiting, key evolution, dependency readiness, backups, clients and deployment remain separate work. No performance/capacity claim is established.
 
 ## Project Goals
 

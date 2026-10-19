@@ -1,5 +1,7 @@
 # Continuous asynchronous purge verification (Phase 2E.3)
 
+Consolidation update: HTTP fixture uploads now use direct multipart through the test-only `MultipartHttpUploads` helper. Existing isolation, one-dispatch uncertainty and process-kill gates remain. Historical results below describe their recorded revisions; see [current milestone verification](backend-consolidation.md#verification) for runs executed after this change.
+
 [AsyncPurgeEndToEndTest](../backend/src/test/java/com/vaultdrive/e2e/AsyncPurgeEndToEndTest.java)
 starts a real embedded HTTP server with production controllers, services, scheduled
 outbox publisher, RabbitMQ transport/listener/ingestor, durable job worker and both
@@ -17,7 +19,7 @@ or permissions, vhosts, buckets or service credentials.
 
 - PostgreSQL is fixed to localhost port 5432, database `vaultdrive_test`. Each run
   creates `async_e2e_<32 hex UUID characters>` using CREATE SCHEMA without
-  IF NOT EXISTS. It never adopts an existing schema. Flyway V1-V23 and Hibernate
+  IF NOT EXISTS. It never adopts an existing schema. Flyway V1-V37 and Hibernate
   use only that schema; schema auto-creation is disabled. Before initializing each
   mutation-capable async component, a gate verifies the database, current schema,
   search path and absence of all outbox events, jobs, users, files and folders.
@@ -32,8 +34,9 @@ or permissions, vhosts, buckets or service credentials.
   allocator generates a run-scoped `integration-tests/` prefix plus owner/file
   UUIDs. Bucket accessibility and per-key absence are checked before admitting
   uploads. Only absence-checked allocations enter the in-memory cleanup registry.
-  Bytes still pass through the production ObjectStorageService, write admission,
-  immutable allocation/target persistence and trusted-writer contract. No bucket
+  Control calls use production ObjectStorageService; bytes use the signed exact
+  UploadPart URL directly. Immutable allocation/session/completion/target evidence
+  and the trusted-writer contract remain authoritative. No bucket
   listing, existing-object cleanup or storage identity migration occurs.
 
 Command-line properties enable the three async components only inside this

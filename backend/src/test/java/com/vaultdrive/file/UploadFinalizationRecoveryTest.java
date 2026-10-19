@@ -10,26 +10,7 @@ import static com.vaultdrive.file.UploadFinalizationTransactions.Outcome.*;
 class UploadFinalizationRecoveryTest {
     private final UploadFinalizationTransactions tx = mock(UploadFinalizationTransactions.class);
     private final UploadFinalizationRecovery recovery = new UploadFinalizationRecovery(tx);
-    private StoredFile file() { return new StoredFile(UUID.randomUUID(), UUID.randomUUID(), null, "a", "k", "text/plain", 1); }
 
-    @Test void receiptCommitPrecedesReadyAndReloadIsOnlyUsedOnFailure() {
-        var file = file(); when(tx.recover(file.getId())).thenReturn(RECOVERED);
-        recovery.complete(file);
-        var order = inOrder(tx); order.verify(tx).recordSuccess(file); order.verify(tx).recover(file.getId());
-        verify(tx, never()).hasSuccess(any());
-    }
-    @Test void failedReloadPreservesOriginalFailureAndNeverFinalizes() {
-        var file = file(); var failure = new IllegalStateException("receipt failure");
-        doThrow(failure).when(tx).recordSuccess(file);
-        when(tx.hasSuccess(file)).thenThrow(new IllegalStateException("reload failure"));
-        assertThatThrownBy(() -> recovery.complete(file)).isSameAs(failure);
-        assertThat(failure.getSuppressed()).hasSize(1);
-        verify(tx, never()).recover(any());
-    }
-    @Test void blockedForegroundCompletionReportsFailureWithoutReady() {
-        var file = file(); when(tx.recover(file.getId())).thenReturn(BLOCKED);
-        assertThatThrownBy(() -> recovery.complete(file)).hasMessage("Upload metadata finalization is blocked");
-    }
     @Test void blockedAndFailedCandidatesCannotStarveLaterCandidates() {
         UUID a = UUID.randomUUID(), b = UUID.randomUUID(), c = UUID.randomUUID(), d = UUID.randomUUID();
         when(tx.scan(null)).thenReturn(List.of(a, b, c, d));

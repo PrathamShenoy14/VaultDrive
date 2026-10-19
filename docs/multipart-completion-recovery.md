@@ -1,5 +1,7 @@
 # Multipart completion and explicit recovery — Phase 3E / M3
 
+Consolidation update: [the backend audit](backend-consolidation.md) retires synchronous upload admission/PUT and foreground receipt creation. New uploads use direct multipart only. Earlier flow descriptions, commands and verification totals below are historical milestone evidence; retained historical readers/receipts/expiry/cleanup remain supported where stated in the audit.
+
 Current authorization extension: [Sharing M3](sharing-m3.md) adds owner/initiator
 separation and delegated Editor sessions, superseding owner-only authorization
 statements in this historical milestone record. Storage/lifecycle guarantees remain.

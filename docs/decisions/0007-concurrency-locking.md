@@ -1,5 +1,7 @@
 # ADR-0007: Transaction-scoped hierarchy coordination
 
+Current consolidation: [ADR-0010](0010-backend-consolidation.md) retires synchronous new-upload admission/PUT and foreground receipt creation. Historical phase descriptions below remain records of their original revisions; retained receipts, recovery and locking guarantees still apply. Current new uploads use direct multipart only.
+
 - Status: Accepted; folder operations and current file metadata mutation paths implemented
 - Date: 2026-10-09
 

@@ -25,6 +25,7 @@ import static org.assertj.core.api.Assertions.*;
 @SpringBootTest
 @ActiveProfiles("test")
 class SharingConcurrencyIntegrationTest {
+    @Autowired com.vaultdrive.storage.StorageBinding binding;
     @Autowired UserRepository users;
     @Autowired FolderRepository folders;
     @Autowired StoredFileRepository files;
@@ -222,10 +223,9 @@ class SharingConcurrencyIntegrationTest {
                 assertThat(bytes.readAllBytes()).containsExactly((byte)42);
             }
         } finally {
-            storage.delete(key);
+            storage.delete(binding.target(key));
         }
     }
-
 
     enum EditorMutation { CREATE, FOLDER_RENAME, FOLDER_TRASH, FILE_RENAME, FILE_TRASH }
 
@@ -328,7 +328,6 @@ class SharingConcurrencyIntegrationTest {
             executor.shutdownNow(); assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
         }
     }
-
 
     @ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource({"true,true", "true,false", "false,true", "false,false"})

@@ -50,7 +50,7 @@ public class S3StorageConfig {
                         .connectionTimeout(Duration.ofSeconds(2))
                         .connectionAcquisitionTimeout(Duration.ofSeconds(2))
                         .socketTimeout(Duration.ofSeconds(5)))
-                // An uncertain PUT must not spawn a second writer at the same key.
+                // Uncertain multipart control calls must never dispatch a second attempt.
                 // Purge retries belong to the durable PostgreSQL job lifecycle.
                 .overrideConfiguration(config -> config.retryStrategy(
                         StandardRetryStrategy.builder().maxAttempts(1).build()))

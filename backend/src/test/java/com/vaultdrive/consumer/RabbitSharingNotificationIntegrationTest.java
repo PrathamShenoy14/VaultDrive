@@ -151,7 +151,7 @@ class RabbitSharingNotificationIntegrationTest extends SharingNotificationFixtur
         Message poison = new Message(("private poison " + UUID.randomUUID()).getBytes(java.nio.charset.StandardCharsets.UTF_8), new MessageProperties());
         var json = (tools.jackson.databind.node.ObjectNode) mapper.readTree(message(e).getBody()); json.put("payloadVersion", 99);
         Message unsupported = new Message(mapper.writeValueAsBytes(json), message(e).getMessageProperties());
-        for (Message invalid : List.of(poison, unsupported)) { hashes.add(PermissionEventListener.digest(invalid.getBody())); send(invalid); }
+        for (Message invalid : List.of(poison, unsupported)) { hashes.add(NotificationDelivery.digest(invalid.getBody())); send(invalid); }
         assertThat(acked.await(10, TimeUnit.SECONDS)).isTrue(); assertThat(attempts).hasValue(3);
         assertThat(page(recipient).content()).hasSize(1);
         for (String hash : hashes) assertThat(jdbc.queryForObject("SELECT reason_code FROM notification_quarantine WHERE body_sha256 = ?", String.class, hash))

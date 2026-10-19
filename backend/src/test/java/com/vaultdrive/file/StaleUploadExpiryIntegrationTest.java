@@ -1,14 +1,14 @@
 package com.vaultdrive.file;
 
+import org.springframework.context.annotation.Import;
+
+import com.vaultdrive.support.HistoricalUploadFixtures;
 import com.vaultdrive.folder.FolderService;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
 import com.vaultdrive.job.BackgroundJobService;
 import com.vaultdrive.job.JobType;
-import com.vaultdrive.storage.FileStorageIdentityService;
 import com.vaultdrive.storage.ObjectStorageService;
-import com.vaultdrive.storage.S3ObjectStorageService;
 import com.vaultdrive.storage.StorageBinding;
-import com.vaultdrive.storage.config.S3StorageProperties;
 import com.vaultdrive.user.User;
 import com.vaultdrive.user.UserRepository;
 import com.vaultdrive.worker.FolderPurgeDiscoveryService;
@@ -31,7 +31,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 import software.amazon.awssdk.services.s3.S3Client;
 
 import javax.sql.DataSource;
-import java.io.ByteArrayInputStream;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
@@ -45,9 +44,12 @@ import static com.vaultdrive.file.StaleUploadExpiryTransactions.Outcome.*;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+@Import(HistoricalUploadFixtures.class)
 @SpringBootTest
 @ActiveProfiles("test")
 class StaleUploadExpiryIntegrationTest {
+    @Autowired HistoricalUploadFixtures history;
+
     private static final String SCHEMA = "upload_expiry_" + UUID.randomUUID().toString().replace("-", "");
     @DynamicPropertySource static void isolatedDatabase(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", () -> "jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=" + SCHEMA);
@@ -59,8 +61,6 @@ class StaleUploadExpiryIntegrationTest {
     @MockitoSpyBean private StaleUploadExpiryTransactions transactions;
     @Autowired private StaleUploadExpiryProperties properties;
     @Autowired private HierarchyCoordinator hierarchy;
-    @Autowired private FileMetadataService metadata;
-    @Autowired private FileStorageIdentityService identity;
     @Autowired private FolderService folders;
     @Autowired private BackgroundJobService jobs;
     @Autowired private FolderPurgeDiscoveryService discovery;
@@ -68,7 +68,6 @@ class StaleUploadExpiryIntegrationTest {
     @Autowired private PlatformTransactionManager manager;
     @Autowired private EntityManager em;
     @Autowired private StorageBinding binding;
-    @Autowired private S3StorageProperties s3Properties;
     @MockitoBean private ObjectStorageService storage;
     @MockitoSpyBean private S3Client s3;
     private TransactionTemplate tx;
@@ -115,11 +114,11 @@ class StaleUploadExpiryIntegrationTest {
         var stale = fixture(null, true);
         var fresh = fixture(null, false);
         var admitted = fixture(null, true);
-        identity.beginWrite(admitted.getStorageKey());
+        history.admission(admitted.getStorageKey());
         var failed = fixture(null, true);
-        metadata.markFailed(failed);
+        history.status(failed, FileStatus.FAILED);
         var ready = fixture(null, true);
-        identity.beginWrite(ready.getStorageKey()); metadata.markReady(ready);
+        history.admission(ready.getStorageKey()); history.status(ready, FileStatus.READY);
         String readyBefore = fileSnapshot(ready.getId());
         String failedBefore = allocationSnapshot(failed.getId());
         var page = expiry.expirePage(null);
@@ -136,7 +135,7 @@ class StaleUploadExpiryIntegrationTest {
         assertThat(transactions.expire(failed.getId())).isEqualTo(ALREADY_RESOLVED);
         assertThat(fileSnapshot(ready.getId())).isEqualTo(readyBefore);
         assertThat(allocationSnapshot(failed.getId())).isEqualTo(failedBefore);
-        var replacement = metadata.createUploading(new StoredFile(UUID.randomUUID(), owner, null, stale.getName(),
+        var replacement = history.reservation(new StoredFile(UUID.randomUUID(), owner, null, stale.getName(),
                 "disposable/" + UUID.randomUUID(), "text/plain", 1));
         assertThat(replacement.getStorageKey()).isNotEqualTo(stale.getStorageKey());
         assertThatThrownBy(() -> tx.executeWithoutResult(status -> em.createNativeQuery(
@@ -151,76 +150,10 @@ class StaleUploadExpiryIntegrationTest {
         assertThat(scalar("SELECT count(*) FROM file_purge_work")).isEqualTo(0L);
     }
 
-    @ParameterizedTest @ValueSource(booleans = {false, true})
-    void admissionVersusExpiryBothWinnerOrders(boolean admissionFirst) throws Exception {
-        var file = fixture(null, true);
-        if (admissionFirst) {
-            race(() -> { identity.beginWrite(file.getStorageKey()); return null; },
-                    () -> transactions.expire(file.getId()), null, ADMISSION_WON);
-            assertUploadingUnprecluded(file);
-            assertThat(scalar("SELECT write_started FROM file_storage_objects WHERE file_id = :id", file.getId())).isEqualTo(true);
-        } else {
-            race(() -> raw().expire(file.getId()), () -> {
-                assertThatThrownBy(() -> identity.beginWrite(file.getStorageKey())).isInstanceOf(RuntimeException.class);
-                // Real adapter must reject before reaching the SDK PUT, even for a delayed request.
-                var adapter = new S3ObjectStorageService(s3, s3Properties, identity, binding, org.mockito.Mockito.mock(software.amazon.awssdk.services.s3.presigner.S3Presigner.class));
-                assertThatThrownBy(() -> adapter.upload(file.getStorageKey(), new ByteArrayInputStream(new byte[]{1}), 1, "text/plain"))
-                        .isInstanceOf(RuntimeException.class);
-                return null;
-            }, EXPIRED, null);
-            assertExpired(file);
-        }
-    }
-
     @Test void concurrentExpiryHasOneWinnerAndReplayPreservesReceipt() throws Exception {
         var file = fixture(null, true);
         race(() -> raw().expire(file.getId()), () -> transactions.expire(file.getId()), EXPIRED, ALREADY_RESOLVED);
         assertExpired(file);
-    }
-
-    @ParameterizedTest @ValueSource(booleans = {false, true})
-    void expiryVersusReadyFinalizationBothWinnerOrders(boolean readyFirst) throws Exception {
-        var file = fixture(null, true);
-        if (readyFirst) {
-            // The metadata boundary's CAS is deliberately tested independently of PUT/admission.
-            race(() -> { metadata.markReady(file); return null; }, () -> transactions.expire(file.getId()), null, ALREADY_RESOLVED);
-            assertThat(scalar("SELECT status FROM files WHERE id = :id", file.getId())).isEqualTo("READY");
-            assertThat(scalar("SELECT reservation_expired_at IS NULL FROM file_storage_objects WHERE file_id = :id", file.getId())).isEqualTo(true);
-        } else {
-            race(() -> raw().expire(file.getId()), () -> {
-                assertThatThrownBy(() -> metadata.markReady(file)).isInstanceOf(RuntimeException.class); return null;
-            }, EXPIRED, null);
-            assertExpired(file);
-        }
-    }
-
-    @ParameterizedTest @ValueSource(booleans = {false, true})
-    void admittedNormalFinalizationIsNeverExpiredInEitherOrder(boolean readyFirst) throws Exception {
-        var file = fixture(null, true);
-        identity.beginWrite(file.getStorageKey());
-        if (readyFirst) {
-            race(() -> { metadata.markReady(file); return null; }, () -> transactions.expire(file.getId()), null, ALREADY_RESOLVED);
-        } else {
-            race(() -> raw().expire(file.getId()), () -> { metadata.markReady(file); return null; }, ADMISSION_WON, null);
-        }
-        assertThat(scalar("SELECT status FROM files WHERE id = :id", file.getId())).isEqualTo("READY");
-        assertThat(scalar("SELECT write_started AND write_precluded_at IS NULL AND reservation_expired_at IS NULL "
-                + "FROM file_storage_objects WHERE file_id = :id", file.getId())).isEqualTo(true);
-    }
-
-    @ParameterizedTest @ValueSource(booleans = {false, true})
-    void ordinaryFailureAndExpiryKeepDistinctEvidenceInBothOrders(boolean failureFirst) throws Exception {
-        var file = fixture(null, true);
-        if (failureFirst) {
-            race(() -> { metadata.markFailed(file); return null; }, () -> transactions.expire(file.getId()), null, ALREADY_RESOLVED);
-            assertThat(scalar("SELECT write_precluded_at IS NULL AND reservation_expired_at IS NULL "
-                    + "FROM file_storage_objects WHERE file_id = :id", file.getId())).isEqualTo(true);
-        } else {
-            race(() -> raw().expire(file.getId()), () -> {
-                assertThatThrownBy(() -> metadata.markFailed(file)).isInstanceOf(RuntimeException.class); return null;
-            }, EXPIRED, null);
-            assertExpired(file);
-        }
     }
 
     @ParameterizedTest @ValueSource(strings = {"trash-first", "expiry-trash", "restore-first", "expiry-restore", "purge-first", "expiry-purge"})
@@ -294,7 +227,7 @@ class StaleUploadExpiryIntegrationTest {
             tx.executeWithoutResult(status -> em.createNativeQuery(
                     "ALTER TABLE file_storage_objects DROP CONSTRAINT reject_test_receipt").executeUpdate());
         }
-        identity.beginWrite(file.getStorageKey()); // Rolled-back preclusion did not consume admission.
+        history.admission(file.getStorageKey()); // Rolled-back preclusion did not consume admission.
     }
 
     @Test void statementTimeoutAfterPreclusionRollsBackWholeCandidate() {
@@ -351,7 +284,7 @@ class StaleUploadExpiryIntegrationTest {
                 .setParameter("id", file.getId()).executeUpdate());
         assertThat(allocationSnapshot(file.getId())).isEqualTo(before);
         assertThat(transactions.expire(file.getId())).isEqualTo(INCONSISTENT); // Absence is no invented success.
-        assertThatThrownBy(() -> metadata.createUploading(new StoredFile(UUID.randomUUID(), owner, null,
+        assertThatThrownBy(() -> history.reservation(new StoredFile(UUID.randomUUID(), owner, null,
                 file.getName(), file.getStorageKey(), "text/plain", 1))).isInstanceOf(RuntimeException.class);
         assertThat(allocationSnapshot(file.getId())).isEqualTo(before);
     }
@@ -446,7 +379,7 @@ class StaleUploadExpiryIntegrationTest {
                 .setParameter("id", file.getId()).executeUpdate());
         assertThat(transactions.expire(file.getId())).isEqualTo(EXPIRED);
         assertThat(scalar("SELECT expired_file_version FROM file_storage_objects WHERE file_id = :id", file.getId())).isEqualTo(8L);
-        assertThatThrownBy(() -> metadata.markReady(file)).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> history.status(file, FileStatus.READY)).isInstanceOf(RuntimeException.class);
         var noLongerOld = fixture(null, true);
         assertThat(transactions.scan(null)).contains(noLongerOld.getId());
         tx.executeWithoutResult(status -> em.createNativeQuery("UPDATE files SET created_at = clock_timestamp() WHERE id = :id")
@@ -461,7 +394,7 @@ class StaleUploadExpiryIntegrationTest {
         UUID broken = ids.getFirst(), blocked = ids.get(1);
         doThrow(new IllegalStateException("test-only")).when(transactions).expire(broken);
         String key = (String) scalar("SELECT storage_key FROM files WHERE id = :id", blocked);
-        identity.beginWrite(key);
+        history.admission(key);
         var first = expiry.expirePage(null);
         assertThat(first.scanned()).isEqualTo(20);
         assertThat(first.failed()).isEqualTo(1);
@@ -524,7 +457,7 @@ class StaleUploadExpiryIntegrationTest {
 
     private StoredFile fixture(UUID folder, boolean aged) {
         UUID id = UUID.randomUUID();
-        var file = metadata.createUploading(new StoredFile(id, owner, folder, id + ".txt",
+        var file = history.reservation(new StoredFile(id, owner, folder, id + ".txt",
                 "users/" + owner + "/files/" + id, "text/plain", 1));
         if (aged) {
             tx.executeWithoutResult(status -> em.createNativeQuery(

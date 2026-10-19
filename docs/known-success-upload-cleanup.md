@@ -1,5 +1,7 @@
 # Restricted known-success upload cleanup (Phase 2E.5B4B)
 
+Consolidation update: [the backend audit](backend-consolidation.md) retires synchronous upload admission/PUT and foreground receipt creation. New uploads use direct multipart only. Earlier flow descriptions, commands and verification totals below are historical milestone evidence; retained historical readers/receipts/expiry/cleanup remain supported where stated in the audit.
+
 B4B implements the restricted GO in the [preserved B4 audit](known-success-cleanup-design-audit.md),
 using the [B4A single-dispatch contract](single-put-dispatch-verification.md).
 It is an explicit internal operation for receipt-backed FAILED uploads. It does

@@ -1,5 +1,7 @@
 # Sharing M5: permission activity history
 
+Consolidation update: [the backend milestone](backend-consolidation.md) has retired synchronous upload. New uploads use direct multipart only. Earlier ownership and retirement statements below preserve the original sharing milestone boundary; retained historical storage/recovery evidence is unchanged.
+
 Implemented under the [approved sharing design](sharing-permissions-design.md).
 M6 now consumes this activity through [in-app recipient notifications](sharing-m6.md);
 the descriptions of M5-only boundaries below remain historical milestone scope.

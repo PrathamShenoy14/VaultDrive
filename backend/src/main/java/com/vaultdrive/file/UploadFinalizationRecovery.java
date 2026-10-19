@@ -17,27 +17,6 @@ public class UploadFinalizationRecovery {
 
     public UploadFinalizationRecovery(UploadFinalizationTransactions transactions) { this.transactions = transactions; }
 
-    /** Called by the foreground only after PUT return AND successful input-stream closure. */
-    @Transactional(propagation = Propagation.NEVER)
-    public void complete(StoredFile original) {
-        try { transactions.recordSuccess(original); }
-        catch (RuntimeException persistenceFailure) {
-            boolean proven;
-            try { proven = transactions.hasSuccess(original); }
-            catch (RuntimeException reloadFailure) {
-                // Keep the original failure without disclosing database/storage details in the API.
-                persistenceFailure.addSuppressed(reloadFailure);
-                throw persistenceFailure;
-            }
-            if (!proven) { throw persistenceFailure; }
-        }
-        var outcome = transactions.recover(original.getId());
-        if (outcome != UploadFinalizationTransactions.Outcome.RECOVERED
-                && outcome != UploadFinalizationTransactions.Outcome.ALREADY_READY) {
-            throw new IllegalStateException("Upload metadata finalization is blocked");
-        }
-    }
-
     public record Page(UUID nextCursor, int scanned, int recovered, int alreadyReady, int blocked,
                        int noReceipt, int failed, int scanFailed, boolean exhausted) { }
 

@@ -10,7 +10,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** Receipt persistence and metadata recovery are separate, PostgreSQL-only commits. */
+/** PostgreSQL-only recovery from retained historical SERVER_PUT receipts. */
 @Service
 public class UploadFinalizationTransactions {
     private final EntityManager em;
@@ -27,51 +27,6 @@ public class UploadFinalizationTransactions {
     }
 
     public enum Outcome { RECOVERED, ALREADY_READY, BLOCKED, NO_RECEIPT }
-
-    /** Caller may invoke only after its one admitted PUT and input close both returned successfully. */
-    @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 10)
-    public void recordSuccess(StoredFile original) {
-        bounds();
-        lock(original.getId(), original.getOwnerId());
-        if (!matchesReceiptIdentity(original, false)) {
-            throw new IllegalStateException("Upload receipt identity is not eligible");
-        }
-        // A duplicate is a read-only replay, preserving the first database-generated timestamp.
-        if (matchesReceiptIdentity(original, true)) { return; }
-        int changed = em.createNativeQuery("""
-                UPDATE file_storage_objects a SET put_succeeded_at = clock_timestamp()
-                FROM files f WHERE a.file_id = :id AND f.id = a.file_id
-                    AND f.owner_id = a.owner_id AND f.storage_key = a.storage_key
-                    AND f.status = 'UPLOADING' AND f.version = a.admitted_file_version
-                    AND f.folder_id IS NOT DISTINCT FROM a.admitted_folder_id
-                    AND f.deleted_at IS NULL AND f.purge_requested_at IS NULL
-                    AND a.put_succeeded_at IS NULL AND a.upload_protocol = 'SERVER_PUT'
-                """).setParameter("id", original.getId()).executeUpdate();
-        if (changed != 1) { throw new IllegalStateException("Upload receipt metadata changed"); }
-    }
-
-    /** Independent authoritative reload after a failed/uncertain receipt acknowledgement. */
-    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true, timeout = 10)
-    public boolean hasSuccess(StoredFile original) {
-        em.createNativeQuery("SET TRANSACTION READ ONLY").executeUpdate();
-        bounds();
-        return matchesReceiptIdentity(original, true);
-    }
-
-    private boolean matchesReceiptIdentity(StoredFile original, boolean requireReceipt) {
-        return (Boolean) em.createNativeQuery("""
-                SELECT EXISTS (SELECT 1 FROM file_storage_objects a WHERE a.file_id = :id
-                    AND a.owner_id = :owner AND a.storage_key = :key AND a.write_started
-                    AND a.upload_protocol = 'SERVER_PUT'
-                    AND a.admitted_file_version = :version
-                    AND a.admitted_folder_id IS NOT DISTINCT FROM cast(:folder AS uuid)
-                    AND num_nonnulls(a.storage_namespace, a.endpoint, a.region, a.bucket) = 4
-                    AND a.write_precluded_at IS NULL AND a.reservation_expired_at IS NULL
-                """ + (requireReceipt ? " AND a.put_succeeded_at IS NOT NULL" : "") + ")")
-                .setParameter("id", original.getId()).setParameter("owner", original.getOwnerId())
-                .setParameter("key", original.getStorageKey()).setParameter("version", original.getVersion())
-                .setParameter("folder", original.getFolderId()).getSingleResult();
-    }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true, timeout = 10)
     public List<UUID> scan(UUID after) {
@@ -136,7 +91,7 @@ public class UploadFinalizationTransactions {
         long version = ((Number) em.createNativeQuery(
                 "SELECT admitted_file_version FROM file_storage_objects WHERE file_id = :id")
                 .setParameter("id", id).getSingleResult()).longValue();
-        // Reuse the foreground status/version CAS, under fresh hierarchy/file/allocation coordination.
+        // Status/version CAS under fresh hierarchy/file/allocation coordination.
         if (files.transitionUploadStatus(id, owner, FileStatus.UPLOADING, version, FileStatus.READY, Instant.now()) != 1) {
             throw new IllegalStateException("Upload finalization state changed");
         }

@@ -1,5 +1,7 @@
 # Stale-upload and uncertain-write recovery design audit
 
+Consolidation update: [the backend audit](backend-consolidation.md) retires synchronous upload admission/PUT and foreground receipt creation. New uploads use direct multipart only. Earlier flow descriptions, commands and verification totals below are historical milestone evidence; retained historical readers/receipts/expiry/cleanup remain supported where stated in the audit.
+
 Phase: **2E.5B — audit and design only**
 
 Implementation follow-up: **B1 inventory and B2 never-admitted UPLOADING expiry

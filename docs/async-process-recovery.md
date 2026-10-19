@@ -1,5 +1,7 @@
 # Isolated process-loss recovery verification (Phase 2E.5A)
 
+Consolidation update: HTTP fixture uploads now use direct multipart through the test-only `MultipartHttpUploads` helper. Existing isolation, one-dispatch uncertainty and process-kill gates remain. Historical results below describe their recorded revisions; see [current milestone verification](backend-consolidation.md#verification) for runs executed after this change.
+
 The test-classpath-only `AsyncPurgeProcessRecoveryTest` launches
 `com.vaultdrive.e2e.ProcessRecoveryApplication` in a separate JVM. The default
 `release` mode pauses at real transaction boundaries, releases the pause, stops

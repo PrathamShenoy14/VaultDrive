@@ -1,5 +1,7 @@
 # ADR-0009: Multipart capability boundary before direct-upload implementation
 
+Current consolidation: [ADR-0010](0010-backend-consolidation.md) retires synchronous new-upload admission/PUT and foreground receipt creation. Historical phase descriptions below remain records of their original revisions; retained receipts, recovery and locking guarantees still apply. Current new uploads use direct multipart only.
+
 - Status: M0 constraints accepted; M1–M5 backend lifecycle implemented; physical reclamation/browser work deferred
 - Date: 2026-10-18
 - Evidence: [version-pinned M0 matrix](../garage-multipart-capabilities.md)

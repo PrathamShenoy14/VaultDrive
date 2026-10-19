@@ -1,12 +1,14 @@
 package com.vaultdrive.hierarchy;
 
+import org.springframework.context.annotation.Import;
+
+import com.vaultdrive.support.HistoricalUploadFixtures;
 import com.vaultdrive.file.StoredFile;
 import com.vaultdrive.file.StoredFileRepository;
 import com.vaultdrive.folder.Folder;
 import com.vaultdrive.folder.FolderRepository;
 import com.vaultdrive.folder.FolderService;
 import com.vaultdrive.security.JwtService;
-import com.vaultdrive.storage.FileStorageIdentityService;
 import com.vaultdrive.user.User;
 import com.vaultdrive.user.UserRepository;
 import jakarta.persistence.EntityManager;
@@ -44,6 +46,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 
 /** Real embedded HTTP server and services; fixture transactions commit before each request. */
+@Import(HistoricalUploadFixtures.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "spring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=hierarchy_http_test",
         "spring.flyway.schemas=hierarchy_http_test", "spring.flyway.default-schema=hierarchy_http_test",
@@ -52,11 +55,12 @@ import static org.mockito.Mockito.doAnswer;
 })
 @ActiveProfiles("test")
 abstract class HierarchyHttpTestSupport {
+    @Autowired HistoricalUploadFixtures history;
+
     @LocalServerPort int port;
     @Autowired UserRepository users;
     @Autowired FolderRepository folders;
     @Autowired StoredFileRepository files;
-    @Autowired FileStorageIdentityService identity;
     @Autowired FolderService service;
     @Autowired JwtService jwt;
     @Autowired PlatformTransactionManager manager;
@@ -134,7 +138,7 @@ abstract class HierarchyHttpTestSupport {
         if (deleted) file.softDelete();
         if (purge) file.requestPermanentDeletion();
         files.saveAndFlush(file);
-        identity.reserve(file);
+        history.allocation(file);
         // Committed READY fixture represents an already admitted write; no worker is enabled.
         jdbc.update("UPDATE file_storage_objects SET write_started = true WHERE file_id = ?", id);
         return id;

@@ -1,5 +1,7 @@
 # Physical file purge (Phase 2D.1 and Phase 2D.2 Slices 2–6)
 
+Consolidation update: [the backend audit](backend-consolidation.md) retires synchronous upload admission/PUT and foreground receipt creation. New uploads use direct multipart only. Earlier flow descriptions, commands and verification totals below are historical milestone evidence; retained historical readers/receipts/expiry/cleanup remain supported where stated in the audit.
+
 M5 extends this legacy purge design with [multipart compatibility](multipart-purge-compatibility.md):
 READY requires multipart completion evidence; unfinished folder members use retained
 logical-discard proof. Folder success does not promise physical reclamation of

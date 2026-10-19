@@ -86,7 +86,7 @@ class MultipartCancellationIntegrationTest {
         }).when(storage).abortMultipart(any(), any());
     }
     @AfterEach void preserveFences() {
-        verify(storage, never()).delete(any(StorageTarget.class)); verify(storage, never()).delete(anyString());
+        verify(storage, never()).delete(any(StorageTarget.class));
         verify(storage, never()).completeMultipart(any(), any(), anyList(), any());
         verify(storage, never()).inspectMultipartObject(any());
         assertThat(jdbc.queryForObject("SELECT status FROM files WHERE id = ?", String.class, session.fileId())).isEqualTo(

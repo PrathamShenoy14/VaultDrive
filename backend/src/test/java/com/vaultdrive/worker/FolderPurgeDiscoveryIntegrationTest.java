@@ -1,5 +1,8 @@
 package com.vaultdrive.worker;
 
+import org.springframework.context.annotation.Import;
+
+import com.vaultdrive.support.HistoricalUploadFixtures;
 import com.vaultdrive.file.FileMetadataService;
 import com.vaultdrive.file.FileStatus;
 import com.vaultdrive.file.StoredFile;
@@ -15,7 +18,6 @@ import com.vaultdrive.job.JobType;
 import com.vaultdrive.outbox.OutboxEvent;
 import com.vaultdrive.outbox.OutboxEventRepository;
 import com.vaultdrive.outbox.OutboxWriter;
-import com.vaultdrive.storage.FileStorageIdentityService;
 import com.vaultdrive.user.User;
 import com.vaultdrive.user.UserRepository;
 import jakarta.persistence.EntityManager;
@@ -45,12 +47,16 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 
 /** Real PostgreSQL only: metadata fixtures and simulated authoritative byte receipts; no Garage calls. */
+@Import(HistoricalUploadFixtures.class)
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=folder_discovery_test",
         "spring.flyway.schemas=folder_discovery_test", "spring.flyway.default-schema=folder_discovery_test"
 })
 @ActiveProfiles("test")
 class FolderPurgeDiscoveryIntegrationTest {
+    @Autowired HistoricalUploadFixtures history;
+    @Autowired com.vaultdrive.file.MultipartSessionService multipart;
+
     @Autowired private EntityManager em;
     @Autowired private PlatformTransactionManager manager;
     @Autowired private UserRepository users;
@@ -58,7 +64,6 @@ class FolderPurgeDiscoveryIntegrationTest {
     @Autowired private StoredFileRepository files;
     @Autowired private FolderService folders;
     @Autowired private FileMetadataService metadata;
-    @Autowired private FileStorageIdentityService storageIdentity;
     @Autowired private OutboxEventRepository outbox;
     @Autowired private OutboxWriter writer;
     @MockitoSpyBean private BackgroundJobService jobs;
@@ -199,7 +204,7 @@ class FolderPurgeDiscoveryIntegrationTest {
         ClaimedJob claim = acceptAndClaim();
         drain(claim, 10);
         StoredFile captured = files.findById(file).orElseThrow();
-        metadata.markFailed(captured);
+        history.status(captured, FileStatus.FAILED);
         assertThat(files.findById(file).orElseThrow().getStatus()).isEqualTo(FileStatus.FAILED);
         assertThat(scalar("SELECT file_status FROM folder_purge_files WHERE event_id = :event")).isEqualTo("UPLOADING");
         assertThat(count("folder_purge_files")).isEqualTo(1);
@@ -533,8 +538,8 @@ class FolderPurgeDiscoveryIntegrationTest {
                     switch (operation) {
                         case "move" -> folders.moveFolder(owner, child, null);
                         case "restore" -> folders.restoreFolder(owner, child);
-                        case "upload" -> metadata.createUploading(new StoredFile(UUID.randomUUID(), owner, child,
-                                "late.txt", "fixture/" + UUID.randomUUID(), "text/plain", 1));
+                        case "upload" -> multipart.reserve(owner, UUID.randomUUID().toString(),
+                                new com.vaultdrive.file.MultipartSessionService.Request(child, "late.txt", 1, "text/plain"));
                         case "purge" -> folders.requestPermanentDeletion(owner, child);
                         default -> throw new AssertionError();
                     }
@@ -566,7 +571,7 @@ class FolderPurgeDiscoveryIntegrationTest {
             if (trashed) { f.softDelete(); }
             files.saveAndFlush(f);
             if (allocation) {
-                storageIdentity.reserve(f);
+                history.allocation(f);
                 em.createNativeQuery("UPDATE file_storage_objects SET write_started = TRUE WHERE file_id = :id")
                         .setParameter("id", id).executeUpdate();
             }

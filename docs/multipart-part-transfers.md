@@ -1,5 +1,7 @@
 # Multipart part transfers — Phase 3D / M2A
 
+Consolidation update: [the backend audit](backend-consolidation.md) retires synchronous upload admission/PUT and foreground receipt creation. New uploads use direct multipart only. Earlier flow descriptions, commands and verification totals below are historical milestone evidence; retained historical readers/receipts/expiry/cleanup remain supported where stated in the audit.
+
 Current browser work: [the interoperability harness](browser-multipart-interoperability.md)
 consumes these unchanged endpoints through same-origin HTTPS, omits forbidden
 script-set Host/Content-Length while preserving exact body framing, and prepares

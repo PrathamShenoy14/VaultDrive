@@ -88,7 +88,7 @@ class DelegatedMultipartIntegrationTest {
         doAnswer(c -> { outside(); return null; }).when(storage).abortMultipart(any(), any());
     }
     @AfterEach void fences() {
-        verify(storage, never()).delete(any(StorageTarget.class)); verify(storage, never()).delete(anyString());
+        verify(storage, never()).delete(any(StorageTarget.class));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM file_storage_objects WHERE owner_id = ? AND "
                 + "(put_succeeded_at IS NOT NULL OR admitted_file_version IS NOT NULL OR write_precluded_at IS NOT NULL)", Integer.class, owner)).isZero();
     }

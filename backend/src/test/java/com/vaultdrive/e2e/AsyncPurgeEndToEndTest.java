@@ -241,7 +241,7 @@ class AsyncPurgeEndToEndTest {
                             boolean cleaned = true;
                             for (String key : probe.keys.values()) {
                                 assertThat(key.startsWith("integration-tests/" + isolation.schema + "/")).isTrue();
-                                try { storage.delete(key); }
+                                try { storage.delete(ctx.getBean(com.vaultdrive.storage.StorageBinding.class).target(key)); }
                                 catch (RuntimeException failure) { cleaned = false; } // Attempt every owned key; no raw exceptions.
                             }
                             assertThat(cleaned).as("all owned disposable objects cleaned").isTrue();
@@ -272,15 +272,7 @@ class AsyncPurgeEndToEndTest {
     }
 
     UUID upload(UUID folder, String name) throws Exception {
-        String boundary = "e2e-" + UUID.randomUUID();
-        String body = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"" + name
-                + "\"\r\nContent-Type: text/plain\r\n\r\n" + new String(CONTENT, StandardCharsets.UTF_8)
-                + "\r\n--" + boundary + "--\r\n";
-        var response = http.send(builder("/files" + (folder == null ? "" : "?folderId=" + folder))
-                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
-        assertThat(response.statusCode()).as("HTTP upload status (body suppressed)").isEqualTo(201);
-        UUID id = UUID.fromString(mapper.readTree(response.body()).get("fileId").asText());
+        UUID id = com.vaultdrive.support.MultipartHttpUploads.upload(http, mapper, base, token, folder, name, CONTENT);
         assertThat(jdbc.queryForObject("SELECT status FROM files WHERE id = ?", String.class, id)).isEqualTo("READY");
         readable(id);
         return id;

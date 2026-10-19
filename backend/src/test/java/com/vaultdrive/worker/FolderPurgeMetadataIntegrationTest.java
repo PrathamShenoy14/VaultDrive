@@ -1,5 +1,9 @@
 package com.vaultdrive.worker;
 
+import org.springframework.context.annotation.Import;
+
+import com.vaultdrive.support.HistoricalObjectFixtures;
+import com.vaultdrive.support.HistoricalUploadFixtures;
 import com.vaultdrive.file.FileMetadataService;
 import com.vaultdrive.file.FileService;
 import com.vaultdrive.file.FileStatus;
@@ -14,7 +18,6 @@ import com.vaultdrive.job.ClaimedJob;
 import com.vaultdrive.job.JobStatus;
 import com.vaultdrive.job.JobType;
 import com.vaultdrive.outbox.OutboxEventRepository;
-import com.vaultdrive.storage.FileStorageIdentityService;
 import com.vaultdrive.storage.ObjectStorageService;
 import com.vaultdrive.storage.StorageTarget;
 import com.vaultdrive.storage.config.S3StorageProperties;
@@ -26,7 +29,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.util.AopTestUtils;
@@ -48,12 +50,17 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /** Real PostgreSQL/Garage; only this test's fresh UUID owner/key allocations are mutated. */
+@Import(HistoricalObjectFixtures.class)
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=folder_metadata_purge_test",
         "spring.flyway.schemas=folder_metadata_purge_test", "spring.flyway.default-schema=folder_metadata_purge_test"
 })
 @ActiveProfiles("test")
 class FolderPurgeMetadataIntegrationTest {
+    @Autowired HistoricalObjectFixtures historicalObjects;
+
+    @Autowired HistoricalUploadFixtures history;
+
     @Autowired EntityManager em;
     @Autowired PlatformTransactionManager manager;
     @Autowired UserRepository users;
@@ -62,7 +69,6 @@ class FolderPurgeMetadataIntegrationTest {
     @Autowired StoredFileRepository fileRepository;
     @Autowired FileService files;
     @Autowired FileMetadataService metadata;
-    @Autowired FileStorageIdentityService identity;
     @Autowired OutboxEventRepository outbox;
     @Autowired BackgroundJobRepository jobRepository;
     @MockitoSpyBean BackgroundJobService jobs;
@@ -114,7 +120,6 @@ class FolderPurgeMetadataIntegrationTest {
             });
         }
     }
-
 
     @Test void nestedFoldersAreRemovedLeafFirstWithRootLastAndRetainedProof() throws Exception {
         UUID child = child(root), grandchild = child(child), sibling = child(root);
@@ -504,8 +509,8 @@ class FolderPurgeMetadataIntegrationTest {
     }
 
     private StoredFile uploaded(UUID folder) {
-        var result = files.uploadFile(owner, folder, new MockMultipartFile("file", UUID.randomUUID() + ".txt", "text/plain", "fixture".getBytes()));
-        StoredFile f = fileRepository.findById(result.fileId()).orElseThrow();
+        var result = historicalObjects.completed(owner, folder, UUID.randomUUID() + ".txt", "text/plain", "fixture".getBytes());
+        StoredFile f = fileRepository.findById(result.getId()).orElseThrow();
         keys.add(f.getStorageKey()); return f;
     }
     private String key(UUID id) { String key = "users/" + owner + "/files/" + id; keys.add(key); return key; }
@@ -517,7 +522,7 @@ class FolderPurgeMetadataIntegrationTest {
             if (status == FileStatus.FAILED) { f.markFailed(); }
             fileRepository.saveAndFlush(f);
             if (allocation) {
-                identity.reserve(f);
+                history.allocation(f);
                 if (write) { em.createNativeQuery("UPDATE file_storage_objects SET write_started = TRUE WHERE file_id = :file").setParameter("file", id).executeUpdate(); }
             }
             return f;

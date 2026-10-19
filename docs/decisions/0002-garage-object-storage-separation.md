@@ -1,5 +1,7 @@
 # ADR-0002: Separate metadata from Garage object storage
 
+Current consolidation: [ADR-0010](0010-backend-consolidation.md) retires synchronous new-upload admission/PUT and foreground receipt creation. Historical phase descriptions below remain records of their original revisions; retained receipts, recovery and locking guarantees still apply. Current new uploads use direct multipart only.
+
 - Status: Accepted and implemented
 - Date: 2026-10-09 (retrospective record)
 

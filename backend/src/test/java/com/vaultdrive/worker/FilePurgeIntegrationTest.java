@@ -1,5 +1,9 @@
 package com.vaultdrive.worker;
 
+import org.springframework.context.annotation.Import;
+
+import com.vaultdrive.support.HistoricalObjectFixtures;
+import com.vaultdrive.support.HistoricalUploadFixtures;
 import com.vaultdrive.file.FileMetadataService;
 import com.vaultdrive.file.FileService;
 import com.vaultdrive.file.StoredFile;
@@ -15,7 +19,6 @@ import com.vaultdrive.job.JobType;
 import com.vaultdrive.outbox.OutboxEventRepository;
 import com.vaultdrive.outbox.OutboxEvent;
 import com.vaultdrive.outbox.OutboxWriter;
-import com.vaultdrive.storage.FileStorageIdentityService;
 import com.vaultdrive.storage.ObjectStorageService;
 import com.vaultdrive.storage.StorageBinding;
 import com.vaultdrive.storage.StorageDeletionException;
@@ -31,7 +34,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.util.AopTestUtils;
@@ -45,7 +47,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 
-import java.io.ByteArrayInputStream;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -62,19 +63,23 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 /** Real PostgreSQL and Garage, scoped to fresh owner/file UUIDs; no shared storage fixtures. */
+@Import(HistoricalObjectFixtures.class)
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=file_purge_test",
         "spring.flyway.schemas=file_purge_test", "spring.flyway.default-schema=file_purge_test"
 })
 @ActiveProfiles("test")
 class FilePurgeIntegrationTest {
+    @Autowired HistoricalObjectFixtures historicalObjects;
+
+    @Autowired HistoricalUploadFixtures history;
+
     @Autowired private FileService files;
     @Autowired private FileMetadataService metadata;
     @Autowired private StoredFileRepository fileRepository;
     @Autowired private UserRepository users;
     @Autowired private OutboxEventRepository outbox;
     @MockitoSpyBean private OutboxWriter writer;
-    @Autowired private FileStorageIdentityService identity;
     @Autowired private FilePurgeJobHandler handler;
     @MockitoSpyBean private FilePurgeProgressService progress;
     @Autowired private FilePurgeRecoveryService recovery;
@@ -414,8 +419,8 @@ class FilePurgeIntegrationTest {
         assertThat(workCount()).isEqualTo(1);
         assertThat(jobRepository.findById(claim.id())).isPresent();
         StoredFile reused = new StoredFile(UUID.randomUUID(), owner, null, "reused.txt", file.getStorageKey(), null, 1);
-        assertThatThrownBy(() -> metadata.createUploading(reused)).isInstanceOf(RuntimeException.class);
-        assertThatThrownBy(() -> identity.beginWrite(file.getStorageKey())).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> history.reservation(reused)).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> history.admission(file.getStorageKey())).isInstanceOf(IllegalStateException.class);
         transaction.executeWithoutResult(status -> assertThat(entityManager.createNativeQuery(
                 "SELECT count(*) FROM file_storage_objects WHERE file_id = :file")
                 .setParameter("file", file.getId()).getSingleResult()).isEqualTo(1L));
@@ -605,10 +610,9 @@ class FilePurgeIntegrationTest {
     }
 
     private StoredFile uploadedIn(UUID folder) {
-        var result = files.uploadFile(owner, folder,
-                new MockMultipartFile("file", "fixture.txt", "text/plain", "fixture".getBytes()));
-        fileIds.add(result.fileId());
-        StoredFile file = fileRepository.findById(result.fileId()).orElseThrow();
+        var result = historicalObjects.completed(owner, folder, "fixture.txt", "text/plain", "fixture".getBytes());
+        fileIds.add(result.getId());
+        StoredFile file = fileRepository.findById(result.getId()).orElseThrow();
         objectKeys.add(file.getStorageKey());
         return file;
     }
@@ -875,76 +879,14 @@ class FilePurgeIntegrationTest {
         assertBytes(file, "fixture");
     }
 
-    @Test void finalizedAndRemovedKeysCannotBeReused() {
-        StoredFile file = uploaded();
-        assertThatThrownBy(() -> storage.upload(file.getStorageKey(), new ByteArrayInputStream(new byte[]{9}), 1, null))
-                .isInstanceOf(IllegalStateException.class);
-        assertBytes(file, "fixture");
-        fileRepository.deleteById(file.getId());
-        StoredFile replacement = new StoredFile(UUID.randomUUID(), owner, null, "reused.txt", file.getStorageKey(), null, 1);
-        assertThatThrownBy(() -> metadata.createUploading(replacement)).isInstanceOf(RuntimeException.class);
-        assertThat(fileRepository.findById(replacement.getId())).isEmpty();
-        assertThatThrownBy(() -> storage.upload(file.getStorageKey(), new ByteArrayInputStream(new byte[]{9}), 1, null))
-                .isInstanceOf(IllegalStateException.class);
-        assertBytes(file, "fixture");
-    }
-
-    @Test void competingApplicationWritesConsumeOneAllocationOnly() throws Exception {
-        StoredFile file = rawFile();
-        metadata.createUploading(file);
-        objectKeys.add(file.getStorageKey());
-        CyclicBarrier start = new CyclicBarrier(2);
-        var executor = Executors.newFixedThreadPool(2);
-        try {
-            var one = executor.submit(() -> attemptWrite(file, "one", start));
-            var two = executor.submit(() -> attemptWrite(file, "two", start));
-            boolean first = one.get(10, TimeUnit.SECONDS);
-            boolean second = two.get(10, TimeUnit.SECONDS);
-            assertThat(first).isNotEqualTo(second);
-            assertBytes(file, first ? "one" : "two");
-        } finally { executor.shutdownNow(); executor.awaitTermination(5, TimeUnit.SECONDS); }
-    }
-
-    @Test void storageWriteWaitsForFreshFileRowLockBeforeConsumingAllocation() throws Exception {
-        StoredFile file = rawFile();
-        metadata.createUploading(file);
-        CountDownLatch locked = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        CountDownLatch attempted = new CountDownLatch(1);
-        var executor = Executors.newFixedThreadPool(2);
-        try {
-            var holder = executor.submit(() -> transaction.executeWithoutResult(status -> {
-                entityManager.createNativeQuery("SELECT id FROM files WHERE id = :id FOR UPDATE")
-                        .setParameter("id", file.getId()).getSingleResult();
-                locked.countDown();
-                try { assertThat(release.await(10, TimeUnit.SECONDS)).isTrue(); }
-                catch (InterruptedException error) { throw new AssertionError(error); }
-            }));
-            assertThat(locked.await(5, TimeUnit.SECONDS)).isTrue();
-            var contender = executor.submit(() -> { attempted.countDown(); return identity.beginWrite(file.getStorageKey()); });
-            assertThat(attempted.await(5, TimeUnit.SECONDS)).isTrue();
-            assertThatThrownBy(() -> contender.get(300, TimeUnit.MILLISECONDS)).isInstanceOf(java.util.concurrent.TimeoutException.class);
-            release.countDown();
-            holder.get(5, TimeUnit.SECONDS);
-            assertThat(contender.get(5, TimeUnit.SECONDS)).isEqualTo(binding.target(file.getStorageKey()));
-        } finally { release.countDown(); executor.shutdownNow(); executor.awaitTermination(5, TimeUnit.SECONDS); }
-    }
-
-    private boolean attemptWrite(StoredFile file, String value, CyclicBarrier barrier) throws Exception {
-        barrier.await(5, TimeUnit.SECONDS);
-        byte[] content = value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        try { storage.upload(file.getStorageKey(), new ByteArrayInputStream(content), content.length, "text/plain"); return true; }
-        catch (IllegalStateException duplicate) { return false; }
-    }
-
     private StoredFile uploaded() {
         return uploaded("fixture.txt");
     }
 
     private StoredFile uploaded(String name) {
-        var uploaded = files.uploadFile(owner, null, new MockMultipartFile("file", name, "text/plain", "fixture".getBytes()));
-        fileIds.add(uploaded.fileId());
-        StoredFile file = fileRepository.findById(uploaded.fileId()).orElseThrow();
+        var uploaded = historicalObjects.completed(owner, null, name, "text/plain", "fixture".getBytes());
+        fileIds.add(uploaded.getId());
+        StoredFile file = fileRepository.findById(uploaded.getId()).orElseThrow();
         objectKeys.add(file.getStorageKey());
         return file;
     }

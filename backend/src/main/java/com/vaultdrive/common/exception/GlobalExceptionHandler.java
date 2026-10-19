@@ -11,11 +11,9 @@ import com.vaultdrive.folder.exception.InvalidFolderMoveException;
 
 import com.vaultdrive.file.exception.InvalidFileNameException;
 import com.vaultdrive.file.exception.DuplicateFileNameException;
-import com.vaultdrive.file.exception.FileUploadException;
 import com.vaultdrive.file.exception.InvalidFilePaginationException;
 import com.vaultdrive.file.exception.FileNotFoundException;
 import com.vaultdrive.file.exception.FileExtensionChangeException;
-
 
 import org.hibernate.exception.ConstraintViolationException;
 
@@ -281,19 +279,6 @@ public class GlobalExceptionHandler {
                 .body(new ApiError(
                         409,
                         "Conflict",
-                        ex.getMessage()
-                ));
-    }
-
-    @ExceptionHandler(FileUploadException.class)
-    public ResponseEntity<ApiError> handleFileUpload(
-            FileUploadException ex
-    ) {
-        return ResponseEntity
-                .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(new ApiError(
-                        500,
-                        "Internal Server Error",
                         ex.getMessage()
                 ));
     }

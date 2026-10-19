@@ -1,5 +1,7 @@
 # Sharing M6: in-app sharing notifications
 
+Consolidation update: [the backend milestone](backend-consolidation.md) has retired synchronous upload. New uploads use direct multipart only. Earlier ownership and retirement statements below preserve the original sharing milestone boundary; retained historical storage/recovery evidence is unchanged.
+
 M6 implements the final milestone of the [approved sharing design](sharing-permissions-design.md).
 Only the direct registered recipient receives `GRANT_CREATED`, `GRANT_ROLE_CHANGED`
 and `GRANT_REVOKED`. Owners receive no notification for their own actions. Link

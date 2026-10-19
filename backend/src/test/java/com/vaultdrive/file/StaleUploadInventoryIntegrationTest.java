@@ -1,7 +1,9 @@
 package com.vaultdrive.file;
 
+import org.springframework.context.annotation.Import;
+
+import com.vaultdrive.support.HistoricalUploadFixtures;
 import com.vaultdrive.folder.FolderService;
-import com.vaultdrive.storage.FileStorageIdentityService;
 import com.vaultdrive.storage.ObjectStorageService;
 import com.vaultdrive.user.User;
 import com.vaultdrive.user.UserRepository;
@@ -36,9 +38,12 @@ import static com.vaultdrive.file.StaleUploadInventoryTransactions.Classificatio
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+@Import(HistoricalUploadFixtures.class)
 @SpringBootTest
 @ActiveProfiles("test")
 class StaleUploadInventoryIntegrationTest {
+    @Autowired HistoricalUploadFixtures history;
+
     private static final String SCHEMA = "upload_inventory_" + UUID.randomUUID().toString().replace("-", "");
     @DynamicPropertySource static void isolatedDatabase(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", () -> "jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=" + SCHEMA);
@@ -49,8 +54,6 @@ class StaleUploadInventoryIntegrationTest {
     @Autowired private StaleUploadInventory inventory;
     @MockitoSpyBean private StaleUploadInventoryTransactions observations;
     @Autowired private StaleUploadInventoryProperties properties;
-    @Autowired private FileMetadataService metadata;
-    @Autowired private FileStorageIdentityService identity;
     @Autowired private FolderService folders;
     @Autowired private UserRepository users;
     @Autowired private PlatformTransactionManager manager;
@@ -107,8 +110,8 @@ class StaleUploadInventoryIntegrationTest {
     @Test void failedAdmittedWriteRemainsUncertainAndFailedUnusedRemainsNeverAdmitted() {
         var admitted = fixture(null, true, true);
         var never = fixture(null, true, false);
-        metadata.markFailed(admitted);
-        metadata.markFailed(never);
+        history.status(admitted, FileStatus.FAILED);
+        history.status(never, FileStatus.FAILED);
         assertThat(inventory.scanPage(null).admittedUncertain()).isEqualTo(1);
         assertThat(inventory.scanPage(null).neverAdmitted()).isEqualTo(1);
     }
@@ -165,34 +168,13 @@ class StaleUploadInventoryIntegrationTest {
         assertThat(observations.inspect(admitted.getId())).isEqualTo(DEFERRED_TO_PURGE);
     }
 
-    @ParameterizedTest @ValueSource(booleans = {false, true})
-    void concurrentAdmissionOrFinalizationUsesCommittedStatementSnapshots(boolean finalize) throws Exception {
-        var file = fixture(null, true, finalize);
-        var written = new CountDownLatch(1);
-        var release = new CountDownLatch(1);
-        var pool = Executors.newSingleThreadExecutor();
-        try {
-            var writer = pool.submit(() -> tx.executeWithoutResult(status -> {
-                if (finalize) { metadata.markReady(file); }
-                else { identity.beginWrite(file.getStorageKey()); }
-                written.countDown();
-                await(release);
-            }));
-            assertThat(written.await(5, TimeUnit.SECONDS)).isTrue();
-            assertThat(observations.inspect(file.getId())).isEqualTo(finalize ? ADMITTED_UNCERTAIN : NEVER_ADMITTED);
-            release.countDown();
-            writer.get(5, TimeUnit.SECONDS);
-            assertThat(observations.inspect(file.getId())).isEqualTo(finalize ? ALREADY_RESOLVED : ADMITTED_UNCERTAIN);
-        } finally { release.countDown(); pool.shutdownNow(); pool.awaitTermination(5, TimeUnit.SECONDS); }
-    }
-
     @Test void stateChangesBetweenSelectionAndInspectionAreCountedWithoutLosingCursor() {
         var file = fixture(null, true, true);
         doAnswer(call -> {
             Object selected = call.callRealMethod();
             var competing = new TransactionTemplate(manager);
             competing.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-            competing.executeWithoutResult(status -> metadata.markReady(file));
+            competing.executeWithoutResult(status -> history.status(file, FileStatus.READY));
             return selected;
         }).when(observations).scan(null);
         var page = inventory.scanPage(null);
@@ -299,9 +281,9 @@ class StaleUploadInventoryIntegrationTest {
 
     private StoredFile fixture(UUID folder, boolean aged, boolean admitted) {
         UUID id = UUID.randomUUID();
-        var file = metadata.createUploading(new StoredFile(id, owner, folder, id + ".txt",
+        var file = history.reservation(new StoredFile(id, owner, folder, id + ".txt",
                 "users/" + owner + "/files/" + id, "text/plain", 1));
-        if (admitted) { identity.beginWrite(file.getStorageKey()); }
+        if (admitted) { history.admission(file.getStorageKey()); }
         if (aged) {
             tx.executeWithoutResult(status -> em.createNativeQuery(
                     "UPDATE files SET created_at = clock_timestamp() - interval '2 hours' WHERE id = :id")

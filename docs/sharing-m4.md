@@ -1,5 +1,7 @@
 # Sharing M4: secure file Viewer links
 
+Consolidation update: [the backend milestone](backend-consolidation.md) has retired synchronous upload. New uploads use direct multipart only. Earlier ownership and retirement statements below preserve the original sharing milestone boundary; retained historical storage/recovery evidence is unchanged.
+
 Implemented under the [approved sharing design](sharing-permissions-design.md).
 M4 adds file-only bearer capabilities. Activity, notifications, frontend work and
 legacy upload retirement remain outside this milestone. [M5](sharing-m5.md) now

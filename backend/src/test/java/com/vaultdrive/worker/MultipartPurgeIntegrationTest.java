@@ -1,4 +1,8 @@
 package com.vaultdrive.worker;
+
+import org.springframework.context.annotation.Import;
+
+import com.vaultdrive.support.HistoricalUploadFixtures;
 import com.vaultdrive.file.*;
 
 import com.vaultdrive.file.MultipartSessionService.*;
@@ -31,11 +35,14 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
+@Import(HistoricalUploadFixtures.class)
 @SpringBootTest
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Timeout(45)
 class MultipartPurgeIntegrationTest {
+    @Autowired HistoricalUploadFixtures history;
+
     static final String SCHEMA = "multipart_m5_" + UUID.randomUUID().toString().replace("-", "");
     static final String SHA = Base64.getEncoder().encodeToString(new byte[32]);
     @DynamicPropertySource static void isolate(DynamicPropertyRegistry r) {
@@ -56,7 +63,6 @@ class MultipartPurgeIntegrationTest {
     @Autowired FilePurgeJobHandler fileHandler;
     @Autowired FolderPurgeDiscoveryService discovery;
     @Autowired FolderPurgeFileService member;
-    @Autowired FolderPurgeMetadataService removal;
     @Autowired FilePurgeProgressService progress;
     @Autowired JdbcTemplate jdbc;
     @Autowired PlatformTransactionManager manager;
@@ -99,7 +105,7 @@ class MultipartPurgeIntegrationTest {
         verify(storage, never()).delete(any(StorageTarget.class));
         // Existing legacy reservation sees the released name too (under another new allocation).
         cancel.cancel(owner, replacement.id());
-        var legacy = metadata.createUploading(new StoredFile(UUID.randomUUID(), owner, null, "reuse", "fixture/" + UUID.randomUUID(), "text/plain", 1));
+        var legacy = history.reservation(new StoredFile(UUID.randomUUID(), owner, null, "reuse", "fixture/" + UUID.randomUUID(), "text/plain", 1));
         assertThat(legacy.getStatus()).isEqualTo(FileStatus.UPLOADING);
     }
 

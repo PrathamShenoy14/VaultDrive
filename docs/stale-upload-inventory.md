@@ -1,5 +1,7 @@
 # Stale-upload inventory (Phase 2E.5B1)
 
+Consolidation update: [the backend audit](backend-consolidation.md) retires synchronous upload admission/PUT and foreground receipt creation. New uploads use direct multipart only. Earlier flow descriptions, commands and verification totals below are historical milestone evidence; retained historical readers/receipts/expiry/cleanup remain supported where stated in the audit.
+
 B1 implements bounded, read-only PostgreSQL reporting under the
 [recovery audit](stale-upload-recovery-audit.md). The separate
 [B2 expiry operation](stale-upload-expiry.md) now handles freshly validated

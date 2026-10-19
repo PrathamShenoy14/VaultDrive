@@ -2,9 +2,7 @@ package com.vaultdrive.file;
 
 import com.vaultdrive.file.dto.FilePageResponse;
 import com.vaultdrive.file.dto.FileResponse;
-import com.vaultdrive.file.dto.UploadFileResponse;
 import com.vaultdrive.file.dto.FileDownload;
-import com.vaultdrive.file.exception.FileUploadException;
 import com.vaultdrive.file.exception.InvalidFilePaginationException;
 import com.vaultdrive.file.exception.FileNotFoundException;
 import com.vaultdrive.folder.FolderAccessValidator;
@@ -12,7 +10,6 @@ import com.vaultdrive.hierarchy.HierarchyCoordinator;
 import com.vaultdrive.sharing.ResourceReadService;
 import com.vaultdrive.sharing.ResourceAccess;
 import com.vaultdrive.storage.ObjectStorageService;
-import com.vaultdrive.storage.StorageKeyGenerator;
 import com.vaultdrive.storage.StorageObject;
 
 import org.springframework.data.domain.Page;
@@ -21,10 +18,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.io.InputStream;
 import java.util.UUID;
 
 @Service
@@ -36,11 +30,9 @@ public class FileService {
     private final FileNameValidator fileNameValidator;
     private final FileMetadataService fileMetadataService;
     private final ObjectStorageService objectStorageService;
-    private final StorageKeyGenerator storageKeyGenerator;
     private final StoredFileRepository storedFileRepository;
     private final FileNameExtensionResolver fileNameExtensionResolver;
     private final HierarchyCoordinator hierarchyCoordinator;
-    private final UploadFinalizationRecovery uploadFinalization;
     private final ResourceReadService resourceReads;
 
     public FileService(
@@ -48,99 +40,19 @@ public class FileService {
             FileNameValidator fileNameValidator,
             FileMetadataService fileMetadataService,
             ObjectStorageService objectStorageService,
-            StorageKeyGenerator storageKeyGenerator,
             StoredFileRepository storedFileRepository,
             FileNameExtensionResolver fileNameExtensionResolver,
             HierarchyCoordinator hierarchyCoordinator,
-            UploadFinalizationRecovery uploadFinalization,
             ResourceReadService resourceReads
     ) {
         this.folderAccessValidator = folderAccessValidator;
         this.fileNameValidator = fileNameValidator;
         this.fileMetadataService = fileMetadataService;
         this.objectStorageService = objectStorageService;
-        this.storageKeyGenerator = storageKeyGenerator;
         this.storedFileRepository = storedFileRepository;
         this.fileNameExtensionResolver = fileNameExtensionResolver;
         this.hierarchyCoordinator = hierarchyCoordinator;
-        this.uploadFinalization = uploadFinalization;
         this.resourceReads = resourceReads;
-    }
-
-    public UploadFileResponse uploadFile(
-            UUID ownerId,
-            UUID folderId,
-            MultipartFile multipartFile
-    ) {
-        String name = fileNameValidator.validateAndNormalize(
-                multipartFile.getOriginalFilename()
-        );
-
-        UUID fileId = UUID.randomUUID();
-
-        String storageKey =
-                storageKeyGenerator.generateFileKey(
-                        ownerId,
-                        fileId
-                );
-
-        StoredFile storedFile = new StoredFile(
-                fileId,
-                ownerId,
-                folderId,
-                name,
-                storageKey,
-                multipartFile.getContentType(),
-                multipartFile.getSize()
-        );
-
-        StoredFile savedFile =
-                fileMetadataService.createUploading(storedFile);
-
-        try (InputStream inputStream =
-                     multipartFile.getInputStream()) {
-
-            objectStorageService.upload(
-                    savedFile.getStorageKey(),
-                    inputStream,
-                    savedFile.getSizeBytes(),
-                    savedFile.getContentType()
-            );
-
-        } catch (IOException | RuntimeException exception) {
-
-            markFailedSafely(savedFile);
-
-            throw new FileUploadException(
-                    "Failed to upload file",
-                    exception
-            );
-        }
-
-        try {
-            uploadFinalization.complete(savedFile);
-
-        } catch (RuntimeException exception) {
-
-            /*
-             * PUT and close succeeded. Receipt persistence or READY may have an
-             * uncertain database outcome, or eligibility may now be blocked.
-             * Retain the original allocation and bytes. Explicit recovery can
-             * retry metadata only when authoritative success evidence exists.
-             */
-            throw new FileUploadException(
-                    "File was uploaded but metadata could not be finalized",
-                    exception
-            );
-        }
-
-        return new UploadFileResponse(
-                savedFile.getId(),
-                savedFile.getName(),
-                savedFile.getFolderId(),
-                savedFile.getContentType(),
-                savedFile.getSizeBytes()
-        );
     }
 
     public FilePageResponse listFiles(UUID actorId, UUID folderId, int page, int size) {
@@ -393,23 +305,6 @@ public class FileService {
                 ownerId,
                 folderId
         );
-    }
-
-    private void markFailedSafely(
-            StoredFile storedFile
-    ) {
-        try {
-            fileMetadataService.markFailed(storedFile);
-
-        } catch (RuntimeException ignored) {
-
-            /*
-             * The original storage failure is more important.
-             *
-             * If updating FAILED also fails, the row may remain UPLOADING.
-             * A future reconciliation process can detect that state.
-             */
-        }
     }
 
 }

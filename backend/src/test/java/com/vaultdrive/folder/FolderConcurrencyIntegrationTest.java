@@ -164,10 +164,8 @@ class FolderConcurrencyIntegrationTest {
             // 9. Verify the final persisted database state.
     
             List<Folder> restoredFolders =
-                    folderRepository
-                            .findByOwnerIdAndParentFolderIdIsNullAndDeletedAtIsNull(
-                                    ownerId
-                            );
+                    folderRepository.findAll().stream().filter(f -> f.getOwnerId().equals(ownerId)
+                                    && f.getParentFolderId() == null && f.getDeletedAt() == null).toList();
     
             assertThat(restoredFolders)
                     .hasSize(2);

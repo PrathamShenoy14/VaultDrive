@@ -11,21 +11,8 @@
 	<groupId>com.vaultdrive</groupId>
 	<artifactId>backend</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name/>
-	<description/>
-	<url/>
-	<licenses>
-		<license/>
-	</licenses>
-	<developers>
-		<developer/>
-	</developers>
-	<scm>
-		<connection/>
-		<developerConnection/>
-		<tag/>
-		<url/>
-	</scm>
+	<name>VaultDrive backend</name>
+	<description>VaultDrive metadata, authorization and durable object lifecycle API</description>
 	<properties>
 		<java.version>21</java.version>
 		<aws.java.sdk.version>2.48.0</aws.java.sdk.version>
@@ -71,12 +58,6 @@
 			<scope>runtime</scope>
 		</dependency>
 
-		<!-- Flyway migration engine -->
-		<dependency>
-			<groupId>org.flywaydb</groupId>
-			<artifactId>flyway-core</artifactId>
-		</dependency>
-
 		<!-- PostgreSQL-specific Flyway support -->
 		<dependency>
 			<groupId>org.flywaydb</groupId>
@@ -97,11 +78,6 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-validation</artifactId>
-		</dependency>
-
-		<dependency>
-			<groupId>org.springframework.security</groupId>
-			<artifactId>spring-security-crypto</artifactId>
 		</dependency>
 
 		<dependency>

@@ -2,12 +2,22 @@
 
 This roadmap separates repository evidence from future intent. Ordering can change after measurement or design review; unchecked items are not implemented.
 
+## Full backend code and architecture consolidation (completed)
+
+- [x] Audit all backend responsibilities, persistence boundaries, dependencies, configuration, migrations and tests.
+- [x] Retire synchronous POST `/api/v1/files`, SERVER_PUT admission/PUT and foreground receipt creation; direct multipart is the only supported new upload.
+- [x] Retain historical receipts, immutable storage identities, recovery/expiry/cleanup and purge evidence without migration or shared-data repair.
+- [x] Consolidate notification delivery policy and remove superseded resource queries, obsolete DTOs/exceptions/tests and duplicate dependency declarations.
+- [x] Update current architecture, preserve historical milestone records and add removed-route/historical recovery verification.
+
+See [audit decisions, final verification and deferred risks](backend-consolidation.md) and [ADR-0010](decisions/0010-backend-consolidation.md). Stop at this milestone. Browser release, physical multipart reclamation, retention, zero-byte support and new features remain separate work. Earlier phase sections below are historical records; later completed extensions supersede their original boundaries.
+
 ## Current baseline
 
 - [x] Spring Boot API with PostgreSQL and Flyway.
 - [x] Registration, login, HS256 JWT issuance/validation, and protected endpoints.
 - [x] Owner-scoped folder tree with create/list/get/rename/move/soft-delete/trash/restore.
-- [x] S3-compatible upload/download through Garage, metadata listing, rename, move, trash, and restore.
+- [x] Direct multipart upload and backend streaming download through Garage, metadata listing, rename, move, trash, and restore.
 - [x] Pending-purge schema/domain state and purge-aware trash/restore queries.
 - [x] Permanent-delete request flow: shared hierarchy lock, eligible-row lock, durable pending-purge transition, and `202 Accepted` response without Garage deletion.
 - [x] Folder permanent-delete request: exclusive hierarchy lock, non-overlapping subtree intent, pending-purge ancestry barriers, and `202 Accepted` without deletion.
@@ -208,8 +218,8 @@ Exit criteria: correctness tests remain green and measured contention improves f
   actual browser execution of the full scenario matrix, and bounded clock skew.
   Harness delivery does not establish browser release readiness.
 
-- Evaluate presigned transfers so application servers do not proxy all bytes.
-- Define multipart/resumable upload state, checksum verification, expiry, and cleanup.
+- [x] Implement direct signed multipart parts, durable resumable state, checksum verification, explicit completion/cancellation/expiry.
+- [ ] Prove unknown-allocation reconciliation and physical multipart reclamation independently.
 - Add versioning only after its retention and quota semantics are decided.
 - Add malware/content processing as asynchronous work if required.
 

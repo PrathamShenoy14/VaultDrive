@@ -1,5 +1,7 @@
 **Recommendation: GO for a narrowly restricted B4 implementation under the existing trusted-writer contract. A V25 receipt alone is not deletion authority.** Cleanup must also prove permanent abandonment and preserve the original allocation. Historical or otherwise uncertain admitted writers remain NO-GO.
 
+Consolidation update: [the backend audit](backend-consolidation.md) retires synchronous upload admission/PUT and foreground receipt creation. New uploads use direct multipart only. Earlier flow descriptions, commands and verification totals below are historical milestone evidence; retained historical readers/receipts/expiry/cleanup remain supported where stated in the audit.
+
 Reviewed baseline: `310b1315dbe784bcba8c82bb599cf7c98a46175c`. The working tree was clean. This investigation made no changes and ran no tests that mutate databases or storage. No commit was made.
 
 1. **The current foreground sequence is precise.**

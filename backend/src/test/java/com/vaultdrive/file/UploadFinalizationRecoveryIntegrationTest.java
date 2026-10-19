@@ -1,8 +1,10 @@
 package com.vaultdrive.file;
 
+import org.springframework.context.annotation.Import;
+
+import com.vaultdrive.support.HistoricalUploadFixtures;
 import com.vaultdrive.folder.FolderService;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
-import com.vaultdrive.storage.FileStorageIdentityService;
 import com.vaultdrive.storage.ObjectStorageService;
 import com.vaultdrive.user.User;
 import com.vaultdrive.user.UserRepository;
@@ -34,9 +36,12 @@ import static com.vaultdrive.file.UploadFinalizationTransactions.Outcome.*;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+@Import(HistoricalUploadFixtures.class)
 @SpringBootTest
 @ActiveProfiles("test")
 class UploadFinalizationRecoveryIntegrationTest {
+    @Autowired HistoricalUploadFixtures history;
+
     private static final String SCHEMA = "upload_success_" + UUID.randomUUID().toString().replace("-", "");
     @DynamicPropertySource static void isolatedDatabase(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", () -> "jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=" + SCHEMA);
@@ -47,8 +52,6 @@ class UploadFinalizationRecoveryIntegrationTest {
     @Autowired private UploadFinalizationRecovery recovery;
     @Autowired private UploadFinalizationRecoveryProperties properties;
     @Autowired private StoredFileRepository files;
-    @Autowired private FileMetadataService metadata;
-    @Autowired private FileStorageIdentityService identity;
     @Autowired private HierarchyCoordinator hierarchy;
     @Autowired private FolderService folders;
     @Autowired private UserRepository users;
@@ -99,11 +102,11 @@ class UploadFinalizationRecoveryIntegrationTest {
         var file = proven(null);
         String receipt = allocation(file);
         assertUploading(file);
-        transactions.recordSuccess(file);
+        history.receipt(file);
         assertThat(allocation(file)).isEqualTo(receipt);
         assertThat(transactions.recover(file.getId())).isEqualTo(RECOVERED);
         assertThat(transactions.recover(file.getId())).isEqualTo(ALREADY_READY);
-        transactions.recordSuccess(file);
+        history.receipt(file);
         assertThat(allocation(file)).isEqualTo(receipt);
         assertThat(scalar("SELECT version FROM files WHERE id = :id", file.getId())).isEqualTo(file.getVersion() + 1);
     }
@@ -112,37 +115,9 @@ class UploadFinalizationRecoveryIntegrationTest {
         var file = proven(null);
         assertThat(transactions.recover(file.getId())).isEqualTo(RECOVERED); // Commit succeeded, caller lost the reply.
         String ready = fileSnapshot(file), receipt = allocation(file);
-        recovery.complete(file);
+        assertThat(transactions.recover(file.getId())).isEqualTo(ALREADY_READY);
         assertThat(fileSnapshot(file)).isEqualTo(ready);
         assertThat(allocation(file)).isEqualTo(receipt);
-    }
-
-    @Test void uncertainReceiptCommitReloadsAuthoritativeEvidenceAndNeverRepeatsPut() {
-        var file = admitted(null);
-        var boundary = mock(UploadFinalizationTransactions.class);
-        doAnswer(invocation -> {
-            transactions.recordSuccess(file); // Real independent commit before simulated lost acknowledgment.
-            throw new IllegalStateException("simulated lost acknowledgement");
-        }).when(boundary).recordSuccess(file);
-        when(boundary.hasSuccess(file)).thenAnswer(invocation -> transactions.hasSuccess(file));
-        when(boundary.recover(file.getId())).thenAnswer(invocation -> transactions.recover(file.getId()));
-        new UploadFinalizationRecovery(boundary).complete(file);
-        assertThat(transactions.recover(file.getId())).isEqualTo(ALREADY_READY);
-        verify(boundary, times(1)).recordSuccess(file);
-    }
-
-    @Test void receiptRollbackAndUncertainUncommittedOutcomePreserveUploadingAndAllocation() {
-        var file = admitted(null);
-        String before = allocation(file);
-        tx.executeWithoutResult(status -> { raw().recordSuccess(file); status.setRollbackOnly(); });
-        assertThat(allocation(file)).isEqualTo(before);
-        assertThat(transactions.hasSuccess(file)).isFalse();
-        var boundary = mock(UploadFinalizationTransactions.class);
-        doThrow(new IllegalStateException("uncommitted")).when(boundary).recordSuccess(file);
-        when(boundary.hasSuccess(file)).thenAnswer(invocation -> transactions.hasSuccess(file));
-        assertThatThrownBy(() -> new UploadFinalizationRecovery(boundary).complete(file)).isInstanceOf(IllegalStateException.class);
-        verify(boundary, never()).recover(any());
-        assertUploading(file);
     }
 
     @Test void readyRollbackRetainsCommittedReceiptForExplicitRetry() {
@@ -174,24 +149,13 @@ class UploadFinalizationRecoveryIntegrationTest {
         update("UPDATE file_storage_objects SET write_started = true WHERE file_id = :id", file); // Pre-B3 style admission.
         assertThatThrownBy(() -> update("UPDATE file_storage_objects SET admitted_file_version = 0 WHERE file_id = :id", file))
                 .isInstanceOf(RuntimeException.class);
-        assertThatThrownBy(() -> transactions.recordSuccess(file)).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> history.receipt(file)).isInstanceOf(RuntimeException.class);
         update("DELETE FROM file_storage_objects WHERE file_id = :id", file);
         tx.executeWithoutResult(status -> em.createNativeQuery("INSERT INTO file_storage_objects(storage_key, file_id, owner_id, write_started) "
                 + "VALUES (:key, :id, :owner, true)").setParameter("key", file.getStorageKey()).setParameter("id", file.getId())
                 .setParameter("owner", owner).executeUpdate());
         assertThat(transactions.recover(file.getId())).isEqualTo(NO_RECEIPT);
-        assertThatThrownBy(() -> transactions.recordSuccess(file)).isInstanceOf(RuntimeException.class);
-    }
-
-    @Test void wrongOriginalIdentityCannotCreateOrReloadSuccess() {
-        var file = admitted(null);
-        var wrong = new StoredFile(file.getId(), owner, null, "wrong", "wrong-key", "text/plain", 1);
-        assertThatThrownBy(() -> transactions.recordSuccess(wrong)).isInstanceOf(RuntimeException.class);
-        assertThat(transactions.hasSuccess(wrong)).isFalse();
-        transactions.recordSuccess(file);
-        assertThat(transactions.hasSuccess(wrong)).isFalse();
-        var wrongOwner = new StoredFile(file.getId(), UUID.randomUUID(), null, "wrong", file.getStorageKey(), "text/plain", 1);
-        assertThatThrownBy(() -> transactions.recordSuccess(wrongOwner)).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> history.receipt(file)).isInstanceOf(RuntimeException.class);
     }
 
     @ParameterizedTest @ValueSource(strings = {"version", "failed", "missing", "allocation", "destination", "purge-work"})
@@ -200,7 +164,7 @@ class UploadFinalizationRecoveryIntegrationTest {
         String receipt = allocation(file);
         switch (mutation) {
             case "version" -> update("UPDATE files SET version = version + 1 WHERE id = :id", file);
-            case "failed" -> metadata.markFailed(file);
+            case "failed" -> history.status(file, FileStatus.FAILED);
             case "missing" -> update("DELETE FROM files WHERE id = :id", file);
             case "allocation" -> update("UPDATE files SET storage_key = 'different-key' WHERE id = :id", file);
             case "destination" -> {
@@ -227,7 +191,7 @@ class UploadFinalizationRecoveryIntegrationTest {
         UUID folder = folders.createFolder(owner, null, "folder");
         var file = admitted(folder);
         folders.deleteFolder(owner, folder);
-        transactions.recordSuccess(file);
+        history.receipt(file);
         assertThat(transactions.recover(file.getId())).isEqualTo(BLOCKED);
         assertUploading(file);
         folders.restoreFolder(owner, folder);
@@ -240,22 +204,6 @@ class UploadFinalizationRecoveryIntegrationTest {
         assertThat(transactions.recover(file.getId())).isEqualTo(ALREADY_READY);
     }
 
-    @Test void concurrentReceiptRecordingIsDeduplicated() throws Exception {
-        var file = admitted(null);
-        race(() -> { raw().recordSuccess(file); return null; }, () -> { transactions.recordSuccess(file); return null; }, null, null);
-        assertThat(transactions.hasSuccess(file)).isTrue();
-    }
-
-    @ParameterizedTest @ValueSource(booleans = {false, true})
-    void recoveryRacingForegroundCompletionBothOrders(boolean recoveryFirst) throws Exception {
-        var file = proven(null);
-        if (recoveryFirst) {
-            race(() -> raw().recover(file.getId()), () -> { recovery.complete(file); return null; }, RECOVERED, null);
-        } else {
-            race(() -> { metadata.markReady(file); return null; }, () -> transactions.recover(file.getId()), null, ALREADY_READY);
-        }
-        assertThat(scalar("SELECT status FROM files WHERE id = :id", file.getId())).isEqualTo("READY");
-    }
 
     @ParameterizedTest @ValueSource(booleans = {false, true})
     void recoveryRacingExpiryNeverEstablishesConflictingExpiry(boolean recoveryFirst) throws Exception {
@@ -307,7 +255,7 @@ class UploadFinalizationRecoveryIntegrationTest {
         var file = fixture(null);
         update("UPDATE files SET created_at = clock_timestamp() - interval '2 hours' WHERE id = :id", file);
         assertThat(expiry.expire(file.getId())).isEqualTo(StaleUploadExpiryTransactions.Outcome.EXPIRED);
-        assertThatThrownBy(() -> transactions.recordSuccess(file)).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> history.receipt(file)).isInstanceOf(RuntimeException.class);
         assertThat(transactions.recover(file.getId())).isEqualTo(NO_RECEIPT);
     }
 
@@ -315,7 +263,7 @@ class UploadFinalizationRecoveryIntegrationTest {
         assertThat(properties.pageSize()).isEqualTo(20);
         for (int i = 0; i < 23; i++) {
             var file = proven(null);
-            if (i % 2 == 0) { metadata.markFailed(file); }
+            if (i % 2 == 0) { history.status(file, FileStatus.FAILED); }
         }
         var first = recovery.recoverPage(null);
         assertThat(first.scanned()).isEqualTo(20);
@@ -353,20 +301,6 @@ class UploadFinalizationRecoveryIntegrationTest {
             assertUploading(file);
             assertThat(transactions.recover(file.getId())).isEqualTo(RECOVERED);
         } finally { release.countDown(); pool.shutdownNow(); pool.awaitTermination(5, TimeUnit.SECONDS); }
-    }
-
-    @ParameterizedTest @ValueSource(booleans = {false, true})
-    void failedAndRecoveryCasHaveOnlyOneWinner(boolean failedFirst) throws Exception {
-        var file = proven(null);
-        if (failedFirst) {
-            race(() -> { metadata.markFailed(file); return null; }, () -> transactions.recover(file.getId()), null, BLOCKED);
-            assertThat(scalar("SELECT status FROM files WHERE id = :id", file.getId())).isEqualTo("FAILED");
-        } else {
-            race(() -> raw().recover(file.getId()), () -> {
-                assertThatThrownBy(() -> metadata.markFailed(file)).isInstanceOf(RuntimeException.class); return null;
-            }, RECOVERED, null);
-            assertThat(scalar("SELECT status FROM files WHERE id = :id", file.getId())).isEqualTo("READY");
-        }
     }
 
     @Test void statementTimeoutRollsBackReadyAndKeepsReceiptForExplicitRetry() {
@@ -493,16 +427,15 @@ class UploadFinalizationRecoveryIntegrationTest {
         } finally { release.countDown(); pool.shutdownNow(); pool.awaitTermination(5, TimeUnit.SECONDS); }
     }
 
-
     private StoredFile fixture(UUID folder) {
         UUID id = UUID.randomUUID();
-        return metadata.createUploading(new StoredFile(id, owner, folder, id + ".txt", "disposable/" + owner + "/" + id, "text/plain", 1));
+        return history.reservation(new StoredFile(id, owner, folder, id + ".txt", "disposable/" + owner + "/" + id, "text/plain", 1));
     }
     private StoredFile admitted(UUID folder) {
-        var file = fixture(folder); identity.beginWrite(file.getStorageKey()); return file;
+        var file = fixture(folder); history.admission(file.getStorageKey()); return file;
     }
     private StoredFile proven(UUID folder) {
-        var file = admitted(folder); transactions.recordSuccess(file); return file;
+        var file = admitted(folder); history.receipt(file); return file;
     }
     private void update(String sql, StoredFile file) {
         tx.executeWithoutResult(status -> em.createNativeQuery(sql).setParameter("id", file.getId()).executeUpdate());

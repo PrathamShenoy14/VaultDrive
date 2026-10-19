@@ -191,29 +191,6 @@ class FolderPurgeConcurrencyIntegrationTest {
     }
 
     @Test
-    void folderPurgeRequestBlocksThenRejectsUploadReservation()
-            throws Exception {
-        Fixture fixture = createFixture("upload-reservation", false, false);
-        UUID fileId = UUID.randomUUID();
-        StoredFile upload = new StoredFile(
-                fileId,
-                fixture.ownerId(),
-                fixture.childFolderId(),
-                "upload.pdf",
-                "users/" + fixture.ownerId() + "/files/" + fileId,
-                "application/pdf",
-                100L
-        );
-
-        assertRejectedAfterConcurrentParentPurge(
-                fixture,
-                () -> fileMetadataService.createUploading(upload),
-                () -> assertThat(storedFileRepository.existsById(fileId))
-                        .isFalse()
-        );
-    }
-
-    @Test
     void parentPurgeWinsAndRejectsConcurrentChildPurge()
             throws Exception {
         Fixture fixture = createFixture("parent-wins", true, false);

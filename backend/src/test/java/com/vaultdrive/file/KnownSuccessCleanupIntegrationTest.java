@@ -1,5 +1,9 @@
 package com.vaultdrive.file;
 
+import org.springframework.context.annotation.Import;
+
+import com.vaultdrive.support.HistoricalObjectFixtures;
+import com.vaultdrive.support.HistoricalUploadFixtures;
 import com.vaultdrive.folder.FolderService;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
 import com.vaultdrive.storage.*;
@@ -24,7 +28,6 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 
 import javax.sql.DataSource;
-import java.io.ByteArrayInputStream;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
@@ -38,10 +41,15 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 /** Real PostgreSQL/Garage; only this class's successful disposable writes may be removed. */
+@Import(HistoricalObjectFixtures.class)
 @SpringBootTest
 @ActiveProfiles("test")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class KnownSuccessCleanupIntegrationTest {
+    @Autowired HistoricalObjectFixtures historicalObjects;
+
+    @Autowired HistoricalUploadFixtures history;
+
     private static final String SCHEMA = "known_cleanup_" + UUID.randomUUID().toString().replace("-", "");
     private static final AtomicBoolean RETAIN = new AtomicBoolean();
     private static final byte[] BYTES = {2, 4, 6, 8};
@@ -56,7 +64,6 @@ class KnownSuccessCleanupIntegrationTest {
     @Autowired UploadFinalizationTransactions success;
     @Autowired FileMetadataService metadata;
     @Autowired StoredFileRepository files;
-    @Autowired FileStorageIdentityService identity;
     @Autowired HierarchyCoordinator hierarchy;
     @Autowired FolderService folders;
     @Autowired StorageBinding binding;
@@ -168,14 +175,14 @@ class KnownSuccessCleanupIntegrationTest {
                         """).setParameter("id", file.getId()).setParameter("endpoint", binding.target("x").endpoint())
                         .setParameter("region", storageProperties.region()).setParameter("bucket", storageProperties.bucket()).executeUpdate());
                 sql("UPDATE file_storage_objects SET write_started=true, admitted_file_version=0 WHERE file_id=:id", file.getId());
-                success.recordSuccess(file); // Database-only trusted-caller fixture; no PUT dispatched.
+                history.receipt(file); // Database-only trusted-caller fixture; no PUT dispatched.
             } else { sql("UPDATE file_storage_objects SET write_started=true WHERE file_id=:id", file.getId()); }
-            metadata.markFailed(file);
+            history.status(file, FileStatus.FAILED);
         } else {
             file = put(null);
-            if (!exclusion.equals("no-receipt")) { success.recordSuccess(file); }
+            if (!exclusion.equals("no-receipt")) { history.receipt(file); }
             if (exclusion.equals("ready")) { success.recover(file.getId()); }
-            else if (!exclusion.equals("uploading")) { metadata.markFailed(file); }
+            else if (!exclusion.equals("uploading")) { history.status(file, FileStatus.FAILED); }
             switch (exclusion) {
                 case "version" -> sql("UPDATE files SET version=version+1 WHERE id=:id", file.getId());
                 case "destination" -> {
@@ -237,10 +244,10 @@ class KnownSuccessCleanupIntegrationTest {
         storage.delete(abandoned.target());
         assertThat(cleanup.failed(abandoned)).isFalse(); absent(file);
         assertThat(scalar("SELECT to_jsonb(i)::text FROM upload_cleanup_intents i WHERE file_id=:id", file.getId())).isEqualTo(intent);
-        assertThatThrownBy(() -> metadata.markReady(file)).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> history.status(file, FileStatus.READY)).isInstanceOf(RuntimeException.class);
         assertThat(success.recover(file.getId())).isEqualTo(UploadFinalizationTransactions.Outcome.BLOCKED);
         assertThatThrownBy(() -> sql("UPDATE files SET status='READY',version=version+1 WHERE id=:id", file.getId())).isInstanceOf(RuntimeException.class);
-        assertThatThrownBy(() -> identity.beginWrite(file.getStorageKey())).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> history.admission(file.getStorageKey())).isInstanceOf(RuntimeException.class);
     }
 
     @Test void committedDeletionReceiptLostAcknowledgementReplaysWithoutDelete() {
@@ -280,21 +287,6 @@ class KnownSuccessCleanupIntegrationTest {
             release.countDown(); assertThat(first.get(10, TimeUnit.SECONDS).deleted()).isEqualTo(1);
             assertThat(((Number) scalar("SELECT revision FROM upload_cleanup_progress WHERE file_id=:id", file.getId())).longValue()).isEqualTo(2);
         } finally { release.countDown(); pool.shutdownNow(); pool.awaitTermination(5, TimeUnit.SECONDS); }
-    }
-
-    @ParameterizedTest @ValueSource(booleans = {false, true})
-    void readyFinalizationVersusFailedDecisionAndCleanupHaveOneWinner(boolean failedFirst) throws Exception {
-        var file = put(null); success.recordSuccess(file);
-        if (failedFirst) {
-            race(() -> { metadata.markFailed(file); return raw().prepare(file.getId()).outcome(); },
-                    () -> success.recover(file.getId()), CLAIMED, UploadFinalizationTransactions.Outcome.BLOCKED);
-            expire(file); assertThat(one(file).deleted()).isEqualTo(1);
-        } else {
-            // Join the real READY transaction through the existing repository, then hold its row lock.
-            race(() -> { metadata.markReady(file); return null; }, () -> cleanup.prepare(file.getId()).outcome(), null, BLOCKED);
-            assertThat(scalar("SELECT status FROM files WHERE id=:id", file.getId())).isEqualTo("READY");
-            assertThat(has("upload_cleanup_intents", file)).isFalse();
-        }
     }
 
     @ParameterizedTest @ValueSource(strings = {"trash-first", "cleanup-trash", "restore-first", "cleanup-restore", "purge-first", "cleanup-purge"})
@@ -350,9 +342,10 @@ class KnownSuccessCleanupIntegrationTest {
             return response;
         }).when(s3).putObject(any(PutObjectRequest.class), any(RequestBody.class));
         try {
-            var writer = pool.submit(() -> storage.upload(file.getStorageKey(), new ByteArrayInputStream(BYTES), BYTES.length, "text/plain"));
+            history.admission(file.getStorageKey());
+            var writer = pool.submit(() -> historicalObjects.write(file, BYTES));
             assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
-            metadata.markFailed(file);
+            history.status(file, FileStatus.FAILED);
             sql("UPDATE files SET created_at=clock_timestamp()-interval '100 years' WHERE id=:id", file.getId());
             if (bytesAlreadyAccepted) { assertThat(s3.headObject(HeadObjectRequest.builder().bucket(storageProperties.bucket()).key(file.getStorageKey()).build()).contentLength()).isEqualTo(BYTES.length); }
             else { assertThatThrownBy(() -> s3.headObject(HeadObjectRequest.builder().bucket(storageProperties.bucket()).key(file.getStorageKey()).build())).isInstanceOf(NoSuchKeyException.class); }
@@ -573,15 +566,16 @@ class KnownSuccessCleanupIntegrationTest {
     private KnownSuccessCleanup.Page one(StoredFile file) { return new KnownSuccessCleanup(boundary(file), storage).cleanupPage(null); }
     private StoredFile fixture(UUID folder) {
         UUID id = UUID.randomUUID();
-        return metadata.createUploading(new StoredFile(id, owner, folder, id + ".txt", "integration-tests/" + SCHEMA + "/" + id, "text/plain", BYTES.length));
+        return history.reservation(new StoredFile(id, owner, folder, id + ".txt", "integration-tests/" + SCHEMA + "/" + id, "text/plain", BYTES.length));
     }
     private StoredFile put(UUID folder) {
         var file = fixture(folder);
-        try (var input = new ByteArrayInputStream(BYTES)) { storage.upload(file.getStorageKey(), input, BYTES.length, "text/plain"); }
+        history.admission(file.getStorageKey());
+        try { historicalObjects.write(file, BYTES); }
         catch (Exception failure) { RETAIN.set(true); throw new AssertionError("Uncertain write; retain " + SCHEMA, failure); }
         return file;
     }
-    private StoredFile failed(UUID folder) { var f = put(folder); success.recordSuccess(f); metadata.markFailed(f); return f; }
+    private StoredFile failed(UUID folder) { var f = put(folder); history.receipt(f); history.status(f, FileStatus.FAILED); return f; }
     private void expire(StoredFile file) {
         sql("UPDATE upload_cleanup_progress SET lease_until=CASE WHEN claim_token IS NULL THEN NULL ELSE clock_timestamp()-interval '1 second' END,retry_after=clock_timestamp()-interval '1 second' WHERE file_id=:id", file.getId());
     }

@@ -2,13 +2,11 @@ package com.vaultdrive.file;
 
 import com.vaultdrive.file.exception.DuplicateFileNameException;
 import com.vaultdrive.file.exception.FileNotFoundException;
-import com.vaultdrive.file.exception.UploadFinalizationRejectedException;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
 import com.vaultdrive.outbox.OutboxEvent;
 import com.vaultdrive.outbox.OutboxWriter;
 import com.vaultdrive.storage.FileStorageIdentityService;
 import com.vaultdrive.user.UserRepository;
-import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,7 +14,6 @@ import org.springframework.transaction.annotation.Transactional;
 import com.vaultdrive.folder.FolderAccessValidator;
 import com.vaultdrive.folder.exception.FolderNotFoundException;
 
-import java.time.Instant;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -51,34 +48,6 @@ public class FileMetadataService {
         this.hierarchyCoordinator = hierarchyCoordinator;
         this.outboxWriter = outboxWriter;
         this.storageIdentity = storageIdentity;
-    }
-
-    @Transactional
-    public StoredFile createUploading(StoredFile file) {
-        hierarchyCoordinator.acquireShared(file.getOwnerId());
-
-        requireOwner(file.getOwnerId());
-        requireAccessibleDestination(
-                file.getOwnerId(),
-                file.getFolderId()
-        );
-
-        boolean duplicate =
-                fileNameExists(
-                        file.getOwnerId(),
-                        file.getFolderId(),
-                        file.getName()
-                );
-
-        if (duplicate) {
-            throw new DuplicateFileNameException(
-                    "A file with this name already exists"
-            );
-        }
-
-        StoredFile saved = storedFileRepository.saveAndFlush(file);
-        storageIdentity.reserve(saved);
-        return saved;
     }
 
     @Transactional
@@ -226,42 +195,6 @@ public class FileMetadataService {
         return saved;
     }
 
-    @Transactional(
-            noRollbackFor = UploadFinalizationRejectedException.class
-    )
-    public void markReady(StoredFile file) {
-        hierarchyCoordinator.acquireShared(file.getOwnerId());
-
-        StoredFile current = requireUploadingVersion(file);
-
-        try {
-            requireAccessibleDestination(
-                    current.getOwnerId(),
-                    current.getFolderId()
-            );
-        } catch (FolderNotFoundException exception) {
-            transitionUploadStatus(
-                    current,
-                    FileStatus.FAILED
-            );
-
-            throw new UploadFinalizationRejectedException(
-                    "Upload destination is no longer accessible",
-                    exception
-            );
-        }
-
-        transitionUploadStatus(current, FileStatus.READY);
-    }
-
-    @Transactional
-    public void markFailed(StoredFile file) {
-        hierarchyCoordinator.acquireShared(file.getOwnerId());
-
-        StoredFile current = requireUploadingVersion(file);
-        transitionUploadStatus(current, FileStatus.FAILED);
-    }
-
     private boolean fileNameExists(
             UUID ownerId,
             UUID folderId,
@@ -320,58 +253,6 @@ public class FileMetadataService {
         if (!userRepository.existsById(ownerId)) {
             throw new AccessDeniedException("User not found");
         }
-    }
-
-    private void requireAccessibleDestination(
-            UUID ownerId,
-            UUID folderId
-    ) {
-        if (folderId != null) {
-            folderAccessValidator.requireAccessibleFolder(
-                    ownerId,
-                    folderId
-            );
-        }
-    }
-
-    private StoredFile requireUploadingVersion(StoredFile expected) {
-        StoredFile current = storedFileRepository
-                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
-                        expected.getId(),
-                        expected.getOwnerId(),
-                        FileStatus.UPLOADING
-                )
-                .orElseThrow(this::uploadTransitionConflict);
-
-        if (current.getVersion() != expected.getVersion()) {
-            throw uploadTransitionConflict();
-        }
-
-        return current;
-    }
-
-    private void transitionUploadStatus(
-            StoredFile current,
-            FileStatus newStatus
-    ) {
-        int updated = storedFileRepository.transitionUploadStatus(
-                current.getId(),
-                current.getOwnerId(),
-                FileStatus.UPLOADING,
-                current.getVersion(),
-                newStatus,
-                Instant.now()
-        );
-
-        if (updated != 1) {
-            throw uploadTransitionConflict();
-        }
-    }
-
-    private OptimisticLockingFailureException uploadTransitionConflict() {
-        return new OptimisticLockingFailureException(
-                "Upload metadata is no longer eligible for transition"
-        );
     }
 
     private UUID resolveRestoreDestination(

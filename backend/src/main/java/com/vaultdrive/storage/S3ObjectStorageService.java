@@ -5,16 +5,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.services.s3.model.S3Exception;
-import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
-import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 
-import java.io.InputStream;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
@@ -27,7 +24,6 @@ public class S3ObjectStorageService implements ObjectStorageService {
 
     private final S3Client s3Client;
     private final S3StorageProperties properties;
-    private final FileStorageIdentityService identity;
     private final StorageBinding binding;
     private final S3Presigner presigner;
 
@@ -37,13 +33,11 @@ public class S3ObjectStorageService implements ObjectStorageService {
     public S3ObjectStorageService(
             S3Client s3Client,
             S3StorageProperties properties,
-            FileStorageIdentityService identity,
             StorageBinding binding,
             S3Presigner presigner
     ) {
         this.s3Client = s3Client;
         this.properties = properties;
-        this.identity = identity;
         this.binding = binding;
         this.presigner = presigner;
     }
@@ -157,29 +151,6 @@ public class S3ObjectStorageService implements ObjectStorageService {
     }
 
     @Override
-    public void upload(
-            String storageKey,
-            InputStream inputStream,
-            long contentLength,
-            String contentType
-    ) {
-        requireNoTransaction();
-        StorageTarget target = identity.beginWrite(storageKey); // Commits before the PUT.
-        PutObjectRequest.Builder requestBuilder = PutObjectRequest.builder()
-                .bucket(target.bucket())
-                .key(target.key());
-
-        if (contentType != null && !contentType.isBlank()) {
-            requestBuilder.contentType(contentType);
-        }
-
-        s3Client.putObject(
-                requestBuilder.build(),
-                RequestBody.fromInputStream(inputStream, contentLength)
-        );
-    }
-
-    @Override
     public StorageObject download(String storageKey) {
 
         GetObjectRequest request =
@@ -192,12 +163,6 @@ public class S3ObjectStorageService implements ObjectStorageService {
                 s3Client.getObject(request);
 
         return new StorageObject(responseStream);
-    }
-
-    @Override
-    public void delete(String storageKey) {
-        // Existing rejected-upload cleanup API; purge never enters this path.
-        delete(binding.target(storageKey));
     }
 
     @Override

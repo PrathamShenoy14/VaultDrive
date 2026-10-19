@@ -1,5 +1,9 @@
 package com.vaultdrive.consumer;
 
+import org.springframework.context.annotation.Import;
+
+import com.vaultdrive.support.HistoricalObjectFixtures;
+import com.vaultdrive.support.HistoricalUploadFixtures;
 import com.vaultdrive.file.FileMetadataService;
 import com.vaultdrive.file.FileService;
 import com.vaultdrive.file.StoredFile;
@@ -11,7 +15,6 @@ import com.vaultdrive.job.BackgroundJobService;
 import com.vaultdrive.job.JobType;
 import com.vaultdrive.outbox.OutboxEvent;
 import com.vaultdrive.outbox.OutboxEventRepository;
-import com.vaultdrive.storage.FileStorageIdentityService;
 import com.vaultdrive.storage.ObjectStorageService;
 import com.vaultdrive.storage.StorageBinding;
 import com.vaultdrive.user.User;
@@ -24,7 +27,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -44,12 +46,17 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+@Import(HistoricalObjectFixtures.class)
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=missing_job_test",
         "spring.flyway.schemas=missing_job_test", "spring.flyway.default-schema=missing_job_test"
 })
 @ActiveProfiles("test")
 class MissingJobReconciliationIntegrationTest {
+    @Autowired HistoricalObjectFixtures historicalObjects;
+
+    @Autowired HistoricalUploadFixtures history;
+
     @Autowired private MissingJobReconciliationTransactions recovery;
     @Autowired private MissingJobReconciler disabled;
     @Autowired private NotificationIngestor ingestor;
@@ -60,7 +67,6 @@ class MissingJobReconciliationIntegrationTest {
     @Autowired private FileMetadataService metadata;
     @Autowired private FileService files;
     @Autowired private StoredFileRepository fileRepository;
-    @Autowired private FileStorageIdentityService identity;
     @Autowired private StorageBinding binding;
     @Autowired private OutboxEventRepository outbox;
     @Autowired private BackgroundJobRepository repository;
@@ -337,9 +343,8 @@ class MissingJobReconciliationIntegrationTest {
     }
 
     @Test void recoveredJobDoesNotDeleteGarageBytesOrChangeProof() {
-        var uploaded = files.uploadFile(owner, null,
-                new MockMultipartFile("file", "disposable.txt", "text/plain", "recovery-control".getBytes()));
-        var file = fileRepository.findById(uploaded.fileId()).orElseThrow();
+        var uploaded = historicalObjects.completed(owner, null, "disposable.txt", "text/plain", "recovery-control".getBytes());
+        var file = fileRepository.findById(uploaded.getId()).orElseThrow();
         ownedKeys.add(file.getStorageKey());
         files.trashFile(owner, file.getId());
         metadata.requestPermanentDeletion(owner, file.getId());
@@ -359,10 +364,10 @@ class MissingJobReconciliationIntegrationTest {
         UUID resource;
         if (file) {
             resource = UUID.randomUUID();
-            var row = metadata.createUploading(new StoredFile(resource, owner, null, resource + ".txt",
+            var row = history.reservation(new StoredFile(resource, owner, null, resource + ".txt",
                     "integration-tests/reconciliation/" + resource, "text/plain", 1));
-            identity.beginWrite(row.getStorageKey()); // Metadata-only test fixture, no PUT.
-            metadata.markReady(row);
+            history.admission(row.getStorageKey()); // Metadata-only test fixture, no PUT.
+            history.status(row, com.vaultdrive.file.FileStatus.READY);
             files.trashFile(owner, resource);
             metadata.requestPermanentDeletion(owner, resource);
         } else {

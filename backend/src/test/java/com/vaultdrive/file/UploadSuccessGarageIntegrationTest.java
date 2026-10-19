@@ -1,7 +1,9 @@
 package com.vaultdrive.file;
 
-import com.vaultdrive.file.exception.FileUploadException;
-import com.vaultdrive.folder.FolderService;
+import org.springframework.context.annotation.Import;
+
+import com.vaultdrive.support.HistoricalObjectFixtures;
+import com.vaultdrive.support.HistoricalUploadFixtures;
 import com.vaultdrive.storage.ObjectStorageService;
 import com.vaultdrive.user.User;
 import com.vaultdrive.user.UserRepository;
@@ -9,12 +11,10 @@ import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -26,8 +26,6 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.core.sync.RequestBody;
 import javax.sql.DataSource;
-import java.io.ByteArrayInputStream;
-import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -36,9 +34,14 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 import static com.vaultdrive.file.UploadFinalizationTransactions.Outcome.*;
 
+@Import(HistoricalObjectFixtures.class)
 @SpringBootTest
 @ActiveProfiles("test")
 class UploadSuccessGarageIntegrationTest {
+    @Autowired HistoricalObjectFixtures historicalObjects;
+
+    @Autowired HistoricalUploadFixtures history;
+
     private static final String SCHEMA = "upload_garage_" + UUID.randomUUID().toString().replace("-", "");
     private static final java.util.concurrent.atomic.AtomicBoolean RETAIN_SCHEMA = new java.util.concurrent.atomic.AtomicBoolean();
     @DynamicPropertySource static void isolatedDatabase(DynamicPropertyRegistry r) {
@@ -46,11 +49,8 @@ class UploadSuccessGarageIntegrationTest {
         r.add("spring.flyway.schemas", () -> SCHEMA);
         r.add("spring.flyway.default-schema", () -> SCHEMA);
     }
-    @Autowired FileMetadataService metadata;
-    @Autowired FileService files;
-    @Autowired FolderService folders;
+    @Autowired com.vaultdrive.storage.StorageBinding binding;
     @Autowired UploadFinalizationTransactions transactions;
-    @Autowired UploadFinalizationRecovery recovery;
     @Autowired UserRepository users;
     @Autowired EntityManager em;
     @Autowired PlatformTransactionManager manager;
@@ -82,7 +82,7 @@ class UploadSuccessGarageIntegrationTest {
             throw new AssertionError("Uncertain disposable write retained in " + SCHEMA);
         }
         try {
-            for (String key : owned) { storage.delete(key); }
+            for (String key : owned) { storage.delete(binding.target(key)); }
         } catch (RuntimeException failure) {
             RETAIN_SCHEMA.set(true);
             throw new AssertionError("Disposable byte cleanup failed; allocation retained in " + SCHEMA);
@@ -102,12 +102,11 @@ class UploadSuccessGarageIntegrationTest {
 
     @ParameterizedTest @ValueSource(booleans = {false, true})
     void realPutCrashBoundariesRetainBytesAndRecoveryNeverTouchesGarage(boolean receiptCommitted) throws Exception {
-        var file = metadata.createUploading(new StoredFile(UUID.randomUUID(), owner, null, "bytes.txt",
+        var file = history.reservation(new StoredFile(UUID.randomUUID(), owner, null, "bytes.txt",
                 "integration-tests/" + SCHEMA + "/" + UUID.randomUUID(), "application/octet-stream", BYTES.length));
-        try (var input = new ByteArrayInputStream(BYTES)) {
-            storage.upload(file.getStorageKey(), input, BYTES.length, file.getContentType());
-        }
-        if (receiptCommitted) { transactions.recordSuccess(file); }
+        history.admission(file.getStorageKey());
+        historicalObjects.write(file, BYTES);
+        if (receiptCommitted) { history.receipt(file); }
         clearInvocations(storage, s3);
         assertThat(transactions.recover(file.getId())).isEqualTo(receiptCommitted ? RECOVERED : NO_RECEIPT);
         assertThat(transactions.recover(file.getId())).isEqualTo(receiptCommitted ? ALREADY_READY : NO_RECEIPT);
@@ -117,33 +116,4 @@ class UploadSuccessGarageIntegrationTest {
         }
     }
 
-    @Test void foregroundRecordsAfterCloseAndBlockedDestinationRetainsObjectUntilExplicitRestoreRecovery() throws Exception {
-        UUID folder = folders.createFolder(owner, null, "destination");
-        var multipart = new MockMultipartFile("file", "blocked.txt", "text/plain", BYTES) {
-            @Override public InputStream getInputStream() {
-                return new ByteArrayInputStream(BYTES) {
-                    @Override public void close() {
-                        // The SDK has returned successfully; force the destination change at close.
-                        folders.deleteFolder(owner, folder);
-                    }
-                };
-            }
-        };
-        assertThatThrownBy(() -> files.uploadFile(owner, folder, multipart)).isInstanceOf(FileUploadException.class);
-        Object[] row = tx.execute(status -> (Object[]) em.createNativeQuery(
-                "SELECT f.id, f.storage_key, f.status, a.put_succeeded_at IS NOT NULL FROM files f "
-                + "JOIN file_storage_objects a ON a.file_id = f.id WHERE f.owner_id = :owner")
-                .setParameter("owner", owner).getSingleResult());
-        UUID id = (UUID) row[0]; String key = (String) row[1];
-        assertThat(row[2]).isEqualTo("UPLOADING"); assertThat(row[3]).isEqualTo(true);
-        verify(s3, times(1)).putObject(any(PutObjectRequest.class), any(RequestBody.class));
-        verify(storage, never()).delete(any(String.class));
-        clearInvocations(storage, s3);
-        assertThat(recovery.recoverPage(null).blocked()).isEqualTo(1);
-        folders.restoreFolder(owner, folder);
-        assertThat(transactions.recover(id)).isEqualTo(RECOVERED);
-        assertThat(transactions.recover(id)).isEqualTo(ALREADY_READY);
-        verifyNoInteractions(storage, s3);
-        try (var bytes = storage.download(key).inputStream()) { assertThat(bytes.readAllBytes()).isEqualTo(BYTES); }
-    }
 }

@@ -9,8 +9,8 @@ establish browser cookie, CORS, forbidden-header or HTTP/2 behavior.
 ## Boundary and acceptance criteria
 
 The harness exercises the existing API; it adds no production endpoint, migration,
-storage identity, dispatch/recovery path, scheduler or frontend framework. Legacy
-synchronous uploads remain. Existing hierarchy -> file -> allocation -> session
+storage identity, dispatch/recovery path, scheduler or frontend framework. The subsequent [backend consolidation](backend-consolidation.md) retires legacy
+synchronous uploads; the harness already uses direct multipart. Existing hierarchy -> file -> allocation -> session
 coordination and fresh Editor authorization remain authoritative. No Garage I/O
 is moved into a transaction. Unknown Create/Complete/Abort outcomes must never
 cause another storage dispatch. Explicit recovery uses the existing backend

@@ -1,6 +1,5 @@
 package com.vaultdrive.hierarchy;
 
-import com.vaultdrive.file.FileStatus;
 import com.vaultdrive.outbox.OutboxWriter;
 import com.vaultdrive.storage.ObjectStorageService;
 import org.junit.jupiter.api.Test;
@@ -11,10 +10,6 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.util.AopTestUtils;
 import org.mockito.stubbing.Answer;
 
-import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -264,36 +259,5 @@ class HierarchyHttpTransactionTest extends HierarchyHttpTestSupport {
         }
     }
 
-    @Test
-    void realUploadReservationAdmissionReceiptAndFinalizationUseSeparateJoinedTransactions() throws Exception {
-        String boundary = "vaultdrive-http-test";
-        String body = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"http-upload.txt\""
-                + "\r\nContent-Type: text/plain\r\n\r\ndisposable HTTP bytes\r\n--" + boundary + "--\r\n";
-        try {
-            var response = client.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/files"))
-                    .timeout(Duration.ofSeconds(15))
-                    .header("Authorization", "Bearer " + jwt.generateAccessToken(owner))
-                    .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                    .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
-            assertThat(response.statusCode()).as(response.body()).isEqualTo(201);
-            var id = UUID.fromString(mapper.readTree(response.body()).get("fileId").asText());
-            assertThat(files.findById(id).orElseThrow().getStatus()).isEqualTo(FileStatus.READY);
-            assertThat(states).hasSize(4); // reservation, admission, success receipt, finalization
-            assertThat(jdbc.queryForObject("""
-                    SELECT a.write_started AND a.put_succeeded_at IS NOT NULL
-                        AND a.admitted_file_version + 1 = f.version
-                        AND a.admitted_folder_id IS NOT DISTINCT FROM f.folder_id
-                    FROM file_storage_objects a JOIN files f ON f.id = a.file_id WHERE f.id = ?
-                    """, Boolean.class, id)).isTrue();
-            assertJoinedRequests();
-            var download = request("GET", "/files/" + id + "/download", null, 200);
-            assertThat(download.body()).isEqualTo("disposable HTTP bytes");
-        } finally {
-            for (String key : jdbc.queryForList("SELECT storage_key FROM files WHERE owner_id = ? AND name = 'http-upload.txt'",
-                    String.class, owner)) {
-                assertThat(key).startsWith("users/" + owner + "/files/");
-                storage.delete(key);
-            }
-        }
-    }
+
 }

@@ -1,5 +1,9 @@
 package com.vaultdrive.worker;
 
+import org.springframework.context.annotation.Import;
+
+import com.vaultdrive.support.HistoricalObjectFixtures;
+import com.vaultdrive.support.HistoricalUploadFixtures;
 import com.vaultdrive.file.FileMetadataService;
 import com.vaultdrive.file.FileService;
 import com.vaultdrive.file.FileStatus;
@@ -15,7 +19,6 @@ import com.vaultdrive.job.ClaimedJob;
 import com.vaultdrive.job.JobStatus;
 import com.vaultdrive.job.JobType;
 import com.vaultdrive.outbox.OutboxEventRepository;
-import com.vaultdrive.storage.FileStorageIdentityService;
 import com.vaultdrive.storage.ObjectStorageService;
 import com.vaultdrive.storage.StorageBinding;
 import com.vaultdrive.storage.StorageDeletionException;
@@ -29,7 +32,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.util.AopTestUtils;
@@ -54,12 +56,17 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /** Real PostgreSQL/Garage; only this test's fresh UUID owner/key allocations are mutated. */
+@Import(HistoricalObjectFixtures.class)
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=folder_file_purge_test",
         "spring.flyway.schemas=folder_file_purge_test", "spring.flyway.default-schema=folder_file_purge_test"
 })
 @ActiveProfiles("test")
 class FolderPurgeFileIntegrationTest {
+    @Autowired HistoricalObjectFixtures historicalObjects;
+
+    @Autowired HistoricalUploadFixtures history;
+
     @Autowired EntityManager em;
     @Autowired PlatformTransactionManager manager;
     @Autowired UserRepository users;
@@ -68,7 +75,6 @@ class FolderPurgeFileIntegrationTest {
     @Autowired StoredFileRepository fileRepository;
     @Autowired FileService files;
     @Autowired FileMetadataService metadata;
-    @Autowired FileStorageIdentityService identity;
     @Autowired OutboxEventRepository outbox;
     @Autowired BackgroundJobRepository jobRepository;
     @MockitoSpyBean BackgroundJobService jobs;
@@ -309,7 +315,7 @@ class FolderPurgeFileIntegrationTest {
         assertThat(handler.handle(context(claim))).isEqualTo(JobHandler.Result.CONTINUE);
         assertThat(count("file_purge_work", "never_written_at IS NOT NULL AND bytes_deleted_at IS NULL")).isEqualTo(1);
         assertThat(phase()).isEqualTo("DELETE_FOLDERS");
-        assertThatThrownBy(() -> identity.beginWrite(file.getStorageKey())).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> history.admission(file.getStorageKey())).isInstanceOf(RuntimeException.class);
         assertThatThrownBy(() -> sql("UPDATE file_storage_objects SET write_started = TRUE WHERE file_id = :file", file.getId())).isInstanceOf(RuntimeException.class);
         assertThatThrownBy(() -> sql("UPDATE file_storage_objects SET write_precluded_at = NULL WHERE file_id = :file", file.getId())).isInstanceOf(RuntimeException.class);
         assertThatThrownBy(() -> sql("UPDATE file_purge_work SET never_written_at = NULL, never_written_job_id = NULL WHERE file_id = :file", file.getId())).isInstanceOf(RuntimeException.class);
@@ -575,28 +581,6 @@ class FolderPurgeFileIntegrationTest {
         assertThat(folderRepository.existsById(root)).isTrue();
     }
 
-    @Test void uploadAdmissionWinningBeforeRootAcceptanceIsUnsafeEvenWithoutKnownPutOutcome() throws Exception {
-        StoredFile file = raw(FileStatus.UPLOADING, false, true);
-        CountDownLatch admitted = new CountDownLatch(1), release = new CountDownLatch(1);
-        try (var executor = Executors.newFixedThreadPool(2)) {
-            var writer = executor.submit(() -> tx.executeWithoutResult(ignored -> {
-                identity.beginWrite(file.getStorageKey()); admitted.countDown(); await(release);
-            }));
-            try {
-                assertThat(admitted.await(5, TimeUnit.SECONDS)).isTrue();
-                var folder = executor.submit(() -> accept(true));
-                assertThatThrownBy(() -> folder.get(100, TimeUnit.MILLISECONDS)).isInstanceOf(java.util.concurrent.TimeoutException.class);
-                release.countDown(); writer.get(5, TimeUnit.SECONDS);
-                ClaimedJob claim = folder.get(5, TimeUnit.SECONDS);
-                assertThat(handler.handle(context(claim))).isEqualTo(JobHandler.Result.CONTINUE);
-                assertThat(phase()).isEqualTo("DELETE_FILES");
-                assertThat(count("folder_purge_file_progress", "blocked_reason = 'UNSAFE_WRITER'")).isEqualTo(1);
-                assertThat(countWork()).isZero();
-            } finally { release.countDown(); }
-        }
-        verify(storage, never()).delete(any(StorageTarget.class));
-    }
-
     @Test void cancelledOrShortRuntimeNeverBeginsDeletionAndUnrelatedMemberIsRejected() throws Exception {
         StoredFile file = uploaded(root);
         StoredFile outsider = uploaded(null);
@@ -705,8 +689,8 @@ class FolderPurgeFileIntegrationTest {
     }
 
     private StoredFile uploaded(UUID folder) {
-        var result = files.uploadFile(owner, folder, new MockMultipartFile("file", UUID.randomUUID() + ".txt", "text/plain", "fixture".getBytes()));
-        StoredFile f = fileRepository.findById(result.fileId()).orElseThrow();
+        var result = historicalObjects.completed(owner, folder, UUID.randomUUID() + ".txt", "text/plain", "fixture".getBytes());
+        StoredFile f = fileRepository.findById(result.getId()).orElseThrow();
         keys.add(f.getStorageKey()); return f;
     }
     private String key(UUID id) { String key = "users/" + owner + "/files/" + id; keys.add(key); return key; }
@@ -718,7 +702,7 @@ class FolderPurgeFileIntegrationTest {
             if (status == FileStatus.FAILED) { f.markFailed(); }
             fileRepository.saveAndFlush(f);
             if (allocation) {
-                identity.reserve(f);
+                history.allocation(f);
                 if (write) { em.createNativeQuery("UPDATE file_storage_objects SET write_started = TRUE WHERE file_id = :file").setParameter("file", id).executeUpdate(); }
             }
             return f;

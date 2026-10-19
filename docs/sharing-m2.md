@@ -1,5 +1,7 @@
 # Sharing M2: Editor content operations
 
+Consolidation update: [the backend milestone](backend-consolidation.md) has retired synchronous upload. New uploads use direct multipart only. Earlier ownership and retirement statements below preserve the original sharing milestone boundary; retained historical storage/recovery evidence is unchanged.
+
 Implemented on 2026-10-19 under the [approved matrix](sharing-permissions-design.md).
 M2 extends [M1](sharing-m1.md). [M3](sharing-m3.md) subsequently adds delegated
 multipart; [M4](sharing-m4.md) adds file Viewer links and [M5](sharing-m5.md) adds

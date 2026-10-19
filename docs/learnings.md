@@ -696,3 +696,12 @@ The refresh-family lifetime correction uses one seven-day value for new database
 expirations and initial cookie age. Rotation retains the original database expiry
 and derives cookie age from remaining time. Capping eligibility by creation plus
 seven days also bounds older families without rewriting their stored expiration.
+
+
+## Retire admission without deleting history
+
+Consolidation removes a protocol's ability to create new work independently from its durable evidence. SERVER_PUT allocation, write admission, SDK PUT and foreground receipt creation can disappear while old V25 receipts, V24 expiry and V26 cleanup remain meaningful. Missing receipts cannot be synthesized from age, HEAD or current configuration. Schema defaults and recovery readers are therefore not automatically dead code.
+
+Tests should construct historical state explicitly instead of keeping production admission alive solely for fixture setup. Here imported test-only fixtures seed PostgreSQL through its existing guards and create only disposable test objects outside transactions. Removed-route tests verify no metadata, allocation or storage effect; existing receipt/recovery and multipart safety tests protect the retained contract. Old-binary retirement remains a deployment requirement, not a guarantee obtained by deleting a Java method.
+
+JPA and JDBC can coexist with one authority per responsibility. Managed metadata, scalar conditional/evidence transactions and JDBC-only session state have different needs. The dangerous boundary is an old managed entity surviving a native update or protected read before lock acquisition, not the number of persistence APIs. Preserve refresh/clear rules, transaction ownership and deterministic database races before attempting a broad conversion.

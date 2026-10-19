@@ -18,15 +18,6 @@ public interface FolderRepository extends JpaRepository<Folder, UUID> {
             UUID ownerId
     );
 
-    List<Folder> findByOwnerIdAndParentFolderIdAndDeletedAtIsNull(
-            UUID ownerId,
-            UUID parentFolderId
-    );
-    
-    List<Folder> findByOwnerIdAndParentFolderIdIsNullAndDeletedAtIsNull(
-            UUID ownerId
-    );
-    
     boolean existsByOwnerIdAndParentFolderIdAndNameAndDeletedAtIsNull(
             UUID ownerId,
             UUID parentFolderId,

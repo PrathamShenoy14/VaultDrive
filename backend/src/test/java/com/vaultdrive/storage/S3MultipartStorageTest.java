@@ -9,7 +9,6 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedUploadPartRequest;
-import software.amazon.awssdk.services.s3.presigner.model.UploadPartPresignRequest;
 
 import java.time.*;
 import java.util.*;
@@ -19,13 +18,20 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class S3MultipartStorageTest {
+    @Test void controlPlaneClientDisablesSdkRetryAndCrossRegionReplay() {
+        try (var production = new com.vaultdrive.storage.config.S3StorageConfig().s3Client(properties)) {
+            var configuration = production.serviceClientConfiguration();
+            assertThat(configuration.overrideConfiguration().retryStrategy().orElseThrow().maxAttempts()).isEqualTo(1);
+            assertThat(configuration.crossRegionAccessEnabled()).isNotEqualTo(Boolean.TRUE);
+        }
+    }
     final S3StorageProperties properties = new S3StorageProperties("http://localhost:3900", "garage", "fixture", "dummy", "dummy");
     final StorageBinding binding = new StorageBinding(properties, "fixture");
     final S3Client client = mock(S3Client.class);
     final S3Presigner signer = mock(S3Presigner.class);
     final StorageTarget target = binding.target("test key");
     final String sha = Base64.getEncoder().encodeToString(new byte[32]);
-    final S3ObjectStorageService adapter = new S3ObjectStorageService(client, properties, mock(FileStorageIdentityService.class), binding, signer);
+    final S3ObjectStorageService adapter = new S3ObjectStorageService(client, properties, binding, signer);
 
     @Test void initiateUsesExactBindingAndChecksumMetadataAndBoundedIo() {
         when(client.createMultipartUpload(any(CreateMultipartUploadRequest.class))).thenReturn(CreateMultipartUploadResponse.builder().uploadId("exact-id").build());
@@ -51,7 +57,7 @@ class S3MultipartStorageTest {
 
     @Test void realSdkSignerBindsLengthChecksumAndExactIdentity() {
         try (var realSigner = new S3StorageConfig().s3Presigner(properties)) {
-            var real = new S3ObjectStorageService(client, properties, mock(FileStorageIdentityService.class), binding, realSigner);
+            var real = new S3ObjectStorageService(client, properties, binding, realSigner);
             Instant deadline = Instant.now().plusSeconds(120);
             var signed = real.signPart(target, "exact+id/=", 2, 1234, sha, deadline);
             assertThat(signed.requiredHeaders()).containsEntry("content-length", List.of("1234"))

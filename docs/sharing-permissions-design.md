@@ -1,5 +1,7 @@
 # Sharing and permissions design
 
+Consolidation update: [the backend audit](backend-consolidation.md) retires synchronous upload admission/PUT and foreground receipt creation. New uploads use direct multipart only. Earlier flow descriptions, commands and verification totals below are historical milestone evidence; retained historical readers/receipts/expiry/cleanup remain supported where stated in the audit.
+
 Status: Approved design; **M1 (grants and Viewer access), M2 (Editor content operations), M3 (delegated multipart), M4 (file Viewer links), M5 (permission activity) and M6 (in-app notifications) are implemented**.
 
 Source: Revised sharing/permissions plan in `Pasted text(9).txt` from the "VaultDrive Day One Plan" conversation, recorded on 2026-10-19. This document preserves that plan and the decision to retire legacy synchronous upload.

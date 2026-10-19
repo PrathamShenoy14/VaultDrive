@@ -84,7 +84,6 @@ class MultipartTransferIntegrationTest {
     @AfterEach void noTerminalDispatch() {
         // M2A operations and rejected incomplete completion never authorize byte deletion.
         verify(storage, never()).delete(any(StorageTarget.class));
-        verify(storage, never()).delete(anyString());
         assertThat(jdbc.queryForObject("SELECT count(*) FROM files WHERE owner_id = ? AND status = 'READY'", Integer.class, owner)).isZero();
     }
     @AfterAll static void dispose(@Autowired DataSource source) throws Exception {

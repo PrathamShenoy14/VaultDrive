@@ -15,7 +15,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.dao.OptimisticLockingFailureException;
 
 import java.util.List;
 import java.util.UUID;
@@ -335,124 +334,6 @@ class FileHierarchyConcurrencyIntegrationTest {
             startSignal.countDown();
             executor.shutdownNow();
             deleteRestoreFixture(completeFixture);
-        }
-    }
-
-    @Test
-    void uploadReservationCompletesBeforeConcurrentDestinationTrash()
-            throws Exception {
-        UploadFixture fixture = createUploadFixture("reserve-before-trash");
-        CountDownLatch reservationFlushed = new CountDownLatch(1);
-        CountDownLatch releaseReservation = new CountDownLatch(1);
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-
-        try {
-            Future<?> reservation = executor.submit(() ->
-                    inTransaction(() -> {
-                        fileMetadataService.createUploading(fixture.file());
-                        reservationFlushed.countDown();
-                        await(releaseReservation);
-                    })
-            );
-
-            assertThat(reservationFlushed.await(5, TimeUnit.SECONDS)).isTrue();
-
-            Future<?> trash = executor.submit(() ->
-                    folderService.deleteFolder(
-                            fixture.ownerId(),
-                            fixture.folderId()
-                    )
-            );
-
-            assertThatThrownBy(() -> trash.get(500, TimeUnit.MILLISECONDS))
-                    .isInstanceOf(java.util.concurrent.TimeoutException.class);
-
-            releaseReservation.countDown();
-            reservation.get(5, TimeUnit.SECONDS);
-            trash.get(5, TimeUnit.SECONDS);
-
-            StoredFile persisted = requireFile(fixture.file().getId());
-            assertThat(persisted.getStatus()).isEqualTo(FileStatus.UPLOADING);
-            assertThat(folderRepository.findById(fixture.folderId())
-                    .orElseThrow().getDeletedAt()).isNotNull();
-        } finally {
-            releaseReservation.countDown();
-            executor.shutdownNow();
-            deleteUploadFixture(fixture);
-        }
-    }
-
-    @Test
-    void folderTrashDuringObjectTransferPreventsReadyFinalization() {
-        UploadFixture fixture = createUploadFixture("trash-before-ready");
-
-        try {
-            StoredFile reservation =
-                    fileMetadataService.createUploading(fixture.file());
-
-            folderService.deleteFolder(
-                    fixture.ownerId(),
-                    fixture.folderId()
-            );
-
-            assertThatThrownBy(() ->
-                    fileMetadataService.markReady(reservation)
-            ).isInstanceOf(
-                    com.vaultdrive.file.exception
-                            .UploadFinalizationRejectedException.class
-            );
-
-            StoredFile persisted = requireFile(reservation.getId());
-            assertThat(persisted.getStatus()).isEqualTo(FileStatus.FAILED);
-            assertThat(persisted.getVersion()).isEqualTo(1L);
-        } finally {
-            deleteUploadFixture(fixture);
-        }
-    }
-
-    @Test
-    void competingUploadFinalizationsAllowExactlyOneTransition()
-            throws Exception {
-        UploadFixture fixture = createUploadFixture("competing-finalization");
-        StoredFile reservation =
-                fileMetadataService.createUploading(fixture.file());
-        CountDownLatch readyUpdated = new CountDownLatch(1);
-        CountDownLatch releaseReady = new CountDownLatch(1);
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-
-        try {
-            Future<?> ready = executor.submit(() ->
-                    inTransaction(() -> {
-                        fileMetadataService.markReady(reservation);
-                        readyUpdated.countDown();
-                        await(releaseReady);
-                    })
-            );
-
-            assertThat(readyUpdated.await(5, TimeUnit.SECONDS)).isTrue();
-
-            Future<?> failed = executor.submit(() ->
-                    fileMetadataService.markFailed(reservation)
-            );
-
-            assertThatThrownBy(() -> failed.get(500, TimeUnit.MILLISECONDS))
-                    .isInstanceOf(java.util.concurrent.TimeoutException.class);
-
-            releaseReady.countDown();
-            ready.get(5, TimeUnit.SECONDS);
-
-            assertThatThrownBy(() -> failed.get(5, TimeUnit.SECONDS))
-                    .hasRootCauseInstanceOf(
-                            OptimisticLockingFailureException.class
-                    );
-
-            StoredFile persisted = requireFile(reservation.getId());
-            assertThat(persisted.getStatus()).isEqualTo(FileStatus.READY);
-            assertThat(persisted.getVersion()).isEqualTo(1L);
-        } finally {
-            releaseReady.countDown();
-            executor.shutdownNow();
-            deleteUploadFixture(fixture);
         }
     }
 

@@ -1,5 +1,7 @@
 # ADR-0008: Transactional outbox and durable asynchronous jobs
 
+Current consolidation: [ADR-0010](0010-backend-consolidation.md) retires synchronous new-upload admission/PUT and foreground receipt creation. Historical phase descriptions below remain records of their original revisions; retained receipts, recovery and locking guarantees still apply. Current new uploads use direct multipart only.
+
 - Status: Accepted; broker/outbox/job/consumer/worker foundation, trusted-writer file byte purge and standalone metadata finalization, folder discovery/file byte execution implemented; folder metadata removal and durable finalization implemented
 - Date: 2026-10-09
 

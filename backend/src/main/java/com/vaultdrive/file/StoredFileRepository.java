@@ -68,24 +68,6 @@ public interface StoredFileRepository
             UUID excludedFileId
     );
 
-    Optional<StoredFile> findByIdAndOwnerIdAndDeletedAtIsNull(
-            UUID id,
-            UUID ownerId
-    );
-
-    Page<StoredFile> findByOwnerIdAndFolderIdAndStatusAndDeletedAtIsNull(
-            UUID ownerId,
-            UUID folderId,
-            FileStatus status,
-            Pageable pageable
-    );
-
-    Page<StoredFile> findByOwnerIdAndFolderIdIsNullAndStatusAndDeletedAtIsNull(
-            UUID ownerId,
-            FileStatus status,
-            Pageable pageable
-    );
-
     Optional<StoredFile> findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
             UUID id,
             UUID ownerId,
@@ -97,14 +79,6 @@ public interface StoredFileRepository
             FileStatus status,
             Pageable pageable
     );
-
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("""
-            select file from StoredFile file where file.id = :id and file.ownerId = :owner
-                and file.status = com.vaultdrive.file.FileStatus.UPLOADING
-                and file.deletedAt is null and file.purgeRequestedAt is null
-            """)
-    Optional<StoredFile> findUploadingForStorageWrite(@Param("id") UUID id, @Param("owner") UUID owner);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<StoredFile> findByIdAndOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(

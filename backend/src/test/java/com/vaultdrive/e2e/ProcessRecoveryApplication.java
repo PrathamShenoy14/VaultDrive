@@ -381,7 +381,7 @@ public final class ProcessRecoveryApplication {
             for (Path allocation : allocations) {
                 UUID file = UUID.fromString(allocation.getFileName().toString().substring("allocation-".length()));
                 UUID owner = UUID.fromString(Files.readString(allocation));
-                try { ctx.getBean(ObjectStorageService.class).delete(key(schema, owner, file)); }
+                try { ctx.getBean(ObjectStorageService.class).delete(ctx.getBean(com.vaultdrive.storage.StorageBinding.class).target(key(schema, owner, file))); }
                 catch (RuntimeException failure) { clean = false; }
             }
             require(clean, "Owned object cleanup failed; preserve schema and journal");

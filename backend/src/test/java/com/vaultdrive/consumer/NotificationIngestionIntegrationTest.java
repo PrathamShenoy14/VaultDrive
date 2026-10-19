@@ -140,7 +140,7 @@ class NotificationIngestionIntegrationTest {
             case "identity" -> jobs.create(event.getId(), com.vaultdrive.job.JobType.FOLDER_PURGE, UUID.randomUUID());
         }
         var message = new org.springframework.amqp.core.Message(mapper.writeValueAsBytes(json), original.getMessageProperties());
-        String digest = PurgeNotificationListener.digest(message.getBody());
+        String digest = NotificationDelivery.digest(message.getBody());
         hashes.add(digest);
         Channel channel = mock(Channel.class);
         doAnswer(call -> {
@@ -164,7 +164,7 @@ class NotificationIngestionIntegrationTest {
     void quarantineConstraintsRejectInvalidHashAndReason() {
         assertThatThrownBy(() -> ingestor.quarantine("invalid", new InvalidNotification(
                 InvalidNotification.Reason.MALFORMED, null))).hasRootCauseInstanceOf(java.sql.SQLException.class);
-        String hash = PurgeNotificationListener.digest(new byte[]{42});
+        String hash = NotificationDelivery.digest(new byte[]{42});
         hashes.add(hash);
         ingestor.quarantine(hash, new InvalidNotification(InvalidNotification.Reason.MALFORMED, null));
         assertThatThrownBy(() -> transaction().executeWithoutResult(status -> entityManager.createNativeQuery(
@@ -210,6 +210,6 @@ class NotificationIngestionIntegrationTest {
     private long quarantineCount(org.springframework.amqp.core.Message message) {
         return transaction().execute(status -> ((Number) entityManager.createNativeQuery(
                 "SELECT count(*) FROM notification_quarantine WHERE body_sha256 = :hash")
-                .setParameter("hash", PurgeNotificationListener.digest(message.getBody())).getSingleResult()).longValue());
+                .setParameter("hash", NotificationDelivery.digest(message.getBody())).getSingleResult()).longValue());
     }
 }

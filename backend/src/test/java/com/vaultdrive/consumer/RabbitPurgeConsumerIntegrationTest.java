@@ -150,8 +150,8 @@ class RabbitPurgeConsumerIntegrationTest {
         json.put("payloadVersion", 99);
         var version = new Message(mapper.writeValueAsBytes(json), valid.getMessageProperties());
         var malformed = new Message("invalid private payload".getBytes(java.nio.charset.StandardCharsets.UTF_8), new MessageProperties());
-        hashes.add(PurgeNotificationListener.digest(version.getBody()));
-        hashes.add(PurgeNotificationListener.digest(malformed.getBody()));
+        hashes.add(NotificationDelivery.digest(version.getBody()));
+        hashes.add(NotificationDelivery.digest(malformed.getBody()));
         CountDownLatch acked = new CountDownLatch(2);
         start(new PurgeNotificationListener(ingestor, mapper, 1) {
             @Override public void onMessage(Message message, Channel channel) {

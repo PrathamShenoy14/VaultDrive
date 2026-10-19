@@ -92,7 +92,7 @@ class MultipartCompletionIntegrationTest {
         when(storage.inspectMultipartObject(any())).thenAnswer(call -> { assertNoTransaction(); return evidence(session); });
     }
     @AfterEach void preserveProtocolFences() {
-        verify(storage, never()).delete(any(StorageTarget.class)); verify(storage, never()).delete(anyString());
+        verify(storage, never()).delete(any(StorageTarget.class));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM file_storage_objects WHERE owner_id = ? "
                 + "AND (put_succeeded_at IS NOT NULL OR admitted_file_version IS NOT NULL)", Integer.class, owner)).isZero();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM upload_cleanup_intents WHERE file_id = ?", Integer.class, session.fileId())).isZero();

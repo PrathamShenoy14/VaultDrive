@@ -21,7 +21,7 @@ public class FolderPurgeDiscovery {
         }
         var batch = discovery.discover(context, discovery.checkpointVersion(context.claim()), pageSize);
         context.checkActive();
-        if (!batch.advanced()) { throw new IllegalStateException("Folder byte execution is not implemented"); }
+        if (!batch.advanced()) { throw new IllegalStateException("Folder discovery made no progress"); }
         return JobHandler.Result.CONTINUE; // Including the sealed phase checkpoint; never claim purge SUCCESS.
     }
 }

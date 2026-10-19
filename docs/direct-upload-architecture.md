@@ -1,5 +1,7 @@
 # Direct upload and resumability architecture — Phase 3A
 
+Consolidation update: [the backend audit](backend-consolidation.md) retires synchronous upload admission/PUT and foreground receipt creation. New uploads use direct multipart only. Earlier flow descriptions, commands and verification totals below are historical milestone evidence; retained historical readers/receipts/expiry/cleanup remain supported where stated in the audit.
+
 Design report preserved from the Phase 3A chat investigation. Reviewed repository
 baseline: `5ea54e1`, including V26. This is a proposal, not implemented behavior.
 “Verified repository behavior” means source/test inspection, not a new test run.

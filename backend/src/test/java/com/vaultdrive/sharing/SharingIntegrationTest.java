@@ -1,5 +1,8 @@
 package com.vaultdrive.sharing;
 
+import org.springframework.context.annotation.Import;
+
+import com.vaultdrive.support.HistoricalUploadFixtures;
 import com.vaultdrive.file.*;
 import com.vaultdrive.file.exception.FileNotFoundException;
 import com.vaultdrive.folder.*;
@@ -25,11 +28,14 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+@Import(HistoricalUploadFixtures.class)
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
 class SharingIntegrationTest {
+    @Autowired HistoricalUploadFixtures history;
+
     @Autowired UserRepository users;
     @Autowired FolderRepository folders;
     @Autowired StoredFileRepository files;
@@ -39,7 +45,6 @@ class SharingIntegrationTest {
     @Autowired FolderService folderService;
     @Autowired EntityManager em;
     @Autowired MockMvc mvc;
-    @Autowired com.vaultdrive.storage.FileStorageIdentityService identity;
     UUID owner, viewer, stranger;
     Folder privateParent, shared, child, sibling;
     StoredFile file;
@@ -246,7 +251,7 @@ class SharingIntegrationTest {
 
     @Test
     void metadataDeletionCascadesOnlyTargetGrants() {
-        identity.reserve(file);
+        history.allocation(file);
         grant(false, file.getId(), ResourceRole.VIEWER);
         grant(true, shared.getId(), ResourceRole.VIEWER);
         files.delete(file); files.flush();
@@ -337,7 +342,8 @@ class SharingIntegrationTest {
         assertThat(file.getName()).isEqualTo("file.txt");
         assertThat(file.getFolderId()).isEqualTo(child.getId());
         assertThat(file.getDeletedAt()).isNull();
-        assertThat(folders.findByOwnerIdAndParentFolderIdAndDeletedAtIsNull(owner, shared.getId())).hasSize(1);
+        assertThat(folders.findAll().stream().filter(f -> f.getOwnerId().equals(owner)
+                && shared.getId().equals(f.getParentFolderId()) && f.getDeletedAt() == null).toList()).hasSize(1);
     }
 
     @Test
@@ -355,7 +361,8 @@ class SharingIntegrationTest {
         assertThat(reads.files(owner, child.getId(), 9, 1).totalElements()).isEqualTo(2);
         folder(shared.getId(), "\u03c3");
         folder(shared.getId(), "\u03c2");
-        var expected = folders.findByOwnerIdAndParentFolderIdAndDeletedAtIsNull(owner, shared.getId()).stream()
+        var expected = folders.findAll().stream().filter(f -> f.getOwnerId().equals(owner)
+                && shared.getId().equals(f.getParentFolderId()) && f.getDeletedAt() == null).toList().stream()
                 .sorted(java.util.Comparator.comparing(Folder::getName, String.CASE_INSENSITIVE_ORDER)
                         .thenComparing(Folder::getName).thenComparing(Folder::getId)).map(Folder::getId).toList();
         assertThat(reads.folders(viewer, shared.getId())).extracting("id").containsExactlyElementsOf(expected);
@@ -382,7 +389,6 @@ class SharingIntegrationTest {
                 .andExpect(jsonPath("$.content[0].resource.effectiveRole").value("VIEWER"));
     }
 
-
     @Test
     void editorCreatesOwnerOwnedFoldersWithInheritedAccessButNoIndependentCreatorGrant() throws Exception {
         var source = grant(true, shared.getId(), ResourceRole.EDITOR);
@@ -396,7 +402,8 @@ class SharingIntegrationTest {
         mvc.perform(post("/api/v1/folders").with(as(viewer)).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"http-created\",\"parentFolderId\":\"" + shared.getId() + "\"}"))
                 .andExpect(status().isCreated());
-        assertThat(folders.findByOwnerIdAndParentFolderIdAndDeletedAtIsNull(owner, shared.getId()))
+        assertThat(folders.findAll().stream().filter(f -> f.getOwnerId().equals(owner)
+                && shared.getId().equals(f.getParentFolderId()) && f.getDeletedAt() == null).toList())
                 .extracting(Folder::getName).contains("http-created");
         grants.revoke(owner, true, shared.getId(), source.id());
         mvc.perform(get("/api/v1/folders/{id}", created).with(as(viewer))).andExpect(status().isNotFound());
@@ -496,7 +503,7 @@ class SharingIntegrationTest {
         mvc.perform(get("/api/v1/trash/folders").with(as(viewer))).andExpect(status().isOk())
                 .andExpect(jsonPath("$").isEmpty());
         mvc.perform(multipart("/api/v1/files").file(new org.springframework.mock.web.MockMultipartFile("file", "no.txt", "text/plain", new byte[]{1})).param("folderId", child.getId().toString())
-                .with(as(viewer))).andExpect(status().isNotFound());
+                .with(as(viewer))).andExpect(status().isMethodNotAllowed());
         mvc.perform(post("/api/v1/upload-sessions").with(as(viewer)).header("Idempotency-Key", UUID.randomUUID().toString())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"folderId\":\"" + child.getId()
                         + "\",\"name\":\"no.txt\",\"size\":1,\"contentType\":\"text/plain\"}"))
@@ -549,7 +556,6 @@ class SharingIntegrationTest {
         assertEditorBarriers();
         assertThat(files.findById(file.getId()).orElseThrow().getName()).isEqualTo("direct.txt");
     }
-
 
     @Test
     void editorNamespaceConflictsRemainOwnerScopedAndIncompleteFilesStayInaccessible() throws Exception {

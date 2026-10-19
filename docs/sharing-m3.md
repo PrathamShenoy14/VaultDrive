@@ -1,5 +1,7 @@
 # Sharing M3: delegated multipart uploads
 
+Consolidation update: [the backend milestone](backend-consolidation.md) has retired synchronous upload. New uploads use direct multipart only. Earlier ownership and retirement statements below preserve the original sharing milestone boundary; retained historical storage/recovery evidence is unchanged.
+
 Implemented under the [approved sharing design](sharing-permissions-design.md).
 This extends [M1 grants](sharing-m1.md), [M2 Editor mutations](sharing-m2.md)
 and the existing multipart lifecycle. [M4](sharing-m4.md) subsequently adds secure

@@ -1,5 +1,7 @@
 # Upload success receipts and finalization recovery (Phase 2E.5B3)
 
+Consolidation update: [the backend audit](backend-consolidation.md) retires synchronous upload admission/PUT and foreground receipt creation. New uploads use direct multipart only. Earlier flow descriptions, commands and verification totals below are historical milestone evidence; retained historical readers/receipts/expiry/cleanup remain supported where stated in the audit.
+
 Follow-up: [B4B](known-success-upload-cleanup.md) now adds explicit cleanup only for
 matching receipt-backed FAILED uploads. UPLOADING recovery and its restore behavior
 remain unchanged. The original B3 implementation/evidence record below is historical.

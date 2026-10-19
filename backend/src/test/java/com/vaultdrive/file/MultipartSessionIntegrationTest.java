@@ -1,5 +1,8 @@
 package com.vaultdrive.file;
 
+import org.springframework.context.annotation.Import;
+
+import com.vaultdrive.support.HistoricalUploadFixtures;
 import com.vaultdrive.file.MultipartSessionService.*;
 import com.vaultdrive.file.exception.FileNotFoundException;
 import com.vaultdrive.folder.FolderService;
@@ -7,7 +10,6 @@ import com.vaultdrive.hierarchy.HierarchyCoordinator;
 import com.vaultdrive.storage.*;
 import com.vaultdrive.user.User;
 import com.vaultdrive.user.UserRepository;
-import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -34,11 +36,14 @@ import java.util.function.Supplier;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+@Import(HistoricalUploadFixtures.class)
 @SpringBootTest
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Timeout(30)
 class MultipartSessionIntegrationTest {
+    @Autowired HistoricalUploadFixtures history;
+
     private static final String SCHEMA = "multipart_m1_" + UUID.randomUUID().toString().replace("-", "");
     @DynamicPropertySource static void isolate(DynamicPropertyRegistry r) {
         r.add("spring.datasource.url", () -> "jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=" + SCHEMA);
@@ -47,7 +52,6 @@ class MultipartSessionIntegrationTest {
     }
     @Autowired MultipartSessionService sessions;
     @Autowired FileStorageIdentityService identity;
-    @Autowired FileMetadataService metadata;
     @Autowired StoredFileRepository files;
     @Autowired UploadFinalizationTransactions receipts;
     @Autowired StaleUploadExpiryTransactions expiry;
@@ -55,7 +59,6 @@ class MultipartSessionIntegrationTest {
     @Autowired FolderService folders;
     @Autowired UserRepository users;
     @Autowired HierarchyCoordinator hierarchy;
-    @Autowired EntityManager em;
     @Autowired JdbcTemplate jdbc;
     @Autowired PlatformTransactionManager manager;
     @Autowired DataSource source;
@@ -273,13 +276,12 @@ class MultipartSessionIntegrationTest {
     @Test void legacyAdmissionReceiptExpiryRecoveryCleanupAndReadyCannotAdoptMultipart() {
         var reserved = reserve("key", "a");
         var file = files.findById(reserved.fileId()).orElseThrow();
-        assertThatThrownBy(() -> identity.beginWrite(file.getStorageKey())).isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> receipts.recordSuccess(file)).isInstanceOf(IllegalStateException.class);
-        assertThat(receipts.hasSuccess(file)).isFalse();
+        assertThatThrownBy(() -> history.admission(file.getStorageKey())).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> history.receipt(file)).isInstanceOf(RuntimeException.class);
         assertThat(receipts.recover(file.getId())).isEqualTo(UploadFinalizationTransactions.Outcome.NO_RECEIPT);
         assertThat(expiry.expire(file.getId())).isEqualTo(StaleUploadExpiryTransactions.Outcome.INCONSISTENT);
         assertThat(cleanup.prepare(file.getId()).outcome()).isEqualTo(KnownSuccessCleanupTransactions.Outcome.BLOCKED);
-        assertThatThrownBy(() -> metadata.markReady(file)).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> history.status(file, FileStatus.READY)).isInstanceOf(RuntimeException.class);
         assertSqlRejected("UPDATE files SET status = 'READY' WHERE id = ?", file.getId());
         assertSqlRejected("DELETE FROM files WHERE id = ?", file.getId());
         assertSqlRejected("UPDATE file_storage_objects SET upload_protocol = 'SERVER_PUT' WHERE file_id = ?", file.getId());
