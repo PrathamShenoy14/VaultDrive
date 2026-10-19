@@ -152,7 +152,7 @@ Example authorization header:
 Authorization: Bearer <access_token>
 ```
 
-Access tokens expire after 30 minutes by default; refresh families expire after 30 days.
+Access tokens expire after 30 minutes by default; refresh families expire after seven days, without extension on rotation.
 
 ## Getting Started
 

@@ -4,8 +4,14 @@
 
 Access tokens remain HS256 Authorization bearer JWTs with UUID subjects and now
 carry unique UUID `jti` claims. Login/refresh tokens also carry a session UUID
-`sid`. Access lifetime is 30 minutes; refresh families have a fixed 30-day
+`sid`. Access lifetime is 30 minutes; refresh families have a fixed seven-day
 absolute lifetime (rotation does not extend it).
+The same seven-day value controls database creation and the initial cookie's
+604800-second Max-Age. Rotated cookies receive only the family's remaining time.
+Refresh eligibility also caps older families at created_at plus seven days, even
+if their stored expiry is later; no existing expiration is extended or backfilled.
+This bound is fixed by `SessionService.REFRESH_SECONDS`; no refresh-lifetime
+configuration override can increase it. The existing 30-minute access setting is unchanged.
 
 Browser refresh transport is only the `__Host-vaultdrive-refresh` cookie:
 Secure, HttpOnly, SameSite=Strict, Path=/, no Domain. HTTPS is required. Raw
@@ -161,8 +167,8 @@ schema with the same three schema properties and the existing safe Garage and
 RabbitMQ gates documented in [Sharing M6 verification](sharing-m6.md#verification).
 All production publisher/consumer/worker defaults remain disabled.
 
-Executed on 2026-10-19 against PostgreSQL 17.11 and the inspected Garage 2.3.0
-development service:
+Original milestone verification, before the seven-day correction below, executed
+on 2026-10-19 against PostgreSQL 17.11 and the inspected Garage 2.3.0 service:
 
 - Final focused run: **50 passed**, no failures/errors/skips, including 25 new
   isolated PostgreSQL/HTTP session checks.
@@ -189,3 +195,20 @@ The following separately gated checks were not run:
 The end-to-end harness login request was updated for the new client header; the
 gated harness itself was not rerun. No browser UI, browser multipart feature,
 deployment, key rotation, account-state control or general rate limiter is added.
+
+## Seven-day lifetime correction verification
+
+On 2026-10-19, the corrected lifetime passed **52 focused authentication tests**
+and the full safely runnable suite: **1,386 tests; 1,365 passed, 21 gated skips**,
+with no failures/errors. The same four separately gated suites listed above
+remain skipped; live isolated RabbitMQ and gated Garage multipart checks ran.
+Focused/default test contexts used `auth_7d_focused`; the full run used
+`auth_7d_verification` with the three schema properties documented above. The HTTP
+session tests retained their own UUID-named schemas.
+
+Regression checks assert exactly seven days between new family creation and
+expiry, initial cookie Max-Age 604800, unchanged stored expiry across repeated
+rotation, shortened remaining cookie age, and rejection of older families beyond
+seven days despite a later stored expiry. Existing replay, revocation, cookie/CSRF
+and concurrency checks passed. No migration, lock-order, access-token lifetime or
+infrastructure-default change was needed. Whitespace and local Markdown links passed.

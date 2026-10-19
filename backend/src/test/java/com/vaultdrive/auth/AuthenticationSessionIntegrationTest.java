@@ -70,7 +70,7 @@ class AuthenticationSessionIntegrationTest {
         assertThat(mapper.readTree(response.body()).get("expiresIn").asLong()).isEqualTo(1800);
         assertThat(response.body()).doesNotContain(login.refresh(), login.csrf(), "refreshToken", "password");
         assertThat(response.headers().firstValue("Set-Cookie").orElseThrow())
-                .contains("Secure", "HttpOnly", "SameSite=Strict", "Path=/", "Max-Age=2592000").doesNotContain("Domain=");
+                .contains("Secure", "HttpOnly", "SameSite=Strict", "Path=/", "Max-Age=604800").doesNotContain("Domain=");
         assertThat(response.headers().firstValue("Cache-Control")).contains("no-store");
         assertThat(SessionService.validSecret(login.refresh())).isTrue();
         assertThat(SessionService.validSecret(login.csrf())).isTrue();
@@ -79,9 +79,34 @@ class AuthenticationSessionIntegrationTest {
                 .isEqualTo(SessionService.hash(login.refresh())).isNotEqualTo(login.refresh());
         assertThat(jdbc.queryForObject("SELECT csrf_hash FROM auth_sessions WHERE id = ?", String.class, sid))
                 .isEqualTo(SessionService.hash(login.csrf()));
-        assertThat(jdbc.queryForObject("SELECT expires_at - created_at <= interval '30 days 1 second' FROM auth_sessions WHERE id = ?",
+        assertThat(jdbc.queryForObject("SELECT expires_at - created_at = interval '7 days' FROM auth_sessions WHERE id = ?",
                 Boolean.class, sid)).isTrue();
         assertThat(sessions.create(user).toString()).isEqualTo("IssuedSession[REDACTED]");
+    }
+
+    @Test void rotationPreservesOriginalExpirationAndOnlyReturnsRemainingCookieLifetime() throws Exception {
+        var first = login();
+        UUID session = sid(first);
+        jdbc.update("UPDATE auth_sessions SET created_at = statement_timestamp() - interval '6 days', expires_at = statement_timestamp() + interval '1 hour' WHERE id = ?", session);
+        Timestamp originalExpiry = jdbc.queryForObject("SELECT expires_at FROM auth_sessions WHERE id = ?", Timestamp.class, session);
+        var current = first;
+        for (int i = 0; i < 2; i++) {
+            var response = refresh(current);
+            current = credentials(response);
+            assertThat(jdbc.queryForObject("SELECT expires_at FROM auth_sessions WHERE id = ?", Timestamp.class, session)).isEqualTo(originalExpiry);
+            String cookie = response.headers().firstValue("Set-Cookie").orElseThrow();
+            long maxAge = Long.parseLong(cookie.split("Max-Age=", 2)[1].split(";", 2)[0]);
+            assertThat(maxAge).isBetween(1L, 3600L);
+            assertThat(maxAge).isLessThan(SessionService.REFRESH_SECONDS);
+        }
+    }
+
+    @Test void olderFamiliesCannotRefreshBeyondSevenDaysEvenWithLaterStoredExpiration() throws Exception {
+        var first = login();
+        UUID session = sid(first);
+        jdbc.update("UPDATE auth_sessions SET created_at = statement_timestamp() - interval '8 days', expires_at = statement_timestamp() + interval '22 days' WHERE id = ?", session);
+        assertThat(refresh(first).statusCode()).isEqualTo(401);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM auth_refresh_tokens WHERE session_id = ?", Integer.class, session)).isEqualTo(1);
     }
 
     @Test void invalidCredentialsHaveSameResponseForUnknownEmailAndWrongPassword() throws Exception {

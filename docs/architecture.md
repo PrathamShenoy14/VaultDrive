@@ -272,6 +272,7 @@ enablement is added. See [eligibility, state machine, invocation and limits](kno
 
 - Registration normalizes email addresses, enforces BCrypt's 72-byte input limit, hashes passwords, and relies on a case-insensitive PostgreSQL unique index.
 - Login verifies BCrypt hashes and issues 30-minute HS256 access JWTs with unique UUID `jti` and session `sid` claims.
+- Refresh families have a seven-day maximum absolute lifetime. Rotation preserves the original expiry and returns only the remaining cookie lifetime; older families are also capped at seven days from creation.
 - V37 stores refresh families, SHA-256 refresh/CSRF hashes, consumed-token history and indexed expiring jti revocations in PostgreSQL. Secure HttpOnly SameSite=Strict cookies carry 256-bit opaque refresh tokens; session-bound synchronizer headers protect refresh/logout and a custom login header prevents simple-request login CSRF.
 - Family row locks serialize rotation, replay and logout across instances. Reuse revokes only its family; logout atomically revokes the family and presented access JWT. Every JWT request checks PostgreSQL and fails closed when state is unavailable. Explicit cleanup removes bounded expired jti batches.
 - No server HTTP session is maintained. Registration, login, refresh and health are public routes with their documented credential/CSRF contracts. Sharing M4 retains its isolated public file-link GETs. Other endpoints require a valid bearer JWT.

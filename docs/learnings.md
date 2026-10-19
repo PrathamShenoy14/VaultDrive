@@ -674,3 +674,8 @@ cost. Cleanup must retain records through the decoder's clock tolerance. Fault
 injection verifies atomic logout and rotation rollback. Real HTTP also exposed
 servlet error redispatch changing intended 403/503 statuses to 401; direct auth
 exception responses preserve the documented contract. See [the session contract](authentication-sessions.md).
+
+The refresh-family lifetime correction uses one seven-day value for new database
+expirations and initial cookie age. Rotation retains the original database expiry
+and derives cookie age from remaining time. Capping eligibility by creation plus
+seven days also bounds older families without rewriting their stored expiration.

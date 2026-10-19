@@ -24,7 +24,7 @@ import java.util.function.Supplier;
 
 @Service
 public class SessionService {
-    public static final long REFRESH_SECONDS = 30L * 24 * 60 * 60;
+    public static final long REFRESH_SECONDS = 7L * 24 * 60 * 60;
     private final SecureRandom random = new SecureRandom();
     private final JdbcTemplate jdbc;
     private final JwtService jwt;
@@ -48,9 +48,9 @@ public class SessionService {
             UUID session = UUID.randomUUID();
             String refresh = secret(), csrf = secret();
             jdbc.update("""
-                    INSERT INTO auth_sessions(id, user_id, csrf_hash, expires_at)
-                    VALUES (?, ?, ?, clock_timestamp() + interval '30 days')
-                    """, session, userId, hash(csrf));
+                    INSERT INTO auth_sessions(id, user_id, csrf_hash, created_at, expires_at)
+                    VALUES (?, ?, ?, statement_timestamp(), statement_timestamp() + ? * interval '1 second')
+                    """, session, userId, hash(csrf), REFRESH_SECONDS);
             insertToken(session, refresh);
             return new IssuedSession(refresh, csrf, jwt.generateAccessToken(userId, session), REFRESH_SECONDS);
         });
@@ -106,10 +106,11 @@ public class SessionService {
         jdbc.queryForObject("SELECT id FROM auth_sessions WHERE id = ? FOR UPDATE", UUID.class, ids.getFirst());
         var sessions = jdbc.query("""
                 SELECT id, user_id, csrf_hash, revoked_at IS NOT NULL AS revoked,
-                       floor(extract(epoch FROM expires_at - clock_timestamp()))::bigint AS remaining
+                       floor(extract(epoch FROM least(expires_at, created_at + ? * interval '1 second')
+                           - clock_timestamp()))::bigint AS remaining
                 FROM auth_sessions WHERE id = ?
                 """, (rs, row) -> new Session(rs.getObject("id", UUID.class), rs.getObject("user_id", UUID.class),
-                rs.getString("csrf_hash"), rs.getBoolean("revoked"), rs.getLong("remaining")), ids.getFirst());
+                rs.getString("csrf_hash"), rs.getBoolean("revoked"), rs.getLong("remaining")), REFRESH_SECONDS, ids.getFirst());
         return sessions.isEmpty() ? null : sessions.getFirst();
     }
 

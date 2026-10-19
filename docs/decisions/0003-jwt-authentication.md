@@ -53,8 +53,8 @@ adds a PostgreSQL availability dependency to authentication. Pre-milestone JWTs
 without jti require login again on rollout.
 
 Use 256-bit SecureRandom opaque refresh credentials and SHA-256 hashes, with
-30-day absolute family expiry. Retain consumed hashes to detect reuse. Lock the
-family, then freshly read its state and token, consume and replace in one
+seven-day maximum absolute family expiry, with no extension on rotation. Retain
+consumed hashes to detect reuse. Lock the family, then freshly read its state and token, consume and replace in one
 transaction. Commit family revocation before returning a replay error. No
 in-process mutex or grace window: concurrent refresh and lost-response retries
 have the same strict replay outcome. This follows the rotation trade-off in
