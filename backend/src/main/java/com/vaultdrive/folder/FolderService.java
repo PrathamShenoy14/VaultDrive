@@ -8,6 +8,7 @@ import com.vaultdrive.folder.exception.DuplicateFolderNameException;
 import com.vaultdrive.folder.exception.FolderNotFoundException;
 import com.vaultdrive.folder.exception.InvalidFolderMoveException;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
+import com.vaultdrive.sharing.ResourceReadService;
 import com.vaultdrive.outbox.OutboxEvent;
 import com.vaultdrive.outbox.OutboxWriter;
 import com.vaultdrive.worker.FolderPurgeRunService;
@@ -33,6 +34,7 @@ public class FolderService {
     private final HierarchyCoordinator hierarchyCoordinator;
     private final OutboxWriter outboxWriter;
     private final FolderPurgeRunService purgeRuns;
+    private final ResourceReadService resourceReads;
 
     public FolderService(
             FolderRepository folderRepository,
@@ -41,7 +43,8 @@ public class FolderService {
             UserRepository userRepository,
             HierarchyCoordinator hierarchyCoordinator,
             OutboxWriter outboxWriter,
-            FolderPurgeRunService purgeRuns
+            FolderPurgeRunService purgeRuns,
+            ResourceReadService resourceReads
     ) {
         this.folderRepository = folderRepository;
         this.folderAccessValidator = folderAccessValidator;
@@ -50,6 +53,7 @@ public class FolderService {
         this.hierarchyCoordinator = hierarchyCoordinator;
         this.outboxWriter = outboxWriter;
         this.purgeRuns = purgeRuns;
+        this.resourceReads = resourceReads;
     }
 
     @Transactional
@@ -59,6 +63,7 @@ public class FolderService {
             String name
     ) {
 
+        if (parentFolderId != null) resourceReads.requireOwner(ownerId, true, parentFolderId);
         lockFolderNamespace(ownerId);
         
         String normalizedName =
@@ -103,69 +108,16 @@ public class FolderService {
         return folder.getId();
     }
 
-    // Retrieve an individual folder.
-
-    @Transactional(readOnly = true)
-    public FolderResponse getFolder(
-            UUID ownerId,
-            UUID folderId
-    ) {
-
-        Folder folder =
-                folderAccessValidator.requireAccessibleFolder(
-                        ownerId,
-                        folderId
-                );
-        
-        return toResponse(folder);
+    public FolderResponse getFolder(UUID actorId, UUID folderId) {
+        return resourceReads.folder(actorId, folderId);
     }
 
-    // List the authenticated user's active root folders.
-
-    @Transactional(readOnly = true)
-    public List<FolderResponse> listRootFolders(UUID ownerId) {
-
-        return folderRepository
-                .findByOwnerIdAndParentFolderIdIsNullAndDeletedAtIsNull(
-                        ownerId
-                )
-                .stream()
-                .map(this::toResponse)
-                .toList();
+    public List<FolderResponse> listRootFolders(UUID actorId) {
+        return resourceReads.folders(actorId, null);
     }
 
-    @Transactional(readOnly = true)
-    public List<FolderResponse> listChildFolders(
-            UUID ownerId,
-            UUID parentFolderId
-    ) {
-
-        // A folder inside a deleted ancestor is inaccessible.
-
-        folderAccessValidator.requireAccessibleFolder(
-                ownerId,
-                parentFolderId
-        );
-
-        // Fetch only immediate, active children.
-
-        return folderRepository
-                .findByOwnerIdAndParentFolderIdAndDeletedAtIsNull(
-                        ownerId,
-                        parentFolderId
-                )
-                .stream()
-                .sorted(
-                        java.util.Comparator
-                                .comparing(
-                                        Folder::getName,
-                                        String.CASE_INSENSITIVE_ORDER
-                                )
-                                .thenComparing(Folder::getName)
-                                .thenComparing(Folder::getId)
-                )
-                .map(this::toResponse)
-                .toList();
+    public List<FolderResponse> listChildFolders(UUID actorId, UUID parentFolderId) {
+        return resourceReads.folders(actorId, parentFolderId);
     }
 
     @Transactional
@@ -175,6 +127,7 @@ public class FolderService {
             String newName
     ) {
 
+        resourceReads.requireOwner(ownerId, true, folderId);
         lockFolderNamespace(ownerId);
         
         // Validate and normalize the requested name.
@@ -233,6 +186,7 @@ public class FolderService {
             UUID destinationFolderId
     ) {
 
+        resourceReads.requireOwner(ownerId, true, folderId);
         lockFolderNamespace(ownerId);
         
         // 1. Verify ownership and ensure the source folder and its ancestors are active.
@@ -325,6 +279,7 @@ public class FolderService {
 
     @Transactional
     public void deleteFolder(UUID ownerId, UUID folderId) {
+        resourceReads.requireOwner(ownerId, true, folderId);
 
         lockFolderNamespace(ownerId);
     
@@ -369,6 +324,7 @@ public class FolderService {
             UUID folderId
     ) {
 
+        resourceReads.requireOwner(ownerId, true, folderId);
         lockFolderNamespace(ownerId);
         
         // Only explicitly deleted folders without pending purge can be restored.
@@ -430,6 +386,7 @@ public class FolderService {
             UUID folderId
     ) {
         purgeRuns.boundTransaction();
+        resourceReads.requireOwner(ownerId, true, folderId);
         lockFolderNamespace(ownerId);
 
         Folder folder = folderRepository

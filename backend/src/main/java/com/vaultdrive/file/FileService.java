@@ -9,6 +9,8 @@ import com.vaultdrive.file.exception.InvalidFilePaginationException;
 import com.vaultdrive.file.exception.FileNotFoundException;
 import com.vaultdrive.folder.FolderAccessValidator;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
+import com.vaultdrive.sharing.ResourceReadService;
+import com.vaultdrive.sharing.ResourceAccess;
 import com.vaultdrive.storage.ObjectStorageService;
 import com.vaultdrive.storage.StorageKeyGenerator;
 import com.vaultdrive.storage.StorageObject;
@@ -23,7 +25,6 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -40,6 +41,7 @@ public class FileService {
     private final FileNameExtensionResolver fileNameExtensionResolver;
     private final HierarchyCoordinator hierarchyCoordinator;
     private final UploadFinalizationRecovery uploadFinalization;
+    private final ResourceReadService resourceReads;
 
     public FileService(
             FolderAccessValidator folderAccessValidator,
@@ -50,7 +52,8 @@ public class FileService {
             StoredFileRepository storedFileRepository,
             FileNameExtensionResolver fileNameExtensionResolver,
             HierarchyCoordinator hierarchyCoordinator,
-            UploadFinalizationRecovery uploadFinalization
+            UploadFinalizationRecovery uploadFinalization,
+            ResourceReadService resourceReads
     ) {
         this.folderAccessValidator = folderAccessValidator;
         this.fileNameValidator = fileNameValidator;
@@ -61,6 +64,7 @@ public class FileService {
         this.fileNameExtensionResolver = fileNameExtensionResolver;
         this.hierarchyCoordinator = hierarchyCoordinator;
         this.uploadFinalization = uploadFinalization;
+        this.resourceReads = resourceReads;
     }
 
     public UploadFileResponse uploadFile(
@@ -139,97 +143,20 @@ public class FileService {
         );
     }
 
-    public FilePageResponse listFiles(
-            UUID ownerId,
-            UUID folderId,
-            int page,
-            int size
-    ) {
-        validatePagination(page, size);
-
-        validateFolderAccess(
-                ownerId,
-                folderId
-        );
-
-        Pageable pageable = PageRequest.of(
-                page,
-                size,
-                Sort.by("name").ascending()
-        );
-
-        Page<StoredFile> storedFiles;
-
-        if (folderId == null) {
-
-            storedFiles =
-                    storedFileRepository
-                            .findByOwnerIdAndFolderIdIsNullAndStatusAndDeletedAtIsNull(
-                                    ownerId,
-                                    FileStatus.READY,
-                                    pageable
-                            );
-
-        } else {
-
-            storedFiles =
-                    storedFileRepository
-                            .findByOwnerIdAndFolderIdAndStatusAndDeletedAtIsNull(
-                                    ownerId,
-                                    folderId,
-                                    FileStatus.READY,
-                                    pageable
-                            );
-        }
-
-        List<FileResponse> content =
-                storedFiles.getContent()
-                        .stream()
-                        .map(this::toFileResponse)
-                        .toList();
-
-        return new FilePageResponse(
-                content,
-                storedFiles.getNumber(),
-                storedFiles.getSize(),
-                storedFiles.getTotalElements(),
-                storedFiles.getTotalPages()
-        );
+    public FilePageResponse listFiles(UUID actorId, UUID folderId, int page, int size) {
+        return resourceReads.files(actorId, folderId, page, size);
     }
 
-    public FileDownload downloadFile(
-            UUID ownerId,
-            UUID fileId
-    ) {
-        StoredFile storedFile =
-                storedFileRepository
-                        .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
-                                fileId,
-                                ownerId,
-                                FileStatus.READY
-                        )
-                        .orElseThrow(() ->
-                                new FileNotFoundException(
-                                        "File not found"
-                                )
-                        );
-    
-        validateFolderAccess(
-                ownerId,
-                storedFile.getFolderId()
-        );
-    
-        StorageObject storageObject =
-                objectStorageService.download(
-                        storedFile.getStorageKey()
-                );
-    
-        return new FileDownload(
-                storedFile.getName(),
-                storedFile.getContentType(),
-                storedFile.getSizeBytes(),
-                storageObject.inputStream()
-        );
+    public FileResponse getFile(UUID actorId, UUID fileId) {
+        return resourceReads.file(actorId, fileId).fileResponse();
+    }
+
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NEVER)
+    public FileDownload downloadFile(UUID actorId, UUID fileId) {
+        ResourceAccess file = resourceReads.file(actorId, fileId);
+        // Authorization transaction has committed. An admitted stream may finish after revocation.
+        StorageObject storageObject = objectStorageService.download(file.storageKey());
+        return new FileDownload(file.name(), file.contentType(), file.sizeBytes(), storageObject.inputStream());
     }
 
     @Transactional
@@ -241,6 +168,7 @@ public class FileService {
         String normalizedRequestedName =
                 fileNameValidator.validateAndNormalize(newName);
 
+        resourceReads.requireOwner(ownerId, false, fileId);
         hierarchyCoordinator.acquireShared(ownerId);
 
         StoredFile storedFile =
@@ -283,6 +211,7 @@ public class FileService {
             UUID fileId,
             UUID destinationFolderId
     ) {
+        resourceReads.requireOwner(ownerId, false, fileId);
         hierarchyCoordinator.acquireShared(ownerId);
 
         StoredFile storedFile =
@@ -322,6 +251,7 @@ public class FileService {
             UUID ownerId,
             UUID fileId
     ) {
+        resourceReads.requireOwner(ownerId, false, fileId);
         hierarchyCoordinator.acquireShared(ownerId);
 
         StoredFile storedFile =
@@ -384,6 +314,7 @@ public class FileService {
             UUID ownerId,
             UUID fileId
     ) {
+        resourceReads.requireOwner(ownerId, false, fileId);
         StoredFile restoredFile =
                 fileMetadataService.restore(
                         ownerId,
@@ -397,6 +328,7 @@ public class FileService {
             UUID ownerId,
             UUID fileId
     ) {
+        resourceReads.requireOwner(ownerId, false, fileId);
         fileMetadataService.requestPermanentDeletion(
                 ownerId,
                 fileId

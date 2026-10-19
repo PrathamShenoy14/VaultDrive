@@ -73,6 +73,8 @@ class FileServiceTest {
     @Mock
     private UploadFinalizationRecovery uploadFinalization;
 
+    @Mock private com.vaultdrive.sharing.ResourceReadService resourceReads;
+
     private FileService fileService;
     private FileNameExtensionResolver fileNameExtensionResolver;
 
@@ -90,7 +92,8 @@ class FileServiceTest {
                 storedFileRepository,
                 fileNameExtensionResolver,
                 hierarchyCoordinator,
-                uploadFinalization
+                uploadFinalization,
+                resourceReads
         );
     }
 
@@ -646,439 +649,31 @@ class FileServiceTest {
     }
 
     @Test
-    void shouldListReadyFilesFromRoot() {
-        UUID ownerId = UUID.randomUUID();
-
-        StoredFile alpha = createReadyFile(
-                ownerId,
-                null,
-                "alpha.pdf"
-        );
-
-        StoredFile bravo = createReadyFile(
-                ownerId,
-                null,
-                "bravo.pdf"
-        );
-
-        Pageable expectedPageable = PageRequest.of(
-                0,
-                50,
-                Sort.by("name").ascending()
-        );
-
-        when(storedFileRepository
-                .findByOwnerIdAndFolderIdIsNullAndStatusAndDeletedAtIsNull(
-                        ownerId,
-                        FileStatus.READY,
-                        expectedPageable
-                ))
-                .thenReturn(
-                        new PageImpl<>(
-                                List.of(alpha, bravo),
-                                expectedPageable,
-                                2
-                        )
-                );
-
-        FilePageResponse response =
-                fileService.listFiles(
-                        ownerId,
-                        null,
-                        0,
-                        50
-                );
-
-        assertEquals(2, response.content().size());
-        assertEquals(0, response.page());
-        assertEquals(50, response.size());
-        assertEquals(2, response.totalElements());
-        assertEquals(1, response.totalPages());
-
-        FileResponse first = response.content().get(0);
-
-        assertEquals(alpha.getId(), first.id());
-        assertEquals("alpha.pdf", first.name());
-        assertNull(first.folderId());
-        assertEquals("application/pdf", first.contentType());
-        assertEquals(100L, first.sizeBytes());
-        assertEquals(alpha.getCreatedAt(), first.createdAt());
-        assertEquals(alpha.getUpdatedAt(), first.updatedAt());
-
-        assertEquals(
-                "bravo.pdf",
-                response.content().get(1).name()
-        );
-
-        verifyNoInteractions(folderAccessValidator);
-
-        verify(storedFileRepository)
-                .findByOwnerIdAndFolderIdIsNullAndStatusAndDeletedAtIsNull(
-                        ownerId,
-                        FileStatus.READY,
-                        expectedPageable
-                );
+    void readsDelegateToCurrentPermissionSnapshot() {
+        UUID actor = UUID.randomUUID(), folder = UUID.randomUUID();
+        FilePageResponse page = new FilePageResponse(List.of(), 0, 10, 0, 0);
+        when(resourceReads.files(actor, folder, 0, 10)).thenReturn(page);
+        assertSame(page, fileService.listFiles(actor, folder, 0, 10));
     }
 
     @Test
-    void shouldListReadyFilesFromAccessibleFolder() {
-        UUID ownerId = UUID.randomUUID();
-        UUID folderId = UUID.randomUUID();
-
-        Folder folder = mock(Folder.class);
-
-        when(folderAccessValidator.requireAccessibleFolder(
-                ownerId,
-                folderId
-        )).thenReturn(folder);
-
-        StoredFile file = createReadyFile(
-                ownerId,
-                folderId,
-                "resume.pdf"
-        );
-
-        Pageable expectedPageable = PageRequest.of(
-                0,
-                25,
-                Sort.by("name").ascending()
-        );
-
-        when(storedFileRepository
-                .findByOwnerIdAndFolderIdAndStatusAndDeletedAtIsNull(
-                        ownerId,
-                        folderId,
-                        FileStatus.READY,
-                        expectedPageable
-                ))
-                .thenReturn(
-                        new PageImpl<>(
-                                List.of(file),
-                                expectedPageable,
-                                30
-                        )
-                );
-
-        FilePageResponse response =
-                fileService.listFiles(
-                        ownerId,
-                        folderId,
-                        0,
-                        25
-                );
-
-        assertEquals(1, response.content().size());
-        assertEquals(0, response.page());
-        assertEquals(25, response.size());
-        assertEquals(30, response.totalElements());
-        assertEquals(2, response.totalPages());
-
-        FileResponse listedFile =
-                response.content().getFirst();
-
-        assertEquals(file.getId(), listedFile.id());
-        assertEquals("resume.pdf", listedFile.name());
-        assertEquals(folderId, listedFile.folderId());
-        assertEquals(
-                "application/pdf",
-                listedFile.contentType()
-        );
-        assertEquals(100L, listedFile.sizeBytes());
-
-        verify(folderAccessValidator)
-                .requireAccessibleFolder(
-                        ownerId,
-                        folderId
-                );
-
-        verify(storedFileRepository)
-                .findByOwnerIdAndFolderIdAndStatusAndDeletedAtIsNull(
-                        ownerId,
-                        folderId,
-                        FileStatus.READY,
-                        expectedPageable
-                );
+    void downloadUsesAuthorizedStorageIdentity() {
+        UUID actor = UUID.randomUUID(), fileId = UUID.randomUUID();
+        var snapshot = new com.vaultdrive.sharing.ResourceAccess(fileId, UUID.randomUUID(), null,
+                "shared.txt", "text/plain", 1, "opaque-key", java.time.Instant.now(), java.time.Instant.now(),
+                com.vaultdrive.sharing.ResourceRole.VIEWER, false, true);
+        when(resourceReads.file(actor, fileId)).thenReturn(snapshot);
+        InputStream bytes = new ByteArrayInputStream(new byte[]{1});
+        when(objectStorageService.download("opaque-key")).thenReturn(new StorageObject(bytes));
+        assertSame(bytes, fileService.downloadFile(actor, fileId).inputStream());
     }
 
     @Test
-    void shouldRejectListingWhenFolderIsNotAccessible() {
-        UUID ownerId = UUID.randomUUID();
-        UUID folderId = UUID.randomUUID();
-
-        when(folderAccessValidator.requireAccessibleFolder(
-                ownerId,
-                folderId
-        )).thenThrow(
-                new FolderNotFoundException(
-                        "Folder not found"
-                )
-        );
-
-        FolderNotFoundException exception =
-                assertThrows(
-                        FolderNotFoundException.class,
-                        () -> fileService.listFiles(
-                                ownerId,
-                                folderId,
-                                0,
-                                50
-                        )
-                );
-
-        assertEquals(
-                "Folder not found",
-                exception.getMessage()
-        );
-
-        verify(folderAccessValidator)
-                .requireAccessibleFolder(
-                        ownerId,
-                        folderId
-                );
-
-        verifyNoInteractions(storedFileRepository);
-    }
-
-    @Test
-    void shouldRejectNegativePageNumber() {
-        UUID ownerId = UUID.randomUUID();
-
-        InvalidFilePaginationException exception =
-                assertThrows(
-                        InvalidFilePaginationException.class,
-                        () -> fileService.listFiles(
-                                ownerId,
-                                null,
-                                -1,
-                                50
-                        )
-                );
-
-        assertEquals(
-                "Page must be greater than or equal to 0",
-                exception.getMessage()
-        );
-
-        verifyNoInteractions(folderAccessValidator);
-        verifyNoInteractions(storedFileRepository);
-    }
-
-    @Test
-    void shouldRejectPageSizeBelowOne() {
-        UUID ownerId = UUID.randomUUID();
-
-        InvalidFilePaginationException exception =
-                assertThrows(
-                        InvalidFilePaginationException.class,
-                        () -> fileService.listFiles(
-                                ownerId,
-                                null,
-                                0,
-                                0
-                        )
-                );
-
-        assertEquals(
-                "Size must be between 1 and 100",
-                exception.getMessage()
-        );
-
-        verifyNoInteractions(folderAccessValidator);
-        verifyNoInteractions(storedFileRepository);
-    }
-
-    @Test
-    void shouldRejectPageSizeAboveMaximum() {
-        UUID ownerId = UUID.randomUUID();
-
-        InvalidFilePaginationException exception =
-                assertThrows(
-                        InvalidFilePaginationException.class,
-                        () -> fileService.listFiles(
-                                ownerId,
-                                null,
-                                0,
-                                101
-                        )
-                );
-
-        assertEquals(
-                "Size must be between 1 and 100",
-                exception.getMessage()
-        );
-
-        verifyNoInteractions(folderAccessValidator);
-        verifyNoInteractions(storedFileRepository);
-    }
-
-    @Test
-    void shouldDownloadReadyRootFile() throws Exception {
-        UUID ownerId = UUID.randomUUID();
-    
-        StoredFile storedFile = createReadyFile(
-                ownerId,
-                null,
-                "report.pdf"
-        );
-    
-        byte[] content = "pdf-content"
-                .getBytes(StandardCharsets.UTF_8);
-    
-        InputStream inputStream =
-                new ByteArrayInputStream(content);
-    
-        when(storedFileRepository
-                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
-                        storedFile.getId(),
-                        ownerId,
-                        FileStatus.READY
-                ))
-                .thenReturn(java.util.Optional.of(storedFile));
-    
-        when(objectStorageService.download(
-                storedFile.getStorageKey()
-        )).thenReturn(
-                new StorageObject(inputStream)
-        );
-    
-        FileDownload download =
-                fileService.downloadFile(
-                        ownerId,
-                        storedFile.getId()
-                );
-    
-        assertEquals("report.pdf", download.name());
-        assertEquals(
-                "application/pdf",
-                download.contentType()
-        );
-        assertEquals(100L, download.sizeBytes());
-        assertSame(inputStream, download.inputStream());
-    
-        verifyNoInteractions(folderAccessValidator);
-    
-        verify(objectStorageService).download(
-                storedFile.getStorageKey()
-        );
-    }
-    
-    @Test
-    void shouldDownloadReadyFileFromAccessibleFolder() {
-        UUID ownerId = UUID.randomUUID();
-        UUID folderId = UUID.randomUUID();
-    
-        StoredFile storedFile = createReadyFile(
-                ownerId,
-                folderId,
-                "resume.pdf"
-        );
-    
-        when(storedFileRepository
-                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
-                        storedFile.getId(),
-                        ownerId,
-                        FileStatus.READY
-                ))
-                .thenReturn(java.util.Optional.of(storedFile));
-    
-        when(objectStorageService.download(
-                storedFile.getStorageKey()
-        )).thenReturn(
-                new StorageObject(
-                        new ByteArrayInputStream(
-                                new byte[]{1, 2, 3}
-                        )
-                )
-        );
-    
-        FileDownload download =
-                fileService.downloadFile(
-                        ownerId,
-                        storedFile.getId()
-                );
-    
-        assertEquals("resume.pdf", download.name());
-    
-        verify(folderAccessValidator)
-                .requireAccessibleFolder(
-                        ownerId,
-                        folderId
-                );
-    
-        verify(objectStorageService).download(
-                storedFile.getStorageKey()
-        );
-    }
-    
-    @Test
-    void shouldRejectDownloadWhenFileIsNotVisible() {
-        UUID ownerId = UUID.randomUUID();
-        UUID fileId = UUID.randomUUID();
-    
-        when(storedFileRepository
-                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
-                        fileId,
-                        ownerId,
-                        FileStatus.READY
-                ))
-                .thenReturn(java.util.Optional.empty());
-    
-        FileNotFoundException exception =
-                assertThrows(
-                        FileNotFoundException.class,
-                        () -> fileService.downloadFile(
-                                ownerId,
-                                fileId
-                        )
-                );
-    
-        assertEquals(
-                "File not found",
-                exception.getMessage()
-        );
-    
-        verifyNoInteractions(folderAccessValidator);
+    void deniedDownloadNeverCallsStorage() {
+        UUID actor = UUID.randomUUID(), fileId = UUID.randomUUID();
+        when(resourceReads.file(actor, fileId)).thenThrow(new FileNotFoundException("File not found"));
+        assertThrows(FileNotFoundException.class, () -> fileService.downloadFile(actor, fileId));
         verifyNoInteractions(objectStorageService);
-    }
-    
-    @Test
-    void shouldNotAccessStorageWhenDownloadFolderIsInaccessible() {
-        UUID ownerId = UUID.randomUUID();
-        UUID folderId = UUID.randomUUID();
-    
-        StoredFile storedFile = createReadyFile(
-                ownerId,
-                folderId,
-                "secret.pdf"
-        );
-    
-        when(storedFileRepository
-                .findByIdAndOwnerIdAndStatusAndDeletedAtIsNull(
-                        storedFile.getId(),
-                        ownerId,
-                        FileStatus.READY
-                ))
-                .thenReturn(java.util.Optional.of(storedFile));
-    
-        when(folderAccessValidator.requireAccessibleFolder(
-                ownerId,
-                folderId
-        )).thenThrow(
-                new FolderNotFoundException(
-                        "Folder not found"
-                )
-        );
-    
-        assertThrows(
-                FolderNotFoundException.class,
-                () -> fileService.downloadFile(
-                        ownerId,
-                        storedFile.getId()
-                )
-        );
-    
-        verify(objectStorageService, never())
-                .download(anyString());
     }
 
     @Test

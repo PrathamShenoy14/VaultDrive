@@ -169,9 +169,13 @@ Exit criteria: correctness tests remain green and measured contention improves f
 
 ## Phase 5 — Sharing and authorization
 
-- Define owner, collaborator, and link-sharing permission models before schema work.
-- Add resource-level authorization and non-leaking errors.
-- Add revocation, expiry, and audit events.
+- [x] Approve [the six-milestone sharing design](sharing-permissions-design.md).
+- [x] Sharing M1: PostgreSQL grants, strongest-role inheritance, owner management,
+  Viewer metadata/list/download, redaction and paginated shared entry points;
+  [implementation and verification contract](sharing-m1.md).
+- [ ] Sharing M2: Editor content operations.
+- [ ] Sharing M3: delegated multipart with initiator authority and revocation races.
+- [ ] Sharing M4-M6: Viewer links/expiry, permission activity and notifications.
 - Threat-model enumeration, confused-deputy, and link-token risks.
 
 ## Phase 6 — Transfer scalability
@@ -208,7 +212,7 @@ Exit criteria: correctness tests remain green and measured contention improves f
 - Granular lock mechanism and namespace key.
 - Hard-delete retention delay and user-visible cancellation policy.
 - Refresh-token/logout design and JWT key evolution.
-- Sharing schema, quota model, deployment platform, and performance targets.
+- Later sharing milestones, quota model, deployment platform, and performance targets.
 
 ## Phase 2E.4 bounded missing-job reconciliation
 

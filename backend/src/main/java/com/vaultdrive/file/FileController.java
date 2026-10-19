@@ -86,6 +86,11 @@ public class FileController {
         return ResponseEntity.ok(response);
     }
 
+    @GetMapping("/{fileId}")
+    public FileResponse getFile(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID fileId) {
+        return fileService.getFile(UUID.fromString(jwt.getSubject()), fileId);
+    }
+
     @GetMapping("/{fileId}/download")
     public ResponseEntity<StreamingResponseBody> downloadFile(
             @AuthenticationPrincipal Jwt jwt,
@@ -119,6 +124,7 @@ public class FileController {
                         .build();
 
         return ResponseEntity.ok()
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
                 .header(
                         HttpHeaders.CONTENT_DISPOSITION,
                         contentDisposition.toString()

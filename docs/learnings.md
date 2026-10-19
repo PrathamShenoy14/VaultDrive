@@ -2,6 +2,26 @@
 
 This is a living explanation of lessons demonstrated by committed VaultDrive code. It is not a claim that every production concern is solved.
 
+## Sharing M1: permission is a current-state decision
+
+Direct grants are entry points, not copies of a subtree's authorization. Resolving
+the strongest grant along current owner-consistent ancestry makes moves and
+root-fallback restores predictable without grant rewrites. Structural accessibility
+and permission to inspect a parent differ: a directly shared file may be read while
+its private parent ID is redacted.
+
+A shared advisory lock coordinates folder/grant changes but allows file moves.
+Separate location and grant queries could therefore authorize the wrong snapshot.
+M1 resolves metadata, ancestry, lifecycle and permission in one bounded PostgreSQL
+statement, independently of cached JPA entities. Grant mutations take the exclusive
+owner hierarchy lock without touching file versions or retained storage evidence.
+
+Revocation blocks the next download authorization, while an admitted backend stream
+may finish. Holding hierarchy locks during Garage I/O would couple permission changes
+to external latency. PostgreSQL race and storage-boundary tests establish that
+separation. Filter permission/lifecycle before pagination to avoid omitting accessible
+entry points or exposing private totals. See [M1](sharing-m1.md).
+
 ## Completion evidence must survive lost acknowledgements and blocked destinations
 
 M3 freezes the exact validated Garage part manifest and chooses completion in one

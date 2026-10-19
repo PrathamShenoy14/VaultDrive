@@ -55,6 +55,8 @@ class FolderServiceTest {
 
    @Mock private FolderPurgeRunService purgeRuns;
 
+   @Mock private com.vaultdrive.sharing.ResourceReadService resourceReads;
+
    private FolderService folderService;
    private FolderNameValidator folderNameValidator;
    private FolderAccessValidator folderAccessValidator;
@@ -72,7 +74,8 @@ class FolderServiceTest {
             userRepository,
             hierarchyCoordinator,
             outboxWriter,
-            purgeRuns
+            purgeRuns,
+            resourceReads
         );
 
         lenient()
@@ -383,226 +386,22 @@ class FolderServiceTest {
     }
 
     @Test
-    void shouldRetrieveFolderSuccessfully() {
-
-        UUID ownerId = UUID.randomUUID();
-        Folder folder = new Folder(ownerId, null, "Documents");
-
-        when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNull(
-                folder.getId(),
-                ownerId
-        )).thenReturn(Optional.of(folder));
-
-        FolderResponse response = folderService.getFolder(
-                ownerId,
-                folder.getId()
-        );
-
-        assertThat(response.id()).isEqualTo(folder.getId());
-        assertThat(response.name()).isEqualTo("Documents");
-        assertThat(response.parentFolderId()).isNull();
+    void metadataDelegatesToCurrentPermissionSnapshot() {
+        UUID actor = UUID.randomUUID(), folder = UUID.randomUUID();
+        FolderResponse expected = new FolderResponse(folder, "shared", null, Instant.now(), Instant.now());
+        when(resourceReads.folder(actor, folder)).thenReturn(expected);
+        assertThat(folderService.getFolder(actor, folder)).isSameAs(expected);
     }
 
     @Test
-    void shouldRejectRetrievingAnotherUsersFolder() {
-
-        UUID aliceId = UUID.randomUUID();
-        UUID bobId = UUID.randomUUID();
-
-        Folder bobFolder = new Folder(bobId, null, "Private");
-
-        when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNull(
-                bobFolder.getId(),
-                aliceId
-        )).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() ->
-                folderService.getFolder(aliceId, bobFolder.getId())
-        ).isInstanceOf(FolderNotFoundException.class);
-    }
-
-    @Test
-    void shouldRejectRetrievingFolderWithDeletedAncestor() {
-
-        UUID ownerId = UUID.randomUUID();
-
-        Folder documents = new Folder(ownerId, null, "Documents");
-
-        Folder projects = new Folder(
-                ownerId,
-                documents.getId(),
-                "Projects"
-        );
-
-        when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNull(
-                projects.getId(),
-                ownerId
-        )).thenReturn(Optional.of(projects));
-
-        // Simulates Documents being soft-deleted.
-        when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNull(
-                documents.getId(),
-                ownerId
-        )).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() ->
-                folderService.getFolder(ownerId, projects.getId())
-        ).isInstanceOf(FolderNotFoundException.class);
-    }
-
-    @Test
-    void shouldListRootFoldersSuccessfully() {
-
-        UUID ownerId = UUID.randomUUID();
-
-        Folder documents = new Folder(ownerId, null, "Documents");
-        Folder pictures = new Folder(ownerId, null, "Pictures");
-
-        when(folderRepository
-                .findByOwnerIdAndParentFolderIdIsNullAndDeletedAtIsNull(ownerId)
-        ).thenReturn(List.of(documents, pictures));
-
-        List<FolderResponse> response =
-                folderService.listRootFolders(ownerId);
-
-        assertThat(response)
-                .extracting(FolderResponse::name)
-                .containsExactlyInAnyOrder("Documents", "Pictures");
-    }
-
-    @Test
-    void shouldReturnEmptyListWhenNoRootFoldersExist() {
-
-        UUID ownerId = UUID.randomUUID();
-
-        when(folderRepository
-                .findByOwnerIdAndParentFolderIdIsNullAndDeletedAtIsNull(ownerId)
-        ).thenReturn(List.of());
-
-        List<FolderResponse> response =
-                folderService.listRootFolders(ownerId);
-
-        assertThat(response).isEmpty();
-    }
-
-    @Test
-    void shouldListImmediateChildrenAlphabetically() {
-        UUID ownerId = UUID.randomUUID();
-
-        Folder parent = new Folder(ownerId, null, "Documents");
-
-        Folder zebra = new Folder(ownerId, parent.getId(), "Zebra");
-        Folder apple = new Folder(ownerId, parent.getId(), "apple");
-        Folder banana = new Folder(ownerId, parent.getId(), "Banana");
-
-        when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNull(
-                parent.getId(), ownerId
-        )).thenReturn(Optional.of(parent));
-
-        when(folderRepository.findByOwnerIdAndParentFolderIdAndDeletedAtIsNull(
-                ownerId, parent.getId()
-        )).thenReturn(List.of(zebra, apple, banana));
-
-        List<FolderResponse> result =
-                folderService.listChildFolders(ownerId, parent.getId());
-
-        assertThat(result)
-                .extracting(FolderResponse::name)
-                .containsExactly("apple", "Banana", "Zebra");
-    }
-
-    @Test
-    void shouldRejectListingAnotherUsersChildren() {
-        UUID aliceId = UUID.randomUUID();
-        UUID bobId = UUID.randomUUID();
-
-        Folder bobFolder = new Folder(bobId, null, "Private");
-
-        when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNull(
-                bobFolder.getId(), aliceId
-        )).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() ->
-                folderService.listChildFolders(aliceId, bobFolder.getId())
-        ).isInstanceOf(FolderNotFoundException.class);
-
-        verify(folderRepository, never())
-                .findByOwnerIdAndParentFolderIdAndDeletedAtIsNull(
-                        any(), any()
-                );
-    }
-
-    @Test
-    void shouldRejectListingChildrenWhenAncestorIsDeleted() {
-        UUID ownerId = UUID.randomUUID();
-
-        Folder documents = new Folder(ownerId, null, "Documents");
-        Folder projects = new Folder(
-                ownerId, documents.getId(), "Projects"
-        );
-
-        when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNull(
-                projects.getId(), ownerId
-        )).thenReturn(Optional.of(projects));
-
-        // Documents is unavailable because it was deleted.
-        when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNull(
-                documents.getId(), ownerId
-        )).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() ->
-                folderService.listChildFolders(ownerId, projects.getId())
-        ).isInstanceOf(FolderNotFoundException.class);
-    }
-
-    @Test
-    void shouldReturnEmptyListForFolderWithoutChildren() {
-        UUID ownerId = UUID.randomUUID();
-
-        Folder parent = new Folder(ownerId, null, "Empty");
-
-        when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNull(
-                parent.getId(), ownerId
-        )).thenReturn(Optional.of(parent));
-
-        when(folderRepository.findByOwnerIdAndParentFolderIdAndDeletedAtIsNull(
-                ownerId, parent.getId()
-        )).thenReturn(List.of());
-
-        List<FolderResponse> result =
-                folderService.listChildFolders(ownerId, parent.getId());
-
-        assertThat(result).isEmpty();
-    }
-
-    @Test
-    void shouldSortNamesDifferingOnlyByCaseDeterministically() {
-        UUID ownerId = UUID.randomUUID();
-
-        Folder parent = new Folder(ownerId, null, "Documents");
-
-        Folder lowercase = new Folder(
-                ownerId, parent.getId(), "resume"
-        );
-
-        Folder uppercase = new Folder(
-                ownerId, parent.getId(), "Resume"
-        );
-
-        when(folderRepository.findByIdAndOwnerIdAndDeletedAtIsNull(
-                parent.getId(), ownerId
-        )).thenReturn(Optional.of(parent));
-
-        when(folderRepository.findByOwnerIdAndParentFolderIdAndDeletedAtIsNull(
-                ownerId, parent.getId()
-        )).thenReturn(List.of(lowercase, uppercase));
-
-        List<FolderResponse> result =
-                folderService.listChildFolders(ownerId, parent.getId());
-
-        assertThat(result)
-                .extracting(FolderResponse::name)
-                .containsExactly("Resume", "resume");
+    void listingsDelegateToCurrentPermissionSnapshot() {
+        UUID actor = UUID.randomUUID(), folder = UUID.randomUUID();
+        when(resourceReads.folders(actor, folder)).thenReturn(List.of());
+        when(resourceReads.folders(actor, null)).thenReturn(List.of());
+        assertThat(folderService.listChildFolders(actor, folder)).isEmpty();
+        assertThat(folderService.listRootFolders(actor)).isEmpty();
+        verify(resourceReads).folders(actor, folder);
+        verify(resourceReads).folders(actor, null);
     }
 
     @Test

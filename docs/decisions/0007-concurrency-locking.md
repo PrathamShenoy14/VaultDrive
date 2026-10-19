@@ -25,6 +25,19 @@ File restore and permanent-delete request acquire the shared hierarchy lock befo
 
 ## Consequences
 
+Sharing M1 adds exclusive owner hierarchy coordination for grant creation, role
+changes and revocation, followed by fresh scalar resource/ancestry/grant reads.
+Owner grant listing and resource authorization use short shared hierarchy
+transactions. Only immutable resource owner identity is queried before locking.
+File metadata, current location, ancestry and effective role are resolved in one
+PostgreSQL statement snapshot because shared locks do not serialize file moves.
+Shared with me uses one cross-owner snapshot and filters before pagination.
+Storage download opens after authorization commits; admitted streams may finish
+after revocation. ACL changes never update file versions or storage evidence.
+Deterministic PostgreSQL tests cover both grant/trash, grant/move, revoke/read,
+revoke/purge and revoke/restore orders, stale updates and cached-state rejection.
+See [M1](../sharing-m1.md). Existing mutation lock ordering is unchanged.
+
 M4 cancellation and expiry reuse shared hierarchy → fresh file → allocation →
 session, followed by cancellation progress. Abandonment and intent commit
 atomically; completion cannot consume the same decision. A separate commit grants
