@@ -101,6 +101,22 @@ class SharingConcurrencyIntegrationTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
+    void parentDowngradeAndCapabilityReadSerializeInBothOrders(boolean downgradeFirst) throws Exception {
+        grants.create(owner, false, file, email, ResourceRole.EDITOR);
+        var parent = grants.create(owner, true, child, email, ResourceRole.EDITOR);
+        Runnable downgrade = () -> grants.update(owner, true, child, parent.id(), ResourceRole.VIEWER, parent.version());
+        Runnable read = () -> {
+            var result = reads.file(viewer, file).fileResponse();
+            assertThat(result.effectiveRole()).isEqualTo(ResourceRole.EDITOR);
+            assertThat(result.allowedCapabilities().contains("TRASH")).isEqualTo(!downgradeFirst);
+            assertThat(result.allowedCapabilities()).doesNotContain("RESTORE", "PURGE", "MOVE");
+        };
+        assertThat(ordered(downgradeFirst ? downgrade : read, downgradeFirst ? read : downgrade)).isNull();
+        assertThat(reads.file(viewer, file).fileResponse().allowedCapabilities()).doesNotContain("TRASH");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
     void revocationAndReadSerializeInBothOrders(boolean revokeFirst) throws Exception {
         var grant = grants.create(owner, false, file, email, ResourceRole.VIEWER);
         Runnable revoke = () -> grants.revoke(owner, false, file, grant.id());

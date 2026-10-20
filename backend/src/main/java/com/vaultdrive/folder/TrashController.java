@@ -1,6 +1,7 @@
 package com.vaultdrive.folder;
 
-import com.vaultdrive.folder.dto.TrashFolderResponse;
+import com.vaultdrive.folder.dto.TrashPageResponse;
+import com.vaultdrive.deletion.DeletionOperationController;
 import com.vaultdrive.folder.dto.RestoreFolderResponse;
 
 import org.springframework.http.ResponseEntity;
@@ -13,7 +14,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
+import org.springframework.web.bind.annotation.RequestParam;
 import java.util.UUID;
 
 @RestController
@@ -27,13 +28,14 @@ public class TrashController {
     }
 
     @GetMapping("/folders")
-    public ResponseEntity<List<TrashFolderResponse>> listTrashedFolders(
-            @AuthenticationPrincipal Jwt jwt
+    public ResponseEntity<TrashPageResponse> listTrashedFolders(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size
     ) {
         UUID ownerId = UUID.fromString(jwt.getSubject());
 
-        List<TrashFolderResponse> folders =
-                folderService.listTrashedFolders(ownerId);
+        TrashPageResponse folders =
+                folderService.listTrashedFolders(ownerId, page, size);
 
         return ResponseEntity.ok(folders);
     }
@@ -52,14 +54,13 @@ public class TrashController {
     }
 
     @DeleteMapping("/folders/{folderId}/permanent")
-    public ResponseEntity<Void> permanentlyDeleteFolder(
+    public ResponseEntity<DeletionOperationController.Accepted> permanentlyDeleteFolder(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID folderId
     ) {
         UUID ownerId = UUID.fromString(jwt.getSubject());
 
-        folderService.requestPermanentDeletion(ownerId, folderId);
-
-        return ResponseEntity.accepted().build();
+        UUID operation = folderService.requestPermanentDeletion(ownerId, folderId);
+        return DeletionOperationController.accepted(operation);
     }
 }

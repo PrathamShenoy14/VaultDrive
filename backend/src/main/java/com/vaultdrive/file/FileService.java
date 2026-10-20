@@ -3,7 +3,6 @@ package com.vaultdrive.file;
 import com.vaultdrive.file.dto.FilePageResponse;
 import com.vaultdrive.file.dto.FileResponse;
 import com.vaultdrive.file.dto.FileDownload;
-import com.vaultdrive.file.exception.InvalidFilePaginationException;
 import com.vaultdrive.file.exception.FileNotFoundException;
 import com.vaultdrive.folder.FolderAccessValidator;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
@@ -12,10 +11,6 @@ import com.vaultdrive.sharing.ResourceAccess;
 import com.vaultdrive.storage.ObjectStorageService;
 import com.vaultdrive.storage.StorageObject;
 
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,8 +18,6 @@ import java.util.UUID;
 
 @Service
 public class FileService {
-
-    private static final int MAX_PAGE_SIZE = 100;
 
     private final FolderAccessValidator folderAccessValidator;
     private final FileNameValidator fileNameValidator;
@@ -67,7 +60,13 @@ public class FileService {
     public FileDownload downloadFile(UUID actorId, UUID fileId) {
         ResourceAccess file = resourceReads.file(actorId, fileId);
         // Authorization transaction has committed. An admitted stream may finish after revocation.
-        StorageObject storageObject = objectStorageService.download(file.storageKey());
+        StorageObject storageObject;
+        try {
+            storageObject = objectStorageService.download(file.storageKey());
+        } catch (RuntimeException failure) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_GATEWAY, "Download unavailable");
+        }
         return new FileDownload(file.name(), file.contentType(), file.sizeBytes(), storageObject.inputStream());
     }
 
@@ -191,41 +190,14 @@ public class FileService {
         StoredFile trashedFile =
                 fileMetadataService.softDelete(storedFile);
     
-        return toFileResponse(trashedFile, permission);
+        return new FileResponse(trashedFile.getId(), trashedFile.getName(),
+                permission.parentVisible() ? trashedFile.getFolderId() : null,
+                trashedFile.getContentType(), trashedFile.getSizeBytes(), trashedFile.getCreatedAt(),
+                trashedFile.getUpdatedAt(), permission.role(), java.util.List.of());
     }
 
-    public FilePageResponse listTrash(
-            UUID ownerId,
-            int page,
-            int size
-    ) {
-        validatePagination(page, size);
-    
-        Pageable pageable =
-                PageRequest.of(
-                        page,
-                        size,
-                        Sort.by("name").ascending()
-                );
-    
-        Page<StoredFile> files =
-                storedFileRepository
-                        .findByOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
-                                ownerId,
-                                FileStatus.READY,
-                                pageable
-                        );
-    
-        return new FilePageResponse(
-                files.getContent()
-                        .stream()
-                        .map(this::toFileResponse)
-                        .toList(),
-                files.getNumber(),
-                files.getSize(),
-                files.getTotalElements(),
-                files.getTotalPages()
-        );
+    public com.vaultdrive.folder.dto.TrashPageResponse listTrash(UUID ownerId, int page, int size) {
+        return resourceReads.trash(ownerId, false, page, size);
     }
 
     public FileResponse restoreFile(
@@ -242,12 +214,12 @@ public class FileService {
         return toFileResponse(restoredFile);
     }
 
-    public void requestPermanentDeletion(
+    public UUID requestPermanentDeletion(
             UUID ownerId,
             UUID fileId
     ) {
         resourceReads.requireOwner(ownerId, false, fileId);
-        fileMetadataService.requestPermanentDeletion(
+        return fileMetadataService.requestPermanentDeletion(
                 ownerId,
                 fileId
         );
@@ -258,7 +230,7 @@ public class FileService {
                 permission.role() == com.vaultdrive.sharing.ResourceRole.OWNER ? file.getFolderId()
                         : permission.parentVisible() ? permission.parentId() : null,
                 file.getContentType(), file.getSizeBytes(), file.getCreatedAt(), file.getUpdatedAt(),
-                permission.role(), permission.role().capabilities(false));
+                permission.role(), permission.capabilities(false));
     }
 
     private FileResponse toFileResponse(
@@ -273,24 +245,6 @@ public class FileService {
                 storedFile.getCreatedAt(),
                 storedFile.getUpdatedAt()
         );
-    }
-
-    private void validatePagination(
-            int page,
-            int size
-    ) {
-        if (page < 0) {
-            throw new InvalidFilePaginationException(
-                    "Page must be greater than or equal to 0"
-            );
-        }
-
-        if (size < 1 || size > MAX_PAGE_SIZE) {
-            throw new InvalidFilePaginationException(
-                    "Size must be between 1 and "
-                            + MAX_PAGE_SIZE
-            );
-        }
     }
 
     private void validateFolderAccess(

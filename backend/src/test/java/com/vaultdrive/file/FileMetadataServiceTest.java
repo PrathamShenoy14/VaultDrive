@@ -870,15 +870,16 @@ class FileMetadataServiceTest {
         when(storedFileRepository.saveAndFlush(file))
                 .thenReturn(file);
 
-        StoredFile result =
+        UUID result =
                 fileMetadataService.requestPermanentDeletion(
                         ownerId,
                         fileId
                 );
 
-        assertNotNull(result.getDeletedAt());
-        assertNotNull(result.getPurgeRequestedAt());
-        assertEquals(FileStatus.READY, result.getStatus());
+        assertNotNull(result);
+        assertNotNull(file.getDeletedAt());
+        assertNotNull(file.getPurgeRequestedAt());
+        assertEquals(FileStatus.READY, file.getStatus());
 
         verify(storedFileRepository).saveAndFlush(file);
         var persistenceOrder = inOrder(storedFileRepository, storageIdentity, outboxWriter);
@@ -890,7 +891,7 @@ class FileMetadataServiceTest {
                         && event.getAggregateId().equals(fileId)
                         && event.getPayloadVersion() == 1
                         && event.getPayload().get("ownerId").equals(ownerId.toString())
-                        && event.getCreatedAt().equals(result.getPurgeRequestedAt())
+                        && event.getCreatedAt().equals(file.getPurgeRequestedAt())
         ));
     }
 

@@ -705,3 +705,19 @@ Consolidation removes a protocol's ability to create new work independently from
 Tests should construct historical state explicitly instead of keeping production admission alive solely for fixture setup. Here imported test-only fixtures seed PostgreSQL through its existing guards and create only disposable test objects outside transactions. Removed-route tests verify no metadata, allocation or storage effect; existing receipt/recovery and multipart safety tests protect the retained contract. Old-binary retirement remains a deployment requirement, not a guarantee obtained by deleting a Java method.
 
 JPA and JDBC can coexist with one authority per responsibility. Managed metadata, scalar conditional/evidence transactions and JDBC-only session state have different needs. The dangerous boundary is an old managed entity surviving a native update or protected read before lock acquisition, not the number of persistence APIs. Preserve refresh/clear rules, transaction ownership and deterministic database races before attempting a broad conversion.
+
+## Capabilities and deletion status are evidence projections
+
+A role alone cannot describe an available action: a direct Editor grant permits
+rename while a private or Viewer parent still forbids Trash. Compute parent
+editability in the resource resolver statement snapshot and keep mutation
+authorization independent. Applying paging after eligibility preserves counts and
+redaction; a UUID tie breaker makes unchanged pages repeatable without promising
+a cross-request snapshot.
+
+A durable 202 operation is the original intent event, not a worker lease. Retained
+metadata-finalization receipts establish logical completion even before the job
+completion commit or after the source row disappears. Generic SUCCEEDED, missing
+metadata and multipart abort/discard do not establish physical reclamation. A
+bounded status projection exposes known blockers and sanitized outcomes without
+adding storage calls, retries, worker authority or an unbounded subtree walk.

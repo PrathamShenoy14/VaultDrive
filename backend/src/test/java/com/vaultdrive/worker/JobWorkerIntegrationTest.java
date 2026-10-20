@@ -139,7 +139,9 @@ class JobWorkerIntegrationTest {
         }), new JobWorkerProperties(true, 1, Duration.ofSeconds(5), Duration.ofMillis(50),
                 Duration.ofMinutes(5), Duration.ofMillis(100)));
         workers.add(worker);
-        worker.start();
+        // Drive maintenance explicitly: a scheduled renewal could otherwise repair
+        // the deliberately expired lease between the fixture update and replacement claim.
+        worker.poll();
         assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
         update(id, "claim_expires_at = clock_timestamp() + interval '2 seconds'");
         CountDownLatch renewed = new CountDownLatch(1);
@@ -150,7 +152,11 @@ class JobWorkerIntegrationTest {
         assertThat(load(id).getAttemptCount()).isEqualTo(1);
         update(id, "claim_expires_at = clock_timestamp() - interval '1 second', next_attempt_at = clock_timestamp() - interval '1 second'");
         var replacement = jobs.claimNext(JobType.FILE_PURGE).orElseThrow();
-        worker.maintain();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (interrupted.getCount() > 0 && System.nanoTime() < deadline) {
+            worker.maintain();
+            Thread.yield();
+        }
         assertThat(interrupted.await(5, TimeUnit.SECONDS)).isTrue();
         assertThat(jobs.renew(claim.get())).isFalse();
         assertThat(jobs.complete(claim.get())).isFalse();

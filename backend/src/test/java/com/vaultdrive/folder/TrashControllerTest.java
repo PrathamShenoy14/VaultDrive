@@ -1,6 +1,6 @@
 package com.vaultdrive.folder;
 
-import com.vaultdrive.folder.dto.TrashFolderResponse;
+import com.vaultdrive.folder.dto.TrashPageResponse;
 import com.vaultdrive.security.JwtService;
 import com.vaultdrive.folder.dto.RestoreFolderResponse;
 import com.vaultdrive.folder.exception.FolderNotFoundException;
@@ -47,28 +47,28 @@ class TrashControllerTest {
 
         String token = jwtService.generateAccessToken(ownerId);
 
-        TrashFolderResponse folder = new TrashFolderResponse(
+        TrashPageResponse.Entry folder = new TrashPageResponse.Entry(
                 folderId,
-                "Documents",
+                "FOLDER", "Documents",
                 null,
-                Instant.parse("2026-09-29T10:00:00Z")
+                Instant.parse("2026-09-29T10:00:00Z"), null, "TRASHED", List.of("RESTORE", "PURGE")
         );
 
-        when(folderService.listTrashedFolders(ownerId))
-                .thenReturn(List.of(folder));
+        when(folderService.listTrashedFolders(ownerId, 0, 50))
+                .thenReturn(new TrashPageResponse(List.of(folder), 0, 50, 1, 1));
 
         mockMvc.perform(get("/api/v1/trash/folders")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].id")
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].id")
                         .value(folderId.toString()))
-                .andExpect(jsonPath("$[0].name")
+                .andExpect(jsonPath("$.content[0].name")
                         .value("Documents"))
-                .andExpect(jsonPath("$[0].deletedAt")
+                .andExpect(jsonPath("$.content[0].deletedAt")
                         .value("2026-09-29T10:00:00Z"));
 
-        verify(folderService).listTrashedFolders(ownerId);
+        verify(folderService).listTrashedFolders(ownerId, 0, 50);
     }
 
     @Test
@@ -77,15 +77,15 @@ class TrashControllerTest {
 
         String token = jwtService.generateAccessToken(ownerId);
 
-        when(folderService.listTrashedFolders(ownerId))
-                .thenReturn(List.of());
+        when(folderService.listTrashedFolders(ownerId, 0, 50))
+                .thenReturn(new TrashPageResponse(List.of(), 0, 50, 0, 0));
 
         mockMvc.perform(get("/api/v1/trash/folders")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
+                .andExpect(jsonPath("$.content.length()").value(0));
 
-        verify(folderService).listTrashedFolders(ownerId);
+        verify(folderService).listTrashedFolders(ownerId, 0, 50);
     }
 
     @Test
@@ -202,12 +202,17 @@ class TrashControllerTest {
         UUID folderId = UUID.randomUUID();
         String token = jwtService.generateAccessToken(ownerId);
 
+        UUID operation = UUID.randomUUID();
+        when(folderService.requestPermanentDeletion(ownerId, folderId)).thenReturn(operation);
+
         mockMvc.perform(delete(
                         "/api/v1/trash/folders/{folderId}/permanent",
                         folderId
                 ).header("Authorization", "Bearer " + token))
                 .andExpect(status().isAccepted())
-                .andExpect(content().string(""));
+                .andExpect(header().string("Location", "/api/v1/deletion-operations/" + operation))
+                .andExpect(jsonPath("$.operationId").value(operation.toString()))
+                .andExpect(header().string("Retry-After", "2"));
 
         verify(folderService)
                 .requestPermanentDeletion(ownerId, folderId);

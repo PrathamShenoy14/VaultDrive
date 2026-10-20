@@ -12,7 +12,6 @@ import org.springframework.web.server.ResponseStatusException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -45,9 +44,7 @@ public class PublicShareLinkController {
             InputStream input;
             try { input = storage.download(file.storageKey()).inputStream(); }
             catch (RuntimeException failure) {
-                response.setStatus(502);
-                response.setContentType("application/json");
-                response.getWriter().write("{\"message\":\"Download unavailable\"}");
+                com.vaultdrive.common.exception.ApiError.write(response, 502, "Download unavailable");
                 return;
             }
             try (input) {
@@ -61,7 +58,7 @@ public class PublicShareLinkController {
     }
 
     @ExceptionHandler(ResponseStatusException.class)
-    public ResponseEntity<Map<String, String>> unavailable(ResponseStatusException failure) {
-        return ResponseEntity.status(404).body(Map.of("message", "Share link not found"));
+    public ResponseEntity<com.vaultdrive.common.exception.ApiError> unavailable(ResponseStatusException failure) {
+        return ResponseEntity.status(404).body(new com.vaultdrive.common.exception.ApiError(404, "NOT_FOUND", "Share link not found"));
     }
 }

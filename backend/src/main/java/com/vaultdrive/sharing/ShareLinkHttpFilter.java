@@ -45,10 +45,8 @@ public class ShareLinkHttpFilter extends OncePerRequestFilter {
     }
 
     static void error(HttpServletResponse response, int status) throws IOException {
-        response.setStatus(status);
-        response.setContentType("application/json");
         if (status == 429) response.setHeader("Retry-After", "1");
-        response.getWriter().write(status == 404 ? "{\"message\":\"Share link not found\"}"
-                : "{\"message\":\"Public share link capacity exceeded\"}");
+        com.vaultdrive.common.exception.ApiError.write(response, status, status == 404
+                ? "Share link not found" : "Public share link capacity exceeded");
     }
 }

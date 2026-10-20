@@ -57,6 +57,7 @@ import static org.mockito.Mockito.*;
 })
 @ActiveProfiles("test")
 class FolderPurgeMetadataIntegrationTest {
+    @Autowired com.vaultdrive.deletion.DeletionOperationService operations;
     @Autowired HistoricalObjectFixtures historicalObjects;
 
     @Autowired HistoricalUploadFixtures history;
@@ -189,7 +190,10 @@ class FolderPurgeMetadataIntegrationTest {
 
     @Test void crashAfterRootCommitBeforeJobCompletionReplaysOnlyDurableSuccess() throws Exception {
         ClaimedJob abandoned = ready();
+        assertThat(operations.get(owner, event).state().name()).isEqualTo("PROCESSING");
         assertThat(remove(abandoned, 20)).isEqualTo(JobHandler.Result.SUCCEEDED);
+        assertThat(operations.get(owner, event).state().name()).isEqualTo("LOGICALLY_COMPLETED");
+        assertThat(operations.get(owner, event).logicallyCompletedAt()).isNotNull();
         long before = version();
         Object finalized = scalar("SELECT finalized_at FROM folder_purge_runs WHERE event_id = :event");
         assertThat(handler.handle(context(abandoned))).isEqualTo(JobHandler.Result.SUCCEEDED);
@@ -311,6 +315,7 @@ class FolderPurgeMetadataIntegrationTest {
         assertThat(remove(folderClaim, 20)).isEqualTo(JobHandler.Result.CONTINUE);
         assertThat(remove(folderClaim, 20)).isEqualTo(JobHandler.Result.SUCCEEDED);
         assertThat(jobRepository.findById(fileClaim.id()).orElseThrow().getStatus()).isEqualTo(JobStatus.FAILED);
+        assertThat(operations.get(owner, fileClaim.id()).state().name()).isEqualTo("LOGICALLY_COMPLETED");
         assertThat(jobRepository.findById(fileClaim.id()).orElseThrow().getFailureCount()).isEqualTo(10);
         assertFinalized(1, 1);
     }

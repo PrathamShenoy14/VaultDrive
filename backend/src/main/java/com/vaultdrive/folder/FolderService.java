@@ -1,7 +1,8 @@
 package com.vaultdrive.folder;
 
 import com.vaultdrive.folder.dto.FolderResponse;
-import com.vaultdrive.folder.dto.TrashFolderResponse;
+import com.vaultdrive.folder.dto.TrashPageResponse;
+import com.vaultdrive.folder.dto.FolderPageResponse;
 import com.vaultdrive.folder.dto.RestoreFolderResponse;
 
 import com.vaultdrive.folder.exception.DuplicateFolderNameException;
@@ -21,7 +22,6 @@ import com.vaultdrive.user.UserRepository;
 import org.springframework.security.access.AccessDeniedException;
 
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -114,12 +114,12 @@ public class FolderService {
         return resourceReads.folder(actorId, folderId);
     }
 
-    public List<FolderResponse> listRootFolders(UUID actorId) {
-        return resourceReads.folders(actorId, null);
+    public FolderPageResponse listRootFolders(UUID actorId, int page, int size) {
+        return resourceReads.folders(actorId, null, page, size);
     }
 
-    public List<FolderResponse> listChildFolders(UUID actorId, UUID parentFolderId) {
-        return resourceReads.folders(actorId, parentFolderId);
+    public FolderPageResponse listChildFolders(UUID actorId, UUID parentFolderId, int page, int size) {
+        return resourceReads.folders(actorId, parentFolderId, page, size);
     }
 
     @Transactional
@@ -299,29 +299,8 @@ public class FolderService {
         folderRepository.flush();
     }
 
-    @Transactional(readOnly = true)
-    public List<TrashFolderResponse> listTrashedFolders(UUID ownerId) {
-    
-        return folderRepository
-                .findByOwnerIdAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
-                        ownerId
-                )
-                .stream()
-                .map(folder -> new TrashFolderResponse(
-                        folder.getId(),
-                        folder.getName(),
-                        folder.getParentFolderId(),
-                        folder.getDeletedAt()
-                ))
-                .sorted(
-                        java.util.Comparator
-                                .comparing(
-                                        TrashFolderResponse::deletedAt
-                                )
-                                .reversed()
-                                .thenComparing(TrashFolderResponse::id)
-                )
-                .toList();
+    public TrashPageResponse listTrashedFolders(UUID ownerId, int page, int size) {
+        return resourceReads.trash(ownerId, true, page, size);
     }
 
     @Transactional
@@ -387,7 +366,7 @@ public class FolderService {
     }
 
     @Transactional(timeout = 10)
-    public void requestPermanentDeletion(
+    public UUID requestPermanentDeletion(
             UUID ownerId,
             UUID folderId
     ) {
@@ -430,6 +409,7 @@ public class FolderService {
         );
         outboxWriter.append(event);
         purgeRuns.create(event);
+        return event.getId();
     }
 
     private void lockFolderNamespace(UUID ownerId) {
@@ -506,7 +486,7 @@ public class FolderService {
     private FolderResponse toResponse(Folder folder, ResourceAccess permission) {
         return new FolderResponse(folder.getId(), folder.getName(),
                 permission.parentVisible() ? folder.getParentFolderId() : null,
-                folder.getCreatedAt(), folder.getUpdatedAt(), permission.role(), permission.role().capabilities(true));
+                folder.getCreatedAt(), folder.getUpdatedAt(), permission.role(), permission.capabilities(true));
     }
 
     // Convert our JPA entity into a public API response.

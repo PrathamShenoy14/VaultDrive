@@ -1,5 +1,9 @@
 # Phase 2D.2: Safe recursive folder purge and metadata finalization
 
+Current API update: [MVP API contract consistency](api-contract.md) supersedes
+historical capability, folder/Trash pagination, deletion-polling and error-envelope
+descriptions below. Storage, authorization and worker protocols are unchanged.
+
 M5 extends this legacy purge design with [multipart compatibility](multipart-purge-compatibility.md):
 READY requires multipart completion evidence; unfinished folder members use retained
 logical-discard proof. Folder success does not promise physical reclamation of

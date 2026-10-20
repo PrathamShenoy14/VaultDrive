@@ -26,7 +26,7 @@ public class AuthTransportFilter extends OncePerRequestFilter {
         }
         if ("POST".equals(request.getMethod()) && COOKIE_ENDPOINTS.contains(path)) {
             if (request.getQueryString() != null) {
-                response.setStatus(400);
+                com.vaultdrive.common.exception.ApiError.write(response, 400, "Invalid request");
                 return;
             }
             String header = path.endsWith("/login") ? "X-VaultDrive-Client" : CSRF_HEADER;
@@ -34,7 +34,7 @@ public class AuthTransportFilter extends OncePerRequestFilter {
             boolean valid = values.size() == 1 && (path.endsWith("/login")
                     ? "1".equals(values.getFirst()) : SessionService.validSecret(values.getFirst()));
             if (!valid) {
-                response.setStatus(403);
+                com.vaultdrive.common.exception.ApiError.write(response, 403, "Permission denied");
                 return;
             }
         }

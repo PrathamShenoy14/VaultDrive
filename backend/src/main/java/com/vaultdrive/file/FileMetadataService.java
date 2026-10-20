@@ -162,7 +162,7 @@ public class FileMetadataService {
     }
 
     @Transactional
-    public StoredFile requestPermanentDeletion(
+    public UUID requestPermanentDeletion(
             UUID ownerId,
             UUID fileId
     ) {
@@ -192,7 +192,7 @@ public class FileMetadataService {
         );
         storageIdentity.recordPurgeTarget(saved, event);
         outboxWriter.append(event);
-        return saved;
+        return event.getId();
     }
 
     private boolean fileNameExists(

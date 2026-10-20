@@ -45,6 +45,17 @@ Resource reads bind ownership, accessible ancestry, lifecycle and strongest dire
 
 File Viewer links use hashed secrets in a dedicated header, isolated public GET security, uniform failures, no-store/no-referrer/nosniff and bounded per-process request/download admission. Downloads stream through the backend without presigned GETs. Admitted streams may finish after revocation. Immutable activity/outbox and recipient-isolated notifications survive resource changes without conferring authority. See [Sharing M1–M6](sharing-permissions-design.md).
 
+## API contract consistency
+
+[The current API contract](api-contract.md) defines fresh authorization-dependent
+capabilities, bounded folder and owner Trash pages, common Trash lifecycle entries,
+pending-ancestor exclusion and retained owner-only deletion-operation polling.
+202 returns the original event UUID/Location. Polling distinguishes accepted,
+processing, blocked, failed and receipt-backed logical completion; it never
+asserts physical reclamation. Errors share the uppercase ApiError envelope across
+authenticated and public-link endpoints, preserving public-link uniform 404s.
+Read projections add no migration, mutation authority or lock-order change.
+
 ## Concurrency model
 
 [ADR-0007](decisions/0007-concurrency-locking.md) is the exact lock-order authority. Transaction advisory locks use Hibernate's enlisted connection and stable keys. Collisions conservatively serialize work. Only immutable identity may precede coordination.

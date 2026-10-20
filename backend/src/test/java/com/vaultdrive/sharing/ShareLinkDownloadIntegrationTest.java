@@ -108,7 +108,7 @@ class ShareLinkDownloadIntegrationTest {
         when(storage.download(key)).thenThrow(new IllegalStateException("provider-private-" + key));
         mvc.perform(get(downloadPath()).header(ShareLinkHttpFilter.TOKEN_HEADER, link.secret()))
                 .andExpect(status().isBadGateway()).andExpect(header().string("Cache-Control", "no-store"))
-                .andExpect(content().json("{\"message\":\"Download unavailable\"}"));
+                .andExpect(content().json("{\"status\":502,\"error\":\"BAD_GATEWAY\",\"message\":\"Download unavailable\"}"));
         doReturn(new StorageObject(new ByteArrayInputStream(new byte[]{1, 2, 3}))).when(storage).download(key);
         mvc.perform(get(downloadPath()).header(ShareLinkHttpFilter.TOKEN_HEADER, link.secret())).andExpect(status().isOk());
     }

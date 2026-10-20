@@ -63,6 +63,7 @@ import static org.mockito.Mockito.*;
 })
 @ActiveProfiles("test")
 class FolderPurgeFileIntegrationTest {
+    @Autowired com.vaultdrive.deletion.DeletionOperationService operations;
     @Autowired HistoricalObjectFixtures historicalObjects;
 
     @Autowired HistoricalUploadFixtures history;
@@ -267,6 +268,8 @@ class FolderPurgeFileIntegrationTest {
         assertThat(phase()).isEqualTo("DELETE_FILES");
         assertThat(count("file_purge_work", "TRUE")).isZero();
         assertThat(count("folder_purge_file_progress", "blocked_reason = 'UNSAFE_WRITER'")).isEqualTo(1);
+        assertThat(operations.get(owner, event).state().name()).isEqualTo("BLOCKED");
+        assertThat(operations.get(owner, event).reasonCode()).isEqualTo("MEMBER_BLOCKED");
         assertThat(handler.handle(context(claim))).isEqualTo(JobHandler.Result.RETRY);
         assertThat(fileRepository.existsById(unsafe.getId())).isTrue();
         verify(storage, never()).delete(any(StorageTarget.class));

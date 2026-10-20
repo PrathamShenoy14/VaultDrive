@@ -30,7 +30,8 @@ public class ResourceAccessRepository {
     }
 
     public ResourceAccess require(UUID actor, boolean folder, UUID id, boolean includeTrash) {
-        List<?> rows = query("SELECT a.* FROM resolve_resource_access(:actor, :file, :folder, :trash) a")
+        List<?> rows = query("SELECT " + projection(folder)
+                + " FROM resolve_resource_access(:actor, :file, :folder, :trash) a")
                 .setParameter("actor", actor).setParameter("file", folder ? null : id)
                 .setParameter("folder", folder ? id : null).setParameter("trash", includeTrash)
                 .getResultList();
@@ -46,6 +47,14 @@ public class ResourceAccessRepository {
         return entityManager.createNativeQuery(sql);
     }
 
+    // Same statement as resource/role resolution; a target-only Editor grant cannot authorize Trash.
+    public static String projection(boolean folder) {
+        return "a.*, (a.effective_role = 'OWNER' OR EXISTS (SELECT 1 FROM resource_grants pg "
+                + "WHERE pg.grantee_user_id = :actor AND pg.owner_id = a.owner_id AND pg.role = 'EDITOR' "
+                + "AND pg.folder_id = ANY(" + (folder ? "a.folder_path[2:]" : "a.folder_path")
+                + "))) AS parent_editable";
+    }
+
     public static RuntimeException notFound(boolean folder) {
         return folder ? new FolderNotFoundException("Folder not found") : new FileNotFoundException("File not found");
     }
@@ -53,10 +62,11 @@ public class ResourceAccessRepository {
     public static ResourceAccess map(Object[] r) {
         return new ResourceAccess((UUID) r[0], (UUID) r[1], (UUID) r[2], (String) r[3], (String) r[4],
                 ((Number) r[5]).longValue(), (String) r[6], instant(r[7]), instant(r[8]),
-                ResourceRole.valueOf((String) r[9]), (Boolean) r[10], (Boolean) r[11]);
+                ResourceRole.valueOf((String) r[9]), (Boolean) r[10], (Boolean) r[11], (Boolean) r[13]);
     }
 
     public static Instant instant(Object value) {
+        if (value == null) return null;
         if (value instanceof Instant i) return i;
         if (value instanceof OffsetDateTime o) return o.toInstant();
         return ((Timestamp) value).toInstant();

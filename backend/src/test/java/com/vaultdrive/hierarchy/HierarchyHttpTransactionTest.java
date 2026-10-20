@@ -57,7 +57,11 @@ class HierarchyHttpTransactionTest extends HierarchyHttpTestSupport {
         assertThat(mapper.readTree(restored.body()).get("restoredName").asText()).isEqualTo("Restore (restored)");
         request("DELETE", "/folders/" + trashed, null, 204);
         var accepted = request("DELETE", purge(trashed), null, 202);
-        assertThat(accepted.body()).isEmpty();
+        String operation = mapper.readTree(accepted.body()).get("operationId").asText();
+        assertThat(accepted.headers().firstValue("Location")).contains("/api/v1/deletion-operations/" + operation);
+        assertThat(accepted.headers().firstValue("Retry-After")).contains("2");
+        var polled = request("GET", "/deletion-operations/" + operation, null, 200);
+        assertThat(mapper.readTree(polled.body()).get("state").asText()).isEqualTo("ACCEPTED");
         assertThat(folders.findById(trashed).orElseThrow().getPurgeRequestedAt()).isNotNull();
         assertThat(events()).isEqualTo(1);
         assertThat(count("folder_purge_runs")).isEqualTo(1);

@@ -12,13 +12,8 @@ import com.vaultdrive.storage.StorageObject;
 
 import com.vaultdrive.file.dto.FilePageResponse;
 import com.vaultdrive.file.dto.FileResponse;
-import com.vaultdrive.file.exception.InvalidFilePaginationException;
+import com.vaultdrive.folder.dto.TrashPageResponse;
 
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -69,7 +64,7 @@ class FileServiceTest {
         lenient().when(resourceReads.requireEditor(any(), anyBoolean(), any(), anyBoolean()))
                 .thenAnswer(i -> new com.vaultdrive.sharing.ResourceAccess(i.getArgument(2), i.getArgument(0),
                         null, "", null, 0, null, java.time.Instant.now(), java.time.Instant.now(),
-                        com.vaultdrive.sharing.ResourceRole.OWNER, true, true));
+                        com.vaultdrive.sharing.ResourceRole.OWNER, true, true, true));
         fileNameExtensionResolver =
                     new FileNameExtensionResolver();
         
@@ -98,7 +93,7 @@ class FileServiceTest {
         UUID actor = UUID.randomUUID(), fileId = UUID.randomUUID();
         var snapshot = new com.vaultdrive.sharing.ResourceAccess(fileId, UUID.randomUUID(), null,
                 "shared.txt", "text/plain", 1, "opaque-key", java.time.Instant.now(), java.time.Instant.now(),
-                com.vaultdrive.sharing.ResourceRole.VIEWER, false, true);
+                com.vaultdrive.sharing.ResourceRole.VIEWER, false, true, false);
         when(resourceReads.file(actor, fileId)).thenReturn(snapshot);
         InputStream bytes = new ByteArrayInputStream(new byte[]{1});
         when(objectStorageService.download("opaque-key")).thenReturn(new StorageObject(bytes));
@@ -1133,87 +1128,11 @@ class FileServiceTest {
     }
 
     @Test
-    void shouldListTrashedFilesForOwner() {
-        UUID ownerId = UUID.randomUUID();
-        UUID folderId = UUID.randomUUID();
-    
-        StoredFile first =
-                createReadyFile(
-                        ownerId,
-                        folderId,
-                        "alpha.pdf"
-                );
-    
-        StoredFile second =
-                createReadyFile(
-                        ownerId,
-                        null,
-                        "bravo.pdf"
-                );
-    
-        first.softDelete();
-        second.softDelete();
-    
-        Page<StoredFile> page =
-                new PageImpl<>(
-                        List.of(first, second),
-                        PageRequest.of(
-                                0,
-                                50,
-                                Sort.by("name").ascending()
-                        ),
-                        2
-                );
-    
-        when(storedFileRepository
-                .findByOwnerIdAndStatusAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
-                        eq(ownerId),
-                        eq(FileStatus.READY),
-                        any(Pageable.class)
-                ))
-                .thenReturn(page);
-    
-        FilePageResponse response =
-                fileService.listTrash(
-                        ownerId,
-                        0,
-                        50
-                );
-    
-        assertEquals(2, response.content().size());
-        assertEquals(2, response.totalElements());
-        assertEquals(1, response.totalPages());
-    
-        assertEquals(
-                "alpha.pdf",
-                response.content().get(0).name()
-        );
-    
-        assertEquals(
-                "bravo.pdf",
-                response.content().get(1).name()
-        );
-    
-        verifyNoInteractions(folderAccessValidator);
-        verifyNoInteractions(objectStorageService);
-    }
-
-    @Test
-    void shouldRejectInvalidTrashPageSize() {
-        UUID ownerId = UUID.randomUUID();
-    
-        assertThrows(
-                InvalidFilePaginationException.class,
-                () -> fileService.listTrash(
-                        ownerId,
-                        0,
-                        101
-                )
-        );
-    
-        verifyNoInteractions(storedFileRepository);
-        verifyNoInteractions(folderAccessValidator);
-        verifyNoInteractions(objectStorageService);
+    void shouldDelegateBoundedTrashSnapshot() {
+        UUID owner = UUID.randomUUID();
+        var page = new TrashPageResponse(List.of(), 2, 10, 0, 0);
+        when(resourceReads.trash(owner, false, 2, 10)).thenReturn(page);
+        assertSame(page, fileService.listTrash(owner, 2, 10));
     }
 
     @Test

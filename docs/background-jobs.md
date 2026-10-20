@@ -1,5 +1,9 @@
 # Durable background jobs (Phase 2A)
 
+Current API update: [MVP API contract consistency](api-contract.md) supersedes
+historical capability, folder/Trash pagination, deletion-polling and error-envelope
+descriptions below. Storage, authorization and worker protocols are unchanged.
+
 `background_jobs` is the authoritative execution record. `outbox_events` records
 notification delivery: `PUBLISHED` means broker acceptance, never completed work.
 V14 and `com.vaultdrive.job` provide the Phase 2A persistence foundation. Phase 2B

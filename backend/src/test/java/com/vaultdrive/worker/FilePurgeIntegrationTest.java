@@ -70,6 +70,8 @@ import static org.mockito.Mockito.*;
 })
 @ActiveProfiles("test")
 class FilePurgeIntegrationTest {
+    @Autowired com.vaultdrive.deletion.DeletionOperationService operations;
+
     @Autowired HistoricalObjectFixtures historicalObjects;
 
     @Autowired HistoricalUploadFixtures history;
@@ -156,6 +158,34 @@ class FilePurgeIntegrationTest {
         }
     }
 
+    @Test void deletionPollingFollowsIntentExecutionAndDurableLogicalCompletion() throws Exception {
+        StoredFile file = uploaded();
+        UUID event = request(file);
+        assertThat(operations.get(owner, event).state().name()).isEqualTo("ACCEPTED");
+        jobs.create(event, JobType.FILE_PURGE, file.getId());
+        assertThat(operations.get(owner, event).state().name()).isEqualTo("PROCESSING");
+        ClaimedJob claim = jobs.claimNext(JobType.FILE_PURGE).orElseThrow();
+        assertThat(handler.handle(context(claim))).isEqualTo(JobHandler.Result.SUCCEEDED);
+        // The receipt is authoritative before the separate generic job completion transaction.
+        var completed = operations.get(owner, event);
+        assertThat(completed.state().name()).isEqualTo("LOGICALLY_COMPLETED");
+        assertThat(completed.logicallyCompletedAt()).isNotNull();
+        assertThat(fileRepository.findById(file.getId())).isEmpty();
+        assertThat(jobs.complete(claim)).isTrue();
+        assertThat(operations.get(owner, event)).isEqualTo(completed);
+    }
+
+    @Test void deletionPollingReportsExhaustedExecutionWithoutClaimingLogicalCompletion() {
+        StoredFile file = uploaded();
+        ClaimedJob claim = purge(file);
+        transaction.executeWithoutResult(status -> entityManager.createNativeQuery("""
+                UPDATE background_jobs SET status = 'FAILED', completed_at = clock_timestamp(),
+                    claim_token = NULL, claim_expires_at = NULL WHERE id = :id
+                """).setParameter("id", claim.id()).executeUpdate());
+        assertThat(operations.get(owner, claim.id()).state().name()).isEqualTo("FAILED");
+        assertThat(operations.get(owner, claim.id()).logicallyCompletedAt()).isNull();
+        assertBytes(file, "fixture");
+    }
     @Test void persistedTargetDeletesBytesOutsideTransactionsAndCanReplayAfterLostCompletion() throws Exception {
         StoredFile file = uploaded();
         StoredFile unrelated = uploaded("unrelated.txt");
@@ -275,6 +305,8 @@ class FilePurgeIntegrationTest {
         ClaimedJob claim = purge(file);
         if (prepared) { progress.prepare(claim); }
         fileRepository.deleteById(file.getId());
+        assertThat(operations.get(owner, claim.id()).state().name()).isNotEqualTo("LOGICALLY_COMPLETED");
+        assertThat(operations.get(owner, claim.id()).logicallyCompletedAt()).isNull();
         clearInvocations(storage);
         assertThatThrownBy(() -> handler.handle(context(claim))).isInstanceOf(IllegalStateException.class);
         verify(storage, never()).delete(any(StorageTarget.class));
@@ -446,11 +478,14 @@ class FilePurgeIntegrationTest {
         ClaimedJob claim = purge(file);
         storage.delete(binding.target(file.getStorageKey())); // Old handler's authoritative success.
         assertThat(jobs.complete(claim)).isTrue();
+        assertThat(operations.get(owner, claim.id()).state().name()).isEqualTo("BLOCKED");
+        assertThat(operations.get(owner, claim.id()).reasonCode()).isEqualTo("METADATA_PENDING");
         var before = jobRepository.findById(claim.id()).orElseThrow();
         clearInvocations(storage);
         var page = recovery.recoverPage(null, 1);
         assertThat(page.examined()).isEqualTo(1);
         assertThat(page.finalized()).isEqualTo(1);
+        assertThat(operations.get(owner, claim.id()).state().name()).isEqualTo("LOGICALLY_COMPLETED");
         assertThat(page.nextCursor()).isEqualTo(claim.id());
         verify(storage, never()).delete(any(StorageTarget.class));
         assertReceipts(file, true, true);

@@ -11,8 +11,6 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
-import org.springframework.security.web.access.AccessDeniedHandlerImpl;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 
 @Configuration
@@ -38,11 +36,6 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http
     ) throws Exception {
-
-        AccessDeniedHandlerImpl accessDeniedHandler =
-                new AccessDeniedHandlerImpl();
-
-        accessDeniedHandler.setErrorPage(null);
 
         http
                 // Cookie endpoints use session-bound synchronizer CSRF checks and custom-header admission.
@@ -81,15 +74,22 @@ public class SecurityConfig {
 
                 // Validate bearer JWTs using our JwtDecoder bean.
                 .oauth2ResourceServer(oauth2 ->
-                        oauth2.jwt(jwt -> {})
+                        oauth2.jwt(jwt -> {}).authenticationEntryPoint((request, response, failure) -> {
+                            response.setHeader("WWW-Authenticate", "Bearer");
+                            com.vaultdrive.common.exception.ApiError.write(response, 401, "Authentication required");
+                        })
                 )
 
                 // Explicitly handle unauthenticated and forbidden requests.
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(
-                            new BearerTokenAuthenticationEntryPoint()
+                            (request, response, failure) -> {
+                                response.setHeader("WWW-Authenticate", "Bearer");
+                                com.vaultdrive.common.exception.ApiError.write(response, 401, "Authentication required");
+                            }
                         )
-                        .accessDeniedHandler(accessDeniedHandler)
+                        .accessDeniedHandler((request, response, failure) ->
+                            com.vaultdrive.common.exception.ApiError.write(response, 403, "Permission denied"))
                 );
 
         return http.build();

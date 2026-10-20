@@ -8,6 +8,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 
 import com.vaultdrive.file.dto.FilePageResponse;
 import com.vaultdrive.file.dto.FileResponse;
+import com.vaultdrive.folder.dto.TrashPageResponse;
 import com.vaultdrive.file.dto.FileDownload;
 import com.vaultdrive.file.exception.InvalidFilePaginationException;
 import com.vaultdrive.file.exception.FileNotFoundException;
@@ -716,7 +717,7 @@ class FileControllerTest {
                 .andExpect(jsonPath("$.status")
                         .value(409))
                 .andExpect(jsonPath("$.error")
-                        .value("Conflict"))
+                        .value("CONFLICT"))
                 .andExpect(jsonPath("$.message")
                         .value(
                                 "A file with this name already exists"
@@ -891,7 +892,7 @@ class FileControllerTest {
                 )
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.status").value(409))
-                .andExpect(jsonPath("$.error").value("Conflict"))
+                .andExpect(jsonPath("$.error").value("CONFLICT"))
                 .andExpect(jsonPath("$.message")
                         .value("A file with this name already exists"));
     }
@@ -1062,17 +1063,12 @@ class FileControllerTest {
         UUID ownerId = UUID.randomUUID();
         UUID fileId = UUID.randomUUID();
     
-        FileResponse file = new FileResponse(
+        TrashPageResponse.Entry file = new TrashPageResponse.Entry(
                 fileId,
-                "report.pdf",
-                null,
-                "application/pdf",
-                100L,
-                Instant.now(),
-                Instant.now()
+                "FILE", "report.pdf", null, Instant.now(), null, "TRASHED", List.of("RESTORE", "PURGE")
         );
     
-        FilePageResponse response = new FilePageResponse(
+        TrashPageResponse response = new TrashPageResponse(
                 List.of(file),
                 0,
                 50,
@@ -1114,7 +1110,7 @@ class FileControllerTest {
     void shouldListTrashedFilesWithCustomPagination() throws Exception {
         UUID ownerId = UUID.randomUUID();
     
-        FilePageResponse response = new FilePageResponse(
+        TrashPageResponse response = new TrashPageResponse(
                 List.of(),
                 2,
                 20,
@@ -1315,13 +1311,18 @@ class FileControllerTest {
         UUID ownerId = UUID.randomUUID();
         UUID fileId = UUID.randomUUID();
 
+        UUID operation = UUID.randomUUID();
+        when(fileService.requestPermanentDeletion(ownerId, fileId)).thenReturn(operation);
+
         mockMvc.perform(
                 delete("/api/v1/files/{fileId}/permanent", fileId)
                         .with(jwt().jwt(jwt ->
                                 jwt.subject(ownerId.toString())
                         ))
         )
-                .andExpect(status().isAccepted());
+                .andExpect(status().isAccepted())
+                .andExpect(header().string("Location", "/api/v1/deletion-operations/" + operation))
+                .andExpect(jsonPath("$.operationId").value(operation.toString()));
 
         verify(fileService)
                 .requestPermanentDeletion(ownerId, fileId);

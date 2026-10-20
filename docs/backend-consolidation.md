@@ -1,5 +1,9 @@
 # Full backend code and architecture consolidation
 
+Current API update: [MVP API contract consistency](api-contract.md) supersedes
+historical capability, folder/Trash pagination, deletion-polling and error-envelope
+descriptions below. Storage, authorization and worker protocols are unchanged.
+
 Date: 2026-10-20. Scope: the complete Spring Boot backend, its tests, build,
 configuration and V1–V37 migration history. No product feature, schema migration,
 frontend, deployment or shared-data repair is included.

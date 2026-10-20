@@ -29,6 +29,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.vaultdrive.folder.dto.FolderResponse;
+import com.vaultdrive.folder.dto.FolderPageResponse;
 
 import java.util.List;
 
@@ -287,17 +288,17 @@ class FolderControllerTest {
                 Instant.parse("2026-09-29T11:00:00Z")
         );
     
-        when(folderService.listRootFolders(ownerId))
-                .thenReturn(List.of(documents, pictures));
+        when(folderService.listRootFolders(ownerId, 0, 50))
+                .thenReturn(new FolderPageResponse(List.of(documents, pictures), 0, 50, 2, 1));
     
         mockMvc.perform(get("/api/v1/folders")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(2))
-                .andExpect(jsonPath("$[0].name").value("Documents"))
-                .andExpect(jsonPath("$[1].name").value("Pictures"));
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[0].name").value("Documents"))
+                .andExpect(jsonPath("$.content[1].name").value("Pictures"));
     
-        verify(folderService).listRootFolders(ownerId);
+        verify(folderService).listRootFolders(ownerId, 0, 50);
     }
     
     
@@ -308,15 +309,15 @@ class FolderControllerTest {
     
         String token = jwtService.generateAccessToken(ownerId);
     
-        when(folderService.listRootFolders(ownerId))
-                .thenReturn(List.of());
+        when(folderService.listRootFolders(ownerId, 0, 50))
+                .thenReturn(new FolderPageResponse(List.of(), 0, 50, 0, 0));
     
         mockMvc.perform(get("/api/v1/folders")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
+                .andExpect(jsonPath("$.content.length()").value(0));
     
-        verify(folderService).listRootFolders(ownerId);
+        verify(folderService).listRootFolders(ownerId, 0, 50);
     }
     
     
@@ -374,19 +375,19 @@ class FolderControllerTest {
                 UUID.randomUUID(), "Resume", parentId, now, now
         );
     
-        when(folderService.listChildFolders(ownerId, parentId))
-                .thenReturn(List.of(projects, resume));
+        when(folderService.listChildFolders(ownerId, parentId, 0, 50))
+                .thenReturn(new FolderPageResponse(List.of(projects, resume), 0, 50, 2, 1));
     
         mockMvc.perform(get("/api/v1/folders/{folderId}/children", parentId)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(2))
-                .andExpect(jsonPath("$[0].name").value("Projects"))
-                .andExpect(jsonPath("$[1].name").value("Resume"))
-                .andExpect(jsonPath("$[0].parentFolderId")
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[0].name").value("Projects"))
+                .andExpect(jsonPath("$.content[1].name").value("Resume"))
+                .andExpect(jsonPath("$.content[0].parentFolderId")
                         .value(parentId.toString()));
     
-        verify(folderService).listChildFolders(ownerId, parentId);
+        verify(folderService).listChildFolders(ownerId, parentId, 0, 50);
     }
 
     @Test
@@ -396,15 +397,15 @@ class FolderControllerTest {
     
         String token = jwtService.generateAccessToken(ownerId);
     
-        when(folderService.listChildFolders(ownerId, parentId))
-                .thenReturn(List.of());
+        when(folderService.listChildFolders(ownerId, parentId, 0, 50))
+                .thenReturn(new FolderPageResponse(List.of(), 0, 50, 0, 0));
     
         mockMvc.perform(get("/api/v1/folders/{folderId}/children", parentId)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
+                .andExpect(jsonPath("$.content.length()").value(0));
     
-        verify(folderService).listChildFolders(ownerId, parentId);
+        verify(folderService).listChildFolders(ownerId, parentId, 0, 50);
     }
 
     @Test
@@ -414,7 +415,7 @@ class FolderControllerTest {
     
         String token = jwtService.generateAccessToken(ownerId);
     
-        when(folderService.listChildFolders(ownerId, parentId))
+        when(folderService.listChildFolders(ownerId, parentId, 0, 50))
                 .thenThrow(new FolderNotFoundException("Folder not found"));
     
         mockMvc.perform(get("/api/v1/folders/{folderId}/children", parentId)
@@ -422,7 +423,7 @@ class FolderControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Folder not found"));
     
-        verify(folderService).listChildFolders(ownerId, parentId);
+        verify(folderService).listChildFolders(ownerId, parentId, 0, 50);
     }
 
     @Test

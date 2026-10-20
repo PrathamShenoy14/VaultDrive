@@ -14,7 +14,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
+import com.vaultdrive.folder.dto.FolderPageResponse;
 import java.util.UUID;
 
 @RestController
@@ -51,14 +51,15 @@ public class FolderController {
     // List the authenticated user's root folders.
 
     @GetMapping
-    public ResponseEntity<List<FolderResponse>> listRootFolders(
+    public ResponseEntity<FolderPageResponse> listRootFolders(
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size,
             @AuthenticationPrincipal Jwt jwt
     ) {
 
         UUID ownerId = UUID.fromString(jwt.getSubject());
 
-        List<FolderResponse> folders =
-                folderService.listRootFolders(ownerId);
+        FolderPageResponse folders =
+                folderService.listRootFolders(ownerId, page, size);
 
         return ResponseEntity.ok(folders);
     }
@@ -80,14 +81,15 @@ public class FolderController {
     }
 
     @GetMapping("/{folderId}/children")
-    public ResponseEntity<List<FolderResponse>> listChildFolders(
+    public ResponseEntity<FolderPageResponse> listChildFolders(
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size,
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID folderId
     ) {
         UUID ownerId = UUID.fromString(jwt.getSubject());
     
-        List<FolderResponse> children =
-                folderService.listChildFolders(ownerId, folderId);
+        FolderPageResponse children =
+                folderService.listChildFolders(ownerId, folderId, page, size);
     
         return ResponseEntity.ok(children);
     }

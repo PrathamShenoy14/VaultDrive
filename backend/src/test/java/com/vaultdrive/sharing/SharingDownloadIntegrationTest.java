@@ -79,6 +79,21 @@ class SharingDownloadIntegrationTest {
     }
 
     @Test
+    void storageOpenFailureUsesSanitizedBadGatewayAfterAuthorization() throws Exception {
+        when(storage.download(key)).thenAnswer(call -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            throw new IllegalStateException("provider-private-" + key);
+        });
+        mvc.perform(get("/api/v1/files/{id}/download", file)
+                .with(jwt().jwt(j -> j.subject(viewer.toString()))))
+                .andExpect(status().isBadGateway()).andExpect(jsonPath("$.status").value(502))
+                .andExpect(jsonPath("$.error").value("BAD_GATEWAY"))
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString(key))));
+        verify(storage).download(key);
+    }
+
+    @Test
     void ancestorTrashDeniesDownloadWithoutOpeningStorage() throws Exception {
         folderService.deleteFolder(owner, folder);
         mvc.perform(get("/api/v1/files/{id}/download", file)

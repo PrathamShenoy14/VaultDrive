@@ -1,5 +1,9 @@
 # Sharing M1: grants and Viewer access
 
+Current API update: [MVP API contract consistency](api-contract.md) supersedes
+historical capability, folder/Trash pagination, deletion-polling and error-envelope
+descriptions below. Storage, authorization and worker protocols are unchanged.
+
 Consolidation update: [the backend milestone](backend-consolidation.md) has retired synchronous upload. New uploads use direct multipart only. Earlier ownership and retirement statements below preserve the original sharing milestone boundary; retained historical storage/recovery evidence is unchanged.
 
 Implemented on 2026-10-19 under the [approved design](sharing-permissions-design.md).

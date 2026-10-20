@@ -29,6 +29,64 @@ import java.util.stream.Collectors;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ExceptionHandler({org.springframework.web.servlet.resource.NoResourceFoundException.class,
+            org.springframework.web.servlet.NoHandlerFoundException.class})
+    public ResponseEntity<ApiError> handleUnknownRoute(Exception ex) {
+        return ResponseEntity.status(404).body(new ApiError(404, "NOT_FOUND", "Resource not found"));
+    }
+
+    @ExceptionHandler({org.springframework.dao.QueryTimeoutException.class,
+            org.springframework.dao.CannotAcquireLockException.class,
+            org.hibernate.exception.LockAcquisitionException.class,
+            org.hibernate.QueryTimeoutException.class,
+            jakarta.persistence.QueryTimeoutException.class})
+    public ResponseEntity<ApiError> handleTimeout(Exception ex) {
+        return ResponseEntity.status(503).header("Retry-After", "2")
+                .header("Cache-Control", "no-store")
+                .body(new ApiError(503, "SERVICE_UNAVAILABLE", "Service temporarily unavailable"));
+    }
+
+    @ExceptionHandler(RuntimeException.class)
+    public ResponseEntity<ApiError> handleUnexpected(RuntimeException ex) {
+        log.error("Unhandled API failure ({})", ex.getClass().getSimpleName());
+        return ResponseEntity.status(500).header("Cache-Control", "no-store")
+                .body(new ApiError(500, "INTERNAL_SERVER_ERROR", "Unexpected server error"));
+    }
+
+    @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+    public ResponseEntity<ApiError> handleStatus(org.springframework.web.server.ResponseStatusException ex) {
+        int status = ex.getStatusCode().value();
+        String message = status >= 500 ? "Service unavailable" : ex.getReason();
+        return ResponseEntity.status(status).headers(ex.getHeaders()).header("Cache-Control", "no-store")
+                .body(new ApiError(status, "", message));
+    }
+
+    @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
+    public ResponseEntity<ApiError> handleForbidden(org.springframework.security.access.AccessDeniedException ex) {
+        return ResponseEntity.status(403).body(new ApiError(403, "FORBIDDEN", "Permission denied"));
+    }
+
+    @ExceptionHandler({org.springframework.http.converter.HttpMessageNotReadableException.class,
+            org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class,
+            org.springframework.web.bind.MissingServletRequestParameterException.class,
+            org.springframework.web.bind.MissingRequestHeaderException.class,
+            org.springframework.web.method.annotation.HandlerMethodValidationException.class})
+    public ResponseEntity<ApiError> handleMalformedRequest(Exception ex) {
+        return ResponseEntity.badRequest().body(new ApiError(400, "BAD_REQUEST", "Invalid request"));
+    }
+
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiError> handleMethod(org.springframework.web.HttpRequestMethodNotSupportedException ex) {
+        return ResponseEntity.status(405).headers(ex.getHeaders())
+                .body(new ApiError(405, "METHOD_NOT_ALLOWED", "Method not allowed"));
+    }
+
+    @ExceptionHandler(org.springframework.web.HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ApiError> handleMedia(org.springframework.web.HttpMediaTypeNotSupportedException ex) {
+        return ResponseEntity.status(415).body(new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Unsupported media type"));
+    }
 
     @ExceptionHandler(OptimisticLockingFailureException.class)
     public ResponseEntity<ApiError> handleOptimisticLockingFailure(
@@ -252,7 +310,7 @@ public class GlobalExceptionHandler {
                 .status(HttpStatus.BAD_REQUEST)
                 .body(new ApiError(
                         400,
-                        "Bad Request",
+                        "BAD_REQUEST",
                         ex.getMessage()
                 ));
     }
@@ -265,7 +323,7 @@ public class GlobalExceptionHandler {
                 .status(HttpStatus.BAD_REQUEST)
                 .body(new ApiError(
                         400,
-                        "Bad Request",
+                        "BAD_REQUEST",
                         ex.getMessage()
                 ));
     }
@@ -278,7 +336,7 @@ public class GlobalExceptionHandler {
                 .status(HttpStatus.CONFLICT)
                 .body(new ApiError(
                         409,
-                        "Conflict",
+                        "CONFLICT",
                         ex.getMessage()
                 ));
     }

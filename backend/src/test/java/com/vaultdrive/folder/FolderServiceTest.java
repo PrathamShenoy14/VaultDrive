@@ -29,7 +29,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.vaultdrive.folder.dto.FolderResponse;
-import com.vaultdrive.folder.dto.TrashFolderResponse;
+import com.vaultdrive.folder.dto.FolderPageResponse;
+import com.vaultdrive.folder.dto.TrashPageResponse;
 import com.vaultdrive.folder.dto.RestoreFolderResponse;
 
 import java.util.List;
@@ -68,7 +69,7 @@ class FolderServiceTest {
         lenient().when(resourceReads.requireEditor(any(), anyBoolean(), any(), anyBoolean()))
                 .thenAnswer(i -> new com.vaultdrive.sharing.ResourceAccess(i.getArgument(2), i.getArgument(0),
                         null, "", null, 0, null, java.time.Instant.now(), java.time.Instant.now(),
-                        com.vaultdrive.sharing.ResourceRole.OWNER, true, true));
+                        com.vaultdrive.sharing.ResourceRole.OWNER, true, true, true));
         folderNameValidator = new FolderNameValidator();
         folderAccessValidator = new FolderAccessValidator(folderRepository);
 
@@ -408,12 +409,12 @@ class FolderServiceTest {
     @Test
     void listingsDelegateToCurrentPermissionSnapshot() {
         UUID actor = UUID.randomUUID(), folder = UUID.randomUUID();
-        when(resourceReads.folders(actor, folder)).thenReturn(List.of());
-        when(resourceReads.folders(actor, null)).thenReturn(List.of());
-        assertThat(folderService.listChildFolders(actor, folder)).isEmpty();
-        assertThat(folderService.listRootFolders(actor)).isEmpty();
-        verify(resourceReads).folders(actor, folder);
-        verify(resourceReads).folders(actor, null);
+        when(resourceReads.folders(actor, folder, 0, 50)).thenReturn(new FolderPageResponse(List.of(), 0, 50, 0, 0));
+        when(resourceReads.folders(actor, null, 0, 50)).thenReturn(new FolderPageResponse(List.of(), 0, 50, 0, 0));
+        assertThat(folderService.listChildFolders(actor, folder, 0, 50).content()).isEmpty();
+        assertThat(folderService.listRootFolders(actor, 0, 50).content()).isEmpty();
+        verify(resourceReads).folders(actor, folder, 0, 50);
+        verify(resourceReads).folders(actor, null, 0, 50);
     }
 
     @Test
@@ -904,86 +905,11 @@ class FolderServiceTest {
     }
 
     @Test
-    void shouldListTrashedFoldersNewestFirst() {
-        UUID ownerId = UUID.randomUUID();
-
-        Folder documents = new Folder(ownerId, null, "Documents");
-        Folder pictures = new Folder(ownerId, null, "Pictures");
-
-        documents.softDelete();
-        pictures.softDelete();
-
-        // Assign deterministic deletion timestamps.
-        ReflectionTestUtils.setField(
-                documents,
-                "deletedAt",
-                Instant.parse("2026-09-20T10:00:00Z")
-        );
-
-        ReflectionTestUtils.setField(
-                pictures,
-                "deletedAt",
-                Instant.parse("2026-09-21T10:00:00Z")
-        );
-
-        when(folderRepository
-                .findByOwnerIdAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
-                        ownerId
-                ))
-                .thenReturn(List.of(documents, pictures));
-
-        List<TrashFolderResponse> result =
-                folderService.listTrashedFolders(ownerId);
-
-        assertThat(result)
-                .extracting(TrashFolderResponse::id)
-                .containsExactly(
-                        pictures.getId(),
-                        documents.getId()
-                );
-
-        assertThat(result.get(0).deletedAt())
-                .isAfter(result.get(1).deletedAt());
-    }
-
-    @Test
-    void shouldReturnEmptyTrashList() {
-        UUID ownerId = UUID.randomUUID();
-
-        when(folderRepository
-                .findByOwnerIdAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
-                        ownerId
-                ))
-                .thenReturn(List.of());
-
-        List<TrashFolderResponse> result =
-                folderService.listTrashedFolders(ownerId);
-
-        assertThat(result).isEmpty();
-    }
-
-    @Test
-    void shouldPreserveOriginalParentInTrashResponse() {
-        UUID ownerId = UUID.randomUUID();
-
-        Folder parent = new Folder(ownerId, null, "Documents");
-        Folder child = new Folder(ownerId, parent.getId(), "Projects");
-
-        child.softDelete();
-
-        when(folderRepository
-                .findByOwnerIdAndDeletedAtIsNotNullAndPurgeRequestedAtIsNull(
-                        ownerId
-                ))
-                .thenReturn(List.of(child));
-
-        List<TrashFolderResponse> result =
-                folderService.listTrashedFolders(ownerId);
-
-        assertThat(result).hasSize(1);
-        assertThat(result.get(0).originalParentFolderId())
-                .isEqualTo(parent.getId());
-        assertThat(result.get(0).deletedAt()).isNotNull();
+    void shouldDelegateBoundedTrashSnapshot() {
+        UUID owner = UUID.randomUUID();
+        var page = new TrashPageResponse(List.of(), 2, 10, 0, 0);
+        when(resourceReads.trash(owner, true, 2, 10)).thenReturn(page);
+        assertThat(folderService.listTrashedFolders(owner, 2, 10)).isSameAs(page);
     }
 
     @Test

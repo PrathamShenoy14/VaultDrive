@@ -1,6 +1,8 @@
 package com.vaultdrive.file;
 
 import com.vaultdrive.file.dto.FileResponse;
+import com.vaultdrive.folder.dto.TrashPageResponse;
+import com.vaultdrive.deletion.DeletionOperationController;
 import com.vaultdrive.file.dto.FilePageResponse;
 import com.vaultdrive.file.dto.RenameFileRequest;
 import com.vaultdrive.file.dto.MoveFileRequest;
@@ -169,7 +171,7 @@ public class FileController {
     }
 
     @GetMapping("/trash")
-    public ResponseEntity<FilePageResponse> listTrash(
+    public ResponseEntity<TrashPageResponse> listTrash(
             @AuthenticationPrincipal Jwt jwt,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size
@@ -177,7 +179,7 @@ public class FileController {
         UUID ownerId =
                 UUID.fromString(jwt.getSubject());
     
-        FilePageResponse response =
+        TrashPageResponse response =
                 fileService.listTrash(
                         ownerId,
                         page,
@@ -204,19 +206,15 @@ public class FileController {
     }
 
     @DeleteMapping("/{fileId}/permanent")
-    public ResponseEntity<Void> permanentlyDeleteFile(
+    public ResponseEntity<DeletionOperationController.Accepted> permanentlyDeleteFile(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID fileId
     ) {
         UUID ownerId =
                 UUID.fromString(jwt.getSubject());
 
-        fileService.requestPermanentDeletion(
-                ownerId,
-                fileId
-        );
-
-        return ResponseEntity.accepted().build();
+        UUID operation = fileService.requestPermanentDeletion(ownerId, fileId);
+        return DeletionOperationController.accepted(operation);
     }
     
     private MediaType resolveContentType(

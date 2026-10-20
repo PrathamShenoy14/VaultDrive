@@ -45,6 +45,7 @@ class SharingIntegrationTest {
     @Autowired FolderService folderService;
     @Autowired EntityManager em;
     @Autowired MockMvc mvc;
+    @Autowired com.vaultdrive.deletion.DeletionOperationService operations;
     UUID owner, viewer, stranger;
     Folder privateParent, shared, child, sibling;
     StoredFile file;
@@ -69,7 +70,7 @@ class SharingIntegrationTest {
         assertThatThrownBy(() -> reads.folder(viewer, child.getId())).isInstanceOf(FolderNotFoundException.class);
         assertThatThrownBy(() -> reads.folder(viewer, sibling.getId())).isInstanceOf(FolderNotFoundException.class);
         assertThat(reads.files(viewer, null, 0, 50).content()).isEmpty();
-        assertThat(reads.folders(viewer, null)).isEmpty();
+        assertThat(reads.folders(viewer, null, 0, 50).content()).isEmpty();
         mvc.perform(get("/api/v1/files/{id}", file.getId()).with(as(viewer)))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.folderId").isEmpty())
                 .andExpect(jsonPath("$.storageKey").doesNotExist());
@@ -83,7 +84,7 @@ class SharingIntegrationTest {
         assertThat(reads.folder(viewer, child.getId()).parentFolderId()).isEqualTo(shared.getId());
         assertThat(reads.file(viewer, file.getId()).role()).isEqualTo(ResourceRole.EDITOR);
         assertThat(reads.file(viewer, file.getId()).fileResponse().folderId()).isEqualTo(child.getId());
-        assertThat(reads.folders(viewer, shared.getId())).extracting("id").containsExactly(child.getId());
+        assertThat(reads.folders(viewer, shared.getId(), 0, 50).content()).extracting("id").containsExactly(child.getId());
         assertThat(reads.files(viewer, child.getId(), 0, 10).content()).extracting("id").containsExactly(file.getId());
         assertThat(grants.list(owner, false, file.getId()).direct()).hasSize(1);
         assertThat(grants.list(owner, false, file.getId()).inherited()).singleElement()
@@ -351,9 +352,9 @@ class SharingIntegrationTest {
         grant(true, shared.getId(), ResourceRole.VIEWER);
         Folder lower = folder(shared.getId(), "alpha");
         Folder upper = folder(shared.getId(), "Alpha");
-        assertThat(reads.folders(viewer, shared.getId())).extracting("id")
+        assertThat(reads.folders(viewer, shared.getId(), 0, 50).content()).extracting("id")
                 .containsExactly(upper.getId(), lower.getId(), child.getId());
-        assertThat(reads.folders(owner, shared.getId())).extracting("id")
+        assertThat(reads.folders(owner, shared.getId(), 0, 50).content()).extracting("id")
                 .containsExactly(upper.getId(), lower.getId(), child.getId());
         ready(child.getId(), "aaa.txt");
         assertThat(reads.files(viewer, child.getId(), 0, 1).content()).extracting("name").containsExactly("aaa.txt");
@@ -361,11 +362,10 @@ class SharingIntegrationTest {
         assertThat(reads.files(owner, child.getId(), 9, 1).totalElements()).isEqualTo(2);
         folder(shared.getId(), "\u03c3");
         folder(shared.getId(), "\u03c2");
-        var expected = folders.findAll().stream().filter(f -> f.getOwnerId().equals(owner)
-                && shared.getId().equals(f.getParentFolderId()) && f.getDeletedAt() == null).toList().stream()
-                .sorted(java.util.Comparator.comparing(Folder::getName, String.CASE_INSENSITIVE_ORDER)
-                        .thenComparing(Folder::getName).thenComparing(Folder::getId)).map(Folder::getId).toList();
-        assertThat(reads.folders(viewer, shared.getId())).extracting("id").containsExactlyElementsOf(expected);
+        var expected = em.createNativeQuery("SELECT id FROM folders WHERE parent_folder_id = :parent "
+                + "ORDER BY lower(name) COLLATE \"C\", name COLLATE \"C\", id")
+                .setParameter("parent", shared.getId()).getResultList();
+        assertThat(reads.folders(viewer, shared.getId(), 0, 50).content()).extracting("id").containsExactlyElementsOf(expected);
     }
 
     @Test
@@ -398,7 +398,7 @@ class SharingIntegrationTest {
         assertThat(persisted.getParentFolderId()).isEqualTo(child.getId());
         assertThat(reads.folder(viewer, created).effectiveRole()).isEqualTo(ResourceRole.EDITOR);
         assertThat(grants.list(owner, true, created).direct()).isEmpty();
-        assertThat(reads.folders(viewer, null)).isEmpty();
+        assertThat(reads.folders(viewer, null, 0, 50).content()).isEmpty();
         mvc.perform(post("/api/v1/folders").with(as(viewer)).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"http-created\",\"parentFolderId\":\"" + shared.getId() + "\"}"))
                 .andExpect(status().isCreated());
@@ -457,7 +457,7 @@ class SharingIntegrationTest {
         // Null destination means the actor's root; a collaborator cannot select the owner's root.
         UUID ownRoot = folderService.createFolder(viewer, null, "own-root");
         assertThat(folders.findById(ownRoot).orElseThrow().getOwnerId()).isEqualTo(viewer);
-        assertThat(reads.folders(viewer, null)).extracting("id").containsExactly(ownRoot);
+        assertThat(reads.folders(viewer, null, 0, 50).content()).extracting("id").containsExactly(ownRoot);
     }
 
     @Test
@@ -501,7 +501,7 @@ class SharingIntegrationTest {
         mvc.perform(get("/api/v1/files/trash").with(as(viewer))).andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isEmpty());
         mvc.perform(get("/api/v1/trash/folders").with(as(viewer))).andExpect(status().isOk())
-                .andExpect(jsonPath("$").isEmpty());
+                .andExpect(jsonPath("$.content").isEmpty());
         mvc.perform(multipart("/api/v1/files").file(new org.springframework.mock.web.MockMultipartFile("file", "no.txt", "text/plain", new byte[]{1})).param("folderId", child.getId().toString())
                 .with(as(viewer))).andExpect(status().isMethodNotAllowed());
         mvc.perform(post("/api/v1/upload-sessions").with(as(viewer)).header("Idempotency-Key", UUID.randomUUID().toString())
@@ -589,6 +589,180 @@ class SharingIntegrationTest {
         em.refresh(file);
         assertThat(file.getName()).isEqualTo("file.txt");
         assertThat(child.getName()).isEqualTo("child");
+    }
+
+    @Test
+    void capabilitiesDescribeCurrentActionsAndImmediateParentAuthority() {
+        assertThat(reads.file(owner, file.getId()).fileResponse().allowedCapabilities())
+                .contains("MOVE", "TRASH", "MANAGE_GRANTS").doesNotContain("RESTORE", "PURGE");
+        assertThat(reads.folder(owner, child.getId()).allowedCapabilities())
+                .contains("CREATE_FOLDER", "UPLOAD").doesNotContain("RESTORE", "PURGE");
+        grant(false, file.getId(), ResourceRole.EDITOR);
+        grant(true, child.getId(), ResourceRole.EDITOR);
+        assertThat(reads.folder(viewer, child.getId()).parentFolderId()).isNull();
+        assertThat(reads.folder(viewer, child.getId()).allowedCapabilities()).doesNotContain("TRASH", "MOVE", "PURGE");
+        assertThat(reads.file(viewer, file.getId()).fileResponse().allowedCapabilities()).contains("TRASH");
+        // Direct Editor on child does not authorize trashing child in a Viewer parent.
+        var parentGrant = grant(true, shared.getId(), ResourceRole.VIEWER);
+        assertThat(reads.folder(viewer, child.getId()).allowedCapabilities()).doesNotContain("TRASH");
+        grants.update(owner, true, shared.getId(), parentGrant.id(), ResourceRole.EDITOR, parentGrant.version());
+        assertThat(reads.folder(viewer, child.getId()).allowedCapabilities()).contains("TRASH");
+        grants.revoke(owner, true, child.getId(), grants.list(owner, true, child.getId()).direct().getFirst().id());
+        grants.update(owner, true, shared.getId(), parentGrant.id(), ResourceRole.VIEWER, parentGrant.version() + 1);
+        assertThat(reads.folder(viewer, child.getId()).allowedCapabilities()).containsExactly("READ_METADATA", "LIST_CHILDREN");
+    }
+
+    @Test
+    void directlySharedEditorResponseRedactsParentAndNeverAdvertisesTrash() throws Exception {
+        grant(false, file.getId(), ResourceRole.EDITOR);
+        mvc.perform(get("/api/v1/files/{id}", file.getId()).with(as(viewer)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.folderId").isEmpty())
+                .andExpect(jsonPath("$.allowedCapabilities", org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem("TRASH"))));
+        mvc.perform(patch("/api/v1/files/{id}/name", file.getId()).with(as(viewer))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"changed\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.folderId").isEmpty())
+                .andExpect(jsonPath("$.allowedCapabilities", org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem("TRASH"))));
+    }
+
+    @Test
+    void trashPagesShareSchemaAndSuppressPendingAncestorDescendants() throws Exception {
+        fileService.trashFile(owner, file.getId());
+        folderService.deleteFolder(owner, child.getId());
+        for (String route : new String[]{"/api/v1/files/trash", "/api/v1/trash/folders"}) {
+            mvc.perform(get(route).with(as(owner))).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.content[0].deletedAt").isNotEmpty())
+                    .andExpect(jsonPath("$.content[0].lifecycleState").value("TRASHED"))
+                    .andExpect(jsonPath("$.content[0].allowedCapabilities[0]").value("RESTORE"))
+                    .andExpect(jsonPath("$.totalElements").value(1));
+            mvc.perform(get(route).with(as(viewer))).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(0));
+        }
+        folderService.deleteFolder(owner, shared.getId());
+        UUID operation = folderService.requestPermanentDeletion(owner, shared.getId());
+        assertThat(reads.trash(owner, false, 0, 50).content()).isEmpty();
+        var trash = reads.trash(owner, true, 0, 50);
+        assertThat(trash.totalElements()).isEqualTo(1);
+        assertThat(trash.content().getFirst().id()).isEqualTo(shared.getId());
+        assertThat(trash.content().getFirst().purgeRequestedAt()).isNotNull();
+        assertThat(trash.content().getFirst().allowedCapabilities()).isEmpty();
+        assertThat(operations.get(owner, operation).state()).isEqualTo(com.vaultdrive.deletion.DeletionOperationService.State.ACCEPTED);
+        assertThatThrownBy(() -> fileService.restoreFile(owner, file.getId())).isInstanceOf(FolderNotFoundException.class);
+        assertThatThrownBy(() -> folderService.restoreFolder(owner, child.getId())).isInstanceOf(FolderNotFoundException.class);
+    }
+
+    @Test
+    void trashedAncestorCannotAdvertisePurgeWhenDescendantHasItsOwnPendingIntent() {
+        folderService.deleteFolder(owner, child.getId());
+        folderService.requestPermanentDeletion(owner, child.getId());
+        folderService.deleteFolder(owner, shared.getId());
+        var entries = reads.trash(owner, true, 0, 50).content();
+        assertThat(entries.stream().filter(e -> e.id().equals(shared.getId())).findFirst().orElseThrow()
+                .allowedCapabilities()).containsExactly("RESTORE");
+        assertThat(entries.stream().filter(e -> e.id().equals(child.getId())).findFirst().orElseThrow()
+                .allowedCapabilities()).isEmpty();
+    }
+
+    @Test
+    void trashPaginationUsesDeletionTimeAndUuidAndCountsEmptyPages() {
+        fileService.trashFile(owner, file.getId());
+        var second = ready(child.getId(), "second.txt");
+        fileService.trashFile(owner, second.getId());
+        em.createNativeQuery("UPDATE files SET deleted_at = TIMESTAMPTZ '2026-10-20 00:00:00Z' WHERE owner_id = :owner")
+                .setParameter("owner", owner).executeUpdate();
+        var expected = em.createNativeQuery("SELECT id FROM files WHERE owner_id = :owner ORDER BY deleted_at DESC, id")
+                .setParameter("owner", owner).getResultList();
+        assertThat(reads.trash(owner, false, 0, 1).content().getFirst().id()).isEqualTo(expected.getFirst());
+        assertThat(reads.trash(owner, false, 1, 1).content().getFirst().id()).isEqualTo(expected.getLast());
+        assertThat(reads.trash(owner, false, Integer.MAX_VALUE, 100).content()).isEmpty();
+        assertThat(reads.trash(owner, false, 10, 1).totalElements()).isEqualTo(2);
+        fileService.restoreFile(owner, file.getId());
+        assertThat(reads.trash(owner, false, 0, 1).totalElements()).isEqualTo(1);
+        assertThat(reads.file(owner, file.getId()).fileResponse().allowedCapabilities()).doesNotContain("RESTORE", "PURGE");
+    }
+
+    @Test
+    void boundedFolderPagesKeepCountsAndOrderAcrossOwnerAndInheritedViewer() throws Exception {
+        grant(true, shared.getId(), ResourceRole.VIEWER);
+        var first = folder(shared.getId(), "Alpha");
+        folder(shared.getId(), "alpha");
+        for (UUID actor : new UUID[]{owner, viewer}) {
+            assertThat(reads.folders(actor, shared.getId(), 0, 1).content().getFirst().id()).isEqualTo(first.getId());
+            assertThat(reads.folders(actor, shared.getId(), 1, 1).content().getFirst().name()).isEqualTo("alpha");
+            var empty = reads.folders(actor, shared.getId(), Integer.MAX_VALUE, 100);
+            assertThat(empty.content()).isEmpty(); assertThat(empty.totalElements()).isEqualTo(3);
+            mvc.perform(get("/api/v1/folders/{id}/children", shared.getId()).with(as(actor)).param("size", "1"))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.size").value(1)).andExpect(jsonPath("$.totalElements").value(3));
+        }
+    }
+
+    @Test
+    void errorsUseOneEnvelopeForAuthenticatedAndPublicFailures() throws Exception {
+        for (String route : new String[]{"/api/v1/folders", "/api/v1/files/trash", "/api/v1/trash/folders"}) {
+            for (String size : new String[]{"0", "101", "not-a-number"}) {
+                mvc.perform(get(route).with(as(owner)).param("size", size)).andExpect(status().isBadRequest())
+                        .andExpect(jsonPath("$.status").value(400)).andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+            }
+            mvc.perform(get(route)).andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.status").value(401)).andExpect(jsonPath("$.error").value("UNAUTHORIZED"));
+        }
+        mvc.perform(get("/api/v1/folders/not-a-uuid").with(as(owner))).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Invalid request"));
+        mvc.perform(patch("/api/v1/files/{id}/name", file.getId()).with(as(owner))
+                .contentType(MediaType.APPLICATION_JSON).content("{"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+        mvc.perform(get("/api/v1/public/share-links/not-a-uuid")).andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404)).andExpect(jsonPath("$.error").value("NOT_FOUND"))
+                .andExpect(jsonPath("$.message").value("Share link not found"));
+        mvc.perform(delete("/api/v1/files/{id}", file.getId()).with(as(stranger))).andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+    }
+
+    @Test
+    void deletionAcceptanceReturnsOwnerOnlyRetainedPollingLocation() throws Exception {
+        folderService.deleteFolder(owner, child.getId());
+        var response = mvc.perform(delete("/api/v1/trash/folders/{id}/permanent", child.getId()).with(as(owner)))
+                .andExpect(status().isAccepted()).andExpect(jsonPath("$.operationId").isNotEmpty())
+                .andExpect(header().string("Retry-After", "2")).andReturn().getResponse();
+        String location = response.getHeader("Location");
+        mvc.perform(get(location).with(as(owner))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("ACCEPTED"))
+                .andExpect(jsonPath("$.logicallyCompletedAt").isEmpty())
+                .andExpect(header().string("Cache-Control", "no-store"));
+        for (String path : new String[]{location, "/api/v1/deletion-operations/" + UUID.randomUUID()}) {
+            mvc.perform(get(path).with(as(stranger))).andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.message").value("Deletion operation not found"));
+        }
+        mvc.perform(get(location)).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void deletionPollingDistinguishesPublicationFailureQuarantineAndJobRecovery() {
+        folderService.deleteFolder(owner, child.getId());
+        UUID operation = folderService.requestPermanentDeletion(owner, child.getId());
+        em.createNativeQuery("UPDATE outbox_events SET delivery_status = 'FAILED' WHERE id = :id")
+                .setParameter("id", operation).executeUpdate();
+        assertThat(operations.get(owner, operation).state().name()).isEqualTo("FAILED");
+        assertThat(operations.get(owner, operation).reasonCode()).isEqualTo("DELIVERY_FAILED");
+        em.createNativeQuery("UPDATE outbox_events SET delivery_status = 'PUBLISHED', published_at = clock_timestamp() WHERE id = :id")
+                .setParameter("id", operation).executeUpdate();
+        assertThat(operations.get(owner, operation).state().name()).isEqualTo("PROCESSING");
+        em.createNativeQuery("INSERT INTO notification_quarantine(body_sha256,event_id,reason_code) VALUES (:hash,:id,'EVENT_MISMATCH')")
+                .setParameter("hash", UUID.randomUUID().toString().replace("-", "").repeat(2)).setParameter("id", operation).executeUpdate();
+        assertThat(operations.get(owner, operation).state().name()).isEqualTo("BLOCKED");
+        assertThat(operations.get(owner, operation).reasonCode()).isEqualTo("DELIVERY_QUARANTINED");
+        em.createNativeQuery("INSERT INTO background_jobs(id,job_type,aggregate_type,aggregate_id) VALUES (:id,'FOLDER_PURGE','FOLDER',:folder)")
+                .setParameter("id", operation).setParameter("folder", child.getId()).executeUpdate();
+        assertThat(operations.get(owner, operation).state().name()).isEqualTo("PROCESSING");
+    }
+
+    @Test
+    void legacyDeletionWithoutExecutableTargetIsBlockedAndStillNotRestorable() throws Exception {
+        fileService.trashFile(owner, file.getId());
+        UUID operation = fileService.requestPermanentDeletion(owner, file.getId());
+        assertThat(operations.get(owner, operation).state()).isEqualTo(com.vaultdrive.deletion.DeletionOperationService.State.BLOCKED);
+        assertThat(operations.get(owner, operation).reasonCode()).isEqualTo("TARGET_UNAVAILABLE");
+        assertThat(reads.trash(owner, false, 0, 50).content().getFirst().allowedCapabilities()).isEmpty();
+        mvc.perform(post("/api/v1/files/{id}/restore", file.getId()).with(as(owner))).andExpect(status().isNotFound());
     }
 
     private void assertEditorBarriers() throws Exception {

@@ -272,3 +272,16 @@ M5 ends here; no later milestone is implemented by this change.
 No frontend, browser multipart release or additional authentication features are
 included. General rate limiting, account-state features, JWT key evolution and
 refresh-history retention remain separate work.
+
+## MVP API contract consistency
+
+- [x] Fresh permission/lifecycle capabilities and immediate-parent Editor Trash eligibility.
+- [x] Common owner Trash entries, timestamps, actions and pending-ancestor suppression.
+- [x] Bounded folder/Trash pagination with deterministic order and snapshot counts.
+- [x] Owner-only retained deletion-operation status and receipt-backed logical completion.
+- [x] Common error/validation envelopes and preserved non-leaking public-link semantics.
+- [x] [Response, compatibility, polling and operational documentation](api-contract.md).
+- Verification results and gated limits are recorded in that milestone document.
+
+This milestone ends here. Search, quotas, copy, new activity history, frontend,
+retention policy and physical reclamation remain separate work.
