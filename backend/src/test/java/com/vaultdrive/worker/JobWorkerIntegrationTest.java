@@ -35,12 +35,17 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-@SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=job_worker_test",
-        "spring.flyway.schemas=job_worker_test", "spring.flyway.default-schema=job_worker_test"
-})
+@SpringBootTest
 @ActiveProfiles("test")
 class JobWorkerIntegrationTest {
+    private static final String QUOTA_TEST_SCHEMA = "job_worker_test_" + java.util.UUID.randomUUID().toString().replace("-", "");
+    @org.springframework.test.context.DynamicPropertySource
+    static void quotaIsolatedSchema(org.springframework.test.context.DynamicPropertyRegistry r) {
+        r.add("spring.datasource.url", () -> "jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=" + QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.schemas", () -> QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.default-schema", () -> QUOTA_TEST_SCHEMA);
+    }
+
     @MockitoSpyBean private BackgroundJobService jobs;
     @Autowired private BackgroundJobRepository repository;
     @Autowired private EntityManager entityManager;

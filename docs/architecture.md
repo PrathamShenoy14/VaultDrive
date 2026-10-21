@@ -1,6 +1,6 @@
 # VaultDrive architecture
 
-Last reconciled with the repository on 2026-10-20. This is the current implementation map. Earlier phase records and ADR extensions preserve history; their original boundaries are not the current inventory.
+Last reconciled with the repository on 2026-10-21. This is the current implementation map. Earlier phase records and ADR extensions preserve history; their original boundaries are not the current inventory.
 
 ## System and responsibility boundaries
 
@@ -29,7 +29,7 @@ The [consolidation audit](backend-consolidation.md) records removals, retained h
 
 ## Persistence and schema
 
-Flyway V1–V37 is append-only; Hibernate validates the schema. JPA manages users, folders, files, immutable outbox writes and short job/outbox entity transactions. Native EntityManager SQL implements PostgreSQL recursive authorization, scalar evidence reads, row locks, claims and conditional transitions. JdbcTemplate manages authentication sessions/revocations without a parallel JPA entity model. All use the configured datasource/transaction manager.
+Flyway V1–V39 is append-only; Hibernate validates the schema. JPA manages users, folders, files, immutable outbox writes and short job/outbox entity transactions. Native EntityManager SQL implements PostgreSQL recursive authorization, scalar evidence reads, row locks, claims and conditional transitions. JdbcTemplate manages authentication sessions/revocations without a parallel JPA entity model. All use the configured datasource/transaction manager.
 
 Services own transactions and `spring.jpa.open-in-view=false` remains required. SQL stays in its existing responsibility's transaction service or access repository. A blanket JPA/JDBC conversion would obscure locking and atomicity. Managed mutation targets are refreshed where required; status/version bulk CAS flushes/clears the context. Scalar worker reads avoid stale managed state; independent job/outbox transactions bound cache lifetime. Never save an older entity after native SQL changed that row.
 
@@ -65,6 +65,7 @@ Read projections add no migration, mutation authority or lock-order change.
 - Multipart uses hierarchy → fresh file → allocation → session → decision/progress.
 - Purge uses hierarchy → resource rows → allocation/work/run/progress → final job fence. Metadata pages use exclusive coordination and UUID row order. Job-only transactions acquire no later resource locks.
 - Authentication locks its refresh family before mutable family/token reads.
+- Charge changes lock the owner quota row from the file trigger: after a new reservation file insert and before its new allocation/session, or after existing-file lifecycle coordination. Counter repair uses exclusive hierarchy, then quota row, then a fresh aggregate. No lock spans Garage I/O.
 
 No transaction or hierarchy lock spans Garage, signing or broker I/O. Status/version CAS and live token/clock fences reject stale transitions. Pending-purge ancestry blocks restore root fallback and subtree escape. Lock-scope performance remains unmeasured.
 
@@ -82,6 +83,14 @@ The size policy remains positive files up to five GiB, fixed eight-MiB parts and
 
 ## Trash, purge and asynchronous work
 
+Per-owner quota accounting uses READY file lengths as used and UPLOADING lengths
+as reserved. Trash and pending purge remain charged through durable file metadata
+removal. The authenticated [usage API and repair procedure](storage-quotas.md)
+report limit/used/reserved/available plus separately inventoried uncertain
+write-admitted allocations. Unknown physical reclamation never increases logical
+capacity by itself. [ADR-0011](decisions/0011-storage-quota-accounting.md) records
+the lock and backfill rules.
+
 Only accessible active READY files are usable. Rename/move update metadata without object copies. Trash retains bytes and releases names; restore keeps identity and resolves collisions while preserving extensions. Purge requests record intent/outbox atomically, return 202 and perform no storage I/O. Pending folder intent makes its subtree immutable.
 
 The publisher claims committed rows, publishes outside transactions and requires broker confirm without mandatory return before PUBLISHED. Uncertain outcomes replay the same event UUID. Typed consumers validate source identity, commit deduplicated jobs/notifications or sanitized quarantine, then ACK. Both use one three-attempt delivery policy; exhaustion stops unacknowledged work. Permission routing remains separate from purge.
@@ -98,8 +107,16 @@ Tests cover unit/controller contracts, real PostgreSQL constraints/rollback/race
 
 [Consolidation verification](backend-consolidation.md#verification) records final results and gated skips. Historical [continuous purge](async-purge-verification.md) and [process recovery](async-process-recovery.md) records are evidence for their recorded revisions, not claims that gated runs executed now.
 
+The MVP quota milestone's final 2026-10-21 clean backend run passed 1,331 tests
+with zero failures/errors and 20 gated skips on isolated PostgreSQL schemas,
+including live RabbitMQ, Garage multipart and the HTTP-to-Garage purge harness.
+The skipped checks were process-kill recovery (1), the separate Garage capability
+characterization (18), and retained-journal recovery (1). Focused quota,
+delegated upload, lifecycle and purge races also passed. Test isolation was
+extended to older fixed-schema suites without changing their shared data.
+
 The [browser harness](browser-multipart-interoperability.md) provides exact-body/checksum, refresh serialization and proxy checks. **Live browser interoperability remains unverified** pending approved HTTPS, real-origin CORS, browser execution and bounded clocks. Java/Node checks do not establish browser behavior.
 
 ## Remaining work
 
-Unknown multipart reclamation, broad historical repair, retention/erasure, zero-byte support, general rate limiting, JWT key evolution, quotas, dependency readiness probes, backups/disaster recovery, clients and deployment remain separate. Performance, multi-node failure and capacity targets are unmeasured. No shared checksum repair, old allocation sweep or VM change is part of consolidation. See the [roadmap](development-roadmap.md) and [risk register](backend-consolidation.md#deferred-decisions-and-risks).
+Unknown multipart reclamation, broad historical repair, retention/erasure, zero-byte support, general rate limiting, JWT key evolution, quota notifications, dependency readiness probes, backups/disaster recovery, clients and deployment remain separate. Performance, multi-node failure and capacity targets are unmeasured. No shared checksum repair, old allocation sweep or VM change is part of consolidation. See the [roadmap](development-roadmap.md) and [risk register](backend-consolidation.md#deferred-decisions-and-risks).

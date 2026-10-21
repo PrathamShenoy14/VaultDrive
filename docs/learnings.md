@@ -2,6 +2,16 @@
 
 This is a living explanation of lessons demonstrated by committed VaultDrive code. It is not a claim that every production concern is solved.
 
+## Logical quota and physical uncertainty are independent
+
+An UPLOADING file needs capacity before Garage work starts. Its reservation moves
+to used at READY in the same PostgreSQL transaction. Successful object work with
+uncertain metadata completion keeps the reservation. Cancellation releases logical
+capacity at durable FAILED without proving multipart blocks were reclaimed.
+Retained allocation identity and known logical length make that uncertainty visible
+without granting cleanup authority. A per-owner quota row serializes simultaneous
+admission; its real contention cost remains unmeasured.
+
 ## Browser multipart protocol boundary
 
 Java SDK success does not prove a browser can set required headers, pass preflight

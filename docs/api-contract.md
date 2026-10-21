@@ -1,5 +1,24 @@
 # MVP API contract consistency
 
+The later [MVP storage quota contract](storage-quotas.md) adds the authenticated
+usage route and quota exhaustion response below. The historical no-quota boundary
+later in this document describes only its original milestone.
+
+GET `/api/v1/users/me/storage` returns 200, `Cache-Control: no-store` and the
+authenticated caller's owner-scoped usage:
+
+```json
+{"limitBytes":10737418240,"usedBytes":0,"reservedBytes":0,"availableBytes":10737418240,"uncertainStorageBytes":0,"uncertainStorageAllocations":0,"unknownSizeAllocations":0}
+```
+
+All byte fields are nonnegative 64-bit integers. Available excludes used and
+outstanding reserved bytes. Uncertain fields are a separate allocation inventory,
+not added to available. Missing bearer credentials return 401. A quota-exceeding
+upload-session request returns 409
+`{"status":409,"error":"CONFLICT","message":"Storage quota exceeded"}`
+after destination authorization. It exposes no other owner's limit or usage.
+Authorized idempotency replay retains its original charge.
+
 Implemented on 2026-10-20. This is the current resource, Trash, deletion-polling
 and error contract. Earlier sharing/lifecycle records preserve their milestone
 boundaries; the changes below supersede their capability, folder-list, Trash and

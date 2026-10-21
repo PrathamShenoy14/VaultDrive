@@ -48,12 +48,17 @@ import static org.mockito.ArgumentMatchers.anyLong;
 
 /** Real PostgreSQL only: metadata fixtures and simulated authoritative byte receipts; no Garage calls. */
 @Import(HistoricalUploadFixtures.class)
-@SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=folder_discovery_test",
-        "spring.flyway.schemas=folder_discovery_test", "spring.flyway.default-schema=folder_discovery_test"
-})
+@SpringBootTest
 @ActiveProfiles("test")
 class FolderPurgeDiscoveryIntegrationTest {
+    private static final String QUOTA_TEST_SCHEMA = "folder_discovery_test_" + java.util.UUID.randomUUID().toString().replace("-", "");
+    @org.springframework.test.context.DynamicPropertySource
+    static void quotaIsolatedSchema(org.springframework.test.context.DynamicPropertyRegistry r) {
+        r.add("spring.datasource.url", () -> "jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=" + QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.schemas", () -> QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.default-schema", () -> QUOTA_TEST_SCHEMA);
+    }
+
     @Autowired HistoricalUploadFixtures history;
     @Autowired com.vaultdrive.file.MultipartSessionService multipart;
 

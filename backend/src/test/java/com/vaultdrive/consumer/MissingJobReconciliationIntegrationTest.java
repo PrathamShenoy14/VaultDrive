@@ -47,12 +47,17 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @Import(HistoricalObjectFixtures.class)
-@SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=missing_job_test",
-        "spring.flyway.schemas=missing_job_test", "spring.flyway.default-schema=missing_job_test"
-})
+@SpringBootTest
 @ActiveProfiles("test")
 class MissingJobReconciliationIntegrationTest {
+    private static final String QUOTA_TEST_SCHEMA = "missing_job_test_" + java.util.UUID.randomUUID().toString().replace("-", "");
+    @org.springframework.test.context.DynamicPropertySource
+    static void quotaIsolatedSchema(org.springframework.test.context.DynamicPropertyRegistry r) {
+        r.add("spring.datasource.url", () -> "jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=" + QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.schemas", () -> QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.default-schema", () -> QUOTA_TEST_SCHEMA);
+    }
+
     @Autowired HistoricalObjectFixtures historicalObjects;
 
     @Autowired HistoricalUploadFixtures history;

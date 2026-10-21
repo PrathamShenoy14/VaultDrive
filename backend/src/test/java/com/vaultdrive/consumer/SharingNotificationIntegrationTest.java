@@ -17,12 +17,18 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=sharing_m6_test",
-        "spring.flyway.schemas=sharing_m6_test", "spring.flyway.default-schema=sharing_m6_test"})
+@SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class SharingNotificationIntegrationTest extends SharingNotificationFixtures {
+    private static final String QUOTA_TEST_SCHEMA = "sharing_m6_test_" + java.util.UUID.randomUUID().toString().replace("-", "");
+    @org.springframework.test.context.DynamicPropertySource
+    static void quotaIsolatedSchema(org.springframework.test.context.DynamicPropertyRegistry r) {
+        r.add("spring.datasource.url", () -> "jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=" + QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.schemas", () -> QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.default-schema", () -> QUOTA_TEST_SCHEMA);
+    }
+
     @Autowired MockMvc mvc;
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean PermissionEventIngestor delivery;
 

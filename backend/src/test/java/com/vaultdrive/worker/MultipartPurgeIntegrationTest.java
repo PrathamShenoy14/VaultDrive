@@ -65,6 +65,7 @@ class MultipartPurgeIntegrationTest {
     @Autowired FolderPurgeFileService member;
     @Autowired FilePurgeProgressService progress;
     @Autowired JdbcTemplate jdbc;
+    @Autowired StorageUsageService usage;
     @Autowired PlatformTransactionManager manager;
     @MockitoBean ObjectStorageService storage;
     UUID owner;
@@ -93,6 +94,7 @@ class MultipartPurgeIntegrationTest {
         } else cancel.cancel(owner, s.id());
         var old = s;
         assertThat(jdbc.queryForObject("SELECT status FROM files WHERE id = ?", String.class, s.fileId())).isEqualTo("FAILED");
+        assertCharge(0, 0);
         var replacement = reserve(null, "reuse");
         assertThat(replacement.fileId()).isNotEqualTo(s.fileId());
         assertThat(key(replacement)).isNotEqualTo(key(s));
@@ -139,6 +141,7 @@ class MultipartPurgeIntegrationTest {
                 if (state.equals("STORAGE_COMPLETE")) completion.recordReceipt(owner, permit.snapshot(), evidence(permit.snapshot()), Evidence.COMPLETE_HEAD);
             }
         }
+        assertCharge(0, List.of("CANCELLED", "ABORT_UNKNOWN", "EXPIRED").contains(state) ? 0 : 1);
         var before = jdbc.queryForMap("SELECT * FROM upload_sessions WHERE id = ?", s.id());
         var claim = folderClaim(root); drain(claim);
         assertLogical(s); assertThat(jdbc.queryForMap("SELECT * FROM upload_sessions WHERE id = ?", s.id())).isEqualTo(before);
@@ -146,6 +149,8 @@ class MultipartPurgeIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM folders WHERE id = ?", Integer.class, root)).isZero();
         var old = s;
         assertThatThrownBy(() -> sessions.get(owner, old.id())).isInstanceOf(FileNotFoundException.class);
+        assertCharge(0, 0);
+        assertThat(usage.get(owner).uncertainStorageAllocations()).isEqualTo(state.equals("RESERVED") ? 0 : 1);
         assertThatThrownBy(() -> jdbc.update("UPDATE file_purge_work SET bytes_deleted_at = clock_timestamp(), byte_receipt_job_id = ? WHERE file_id = ?", claim.id(), old.fileId()))
             .isInstanceOf(RuntimeException.class);
         verify(storage, never()).delete(any(StorageTarget.class));
@@ -153,13 +158,17 @@ class MultipartPurgeIntegrationTest {
 
     @Test void readyStandalonePurgeUsesExactReceiptBindingAndReplaysWithoutDelete() throws Exception {
         var s = ready(reserve(null, "ready")); var target = completion.authorize(owner, s.id()).target();
+        assertCharge(1, 0);
         files.trashFile(owner, s.fileId()); metadata.requestPermanentDeletion(owner, s.fileId());
+        assertCharge(1, 0);
         UUID event = jdbc.queryForObject("SELECT event_id FROM file_purge_targets WHERE file_id = ?", UUID.class, s.fileId());
         jobs.create(event, JobType.FILE_PURGE, s.fileId()); var claim = jobs.claimNext(JobType.FILE_PURGE).orElseThrow();
         assertThat(fileHandler.handle(context(claim))).isEqualTo(JobHandler.Result.SUCCEEDED);
         assertThat(fileHandler.handle(context(claim))).isEqualTo(JobHandler.Result.SUCCEEDED);
         verify(storage, times(1)).delete(target);
         assertThat(repository.existsById(s.fileId())).isFalse();
+        assertCharge(0, 0);
+        assertThat(usage.get(owner).uncertainStorageAllocations()).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT bytes_deleted_at IS NOT NULL AND metadata_finalized_at IS NOT NULL AND multipart_discarded_at IS NULL FROM file_purge_work WHERE file_id = ?", Boolean.class, s.fileId())).isTrue();
         assertThat(jobs.complete(claim)).isTrue(); assertThat(progress.recoverSucceeded(event)).isTrue();
         var newer = reserve(null, "ready"); assertThat(key(newer)).isNotEqualTo(key(s));
@@ -169,10 +178,13 @@ class MultipartPurgeIntegrationTest {
     @Test void readyFolderTrashRestoreAndPurgePreserveBindingAndUseByteProof() throws Exception {
         UUID root = folders.createFolder(owner, null, "ready-root"); var s = ready(reserve(root, "ready")); String key = key(s);
         folders.deleteFolder(owner, root);
+        assertCharge(1, 0);
         assertThatThrownBy(() -> sessions.get(owner, s.id())).isInstanceOf(FileNotFoundException.class);
         folders.restoreFolder(owner, root); assertThat(key(s)).isEqualTo(key);
+        assertCharge(1, 0);
         assertThat(sessions.get(owner, s.id()).completion().ready()).isTrue();
         var claim = folderClaim(root); drain(claim);
+        assertCharge(0, 0);
         verify(storage, times(1)).delete(argThat((StorageTarget t) -> t.key().equals(key)));
         assertThat(jdbc.queryForObject("SELECT bytes_deleted_at IS NOT NULL AND multipart_discarded_at IS NULL FROM file_purge_work WHERE file_id = ?", Boolean.class, s.fileId())).isTrue();
     }
@@ -182,9 +194,11 @@ class MultipartPurgeIntegrationTest {
         var claim = folderClaim(root); seal(claim);
         doThrow(new StorageDeletionException(StorageDeletionException.Kind.TRANSIENT)).when(storage).delete(any(StorageTarget.class));
         assertThat(folderHandler.handle(context(claim))).isEqualTo(JobHandler.Result.RETRY);
+        assertCharge(1, 0);
         assertThat(repository.existsById(s.fileId())).isTrue();
         assertThat(jdbc.queryForObject("SELECT bytes_deleted_at IS NULL FROM file_purge_work WHERE file_id = ?", Boolean.class, s.fileId())).isTrue();
         doNothing().when(storage).delete(any(StorageTarget.class)); drain(claim);
+        assertCharge(0, 0);
         verify(storage, times(2)).delete(argThat((StorageTarget t) -> t.key().equals(key(s))));
     }
 
@@ -211,7 +225,9 @@ class MultipartPurgeIntegrationTest {
         Supplier<Object> ready = () -> completion.finalizeReady(owner, s.id());
         Supplier<Object> purge = () -> { folders.deleteFolder(owner, root); folders.requestPermanentDeletion(owner, root); return "PURGE"; };
         race(readyFirst ? ready : purge, readyFirst ? purge : ready);
+        assertCharge(readyFirst ? 1 : 0, readyFirst ? 0 : 1);
         var claim = claimExisting(root); drain(claim);
+        assertCharge(0, 0);
         if (readyFirst) {
             verify(storage, times(1)).delete(any(StorageTarget.class));
             assertThat(jdbc.queryForObject("SELECT bytes_deleted_at IS NOT NULL FROM file_purge_work WHERE file_id = ?", Boolean.class, s.fileId())).isTrue();
@@ -282,6 +298,11 @@ class MultipartPurgeIntegrationTest {
     }
     private CompletedObject evidence(Snapshot s) { return new CompletedObject(1,s.expectedSha256(),"opaque-final","text/plain",Map.of("vaultdrive-session",s.session().id().toString(),"vaultdrive-initiation",s.session().initiationId().toString())); }
     private String key(Session s) { return jdbc.queryForObject("SELECT storage_key FROM file_storage_objects WHERE file_id = ?", String.class, s.fileId()); }
+    private void assertCharge(long used, long reserved) {
+        var current = usage.get(owner);
+        assertThat(current.usedBytes()).isEqualTo(used);
+        assertThat(current.reservedBytes()).isEqualTo(reserved);
+    }
     private String status(Session s) { return jdbc.queryForObject("SELECT status FROM files WHERE id = ?", String.class, s.fileId()); }
     private void age(Session s) {
         tx.executeWithoutResult(t -> {

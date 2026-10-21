@@ -51,12 +51,17 @@ import static org.mockito.Mockito.*;
 
 /** Real PostgreSQL/Garage; only this test's fresh UUID owner/key allocations are mutated. */
 @Import(HistoricalObjectFixtures.class)
-@SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=folder_metadata_purge_test",
-        "spring.flyway.schemas=folder_metadata_purge_test", "spring.flyway.default-schema=folder_metadata_purge_test"
-})
+@SpringBootTest
 @ActiveProfiles("test")
 class FolderPurgeMetadataIntegrationTest {
+    private static final String QUOTA_TEST_SCHEMA = "folder_metadata_purge_test_" + java.util.UUID.randomUUID().toString().replace("-", "");
+    @org.springframework.test.context.DynamicPropertySource
+    static void quotaIsolatedSchema(org.springframework.test.context.DynamicPropertyRegistry r) {
+        r.add("spring.datasource.url", () -> "jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=" + QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.schemas", () -> QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.default-schema", () -> QUOTA_TEST_SCHEMA);
+    }
+
     @Autowired com.vaultdrive.deletion.DeletionOperationService operations;
     @Autowired HistoricalObjectFixtures historicalObjects;
 

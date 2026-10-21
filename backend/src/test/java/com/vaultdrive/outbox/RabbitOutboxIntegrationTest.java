@@ -28,15 +28,20 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 @SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=outbox_publisher_test",
-        "spring.flyway.schemas=outbox_publisher_test",
-        "spring.flyway.default-schema=outbox_publisher_test",
         "vaultdrive.outbox.publisher.max-attempts=3",
         "vaultdrive.outbox.publisher.max-backoff=2s"
 })
 @ActiveProfiles("test")
 @EnabledIfEnvironmentVariable(named = "RABBITMQ_TEST_VHOST", matches = "vaultdrive_outbox_test")
 class RabbitOutboxIntegrationTest {
+    private static final String QUOTA_TEST_SCHEMA = "outbox_publisher_test_" + java.util.UUID.randomUUID().toString().replace("-", "");
+    @org.springframework.test.context.DynamicPropertySource
+    static void quotaIsolatedSchema(org.springframework.test.context.DynamicPropertyRegistry r) {
+        r.add("spring.datasource.url", () -> "jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=" + QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.schemas", () -> QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.default-schema", () -> QUOTA_TEST_SCHEMA);
+    }
+
     @Autowired private OutboxClaimService claims;
     @Autowired private OutboxWriter writer;
     @Autowired private OutboxEventRepository repository;

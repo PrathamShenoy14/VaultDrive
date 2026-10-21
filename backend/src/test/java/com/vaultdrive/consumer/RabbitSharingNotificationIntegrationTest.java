@@ -22,12 +22,18 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
-@SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=sharing_m6_rabbit_test",
-        "spring.flyway.schemas=sharing_m6_rabbit_test", "spring.flyway.default-schema=sharing_m6_rabbit_test"})
+@SpringBootTest
 @ActiveProfiles("test")
 @EnabledIfEnvironmentVariable(named = "RABBITMQ_TEST_VHOST", matches = "vaultdrive_outbox_test")
 class RabbitSharingNotificationIntegrationTest extends SharingNotificationFixtures {
+    private static final String QUOTA_TEST_SCHEMA = "sharing_m6_rabbit_test_" + java.util.UUID.randomUUID().toString().replace("-", "");
+    @org.springframework.test.context.DynamicPropertySource
+    static void quotaIsolatedSchema(org.springframework.test.context.DynamicPropertyRegistry r) {
+        r.add("spring.datasource.url", () -> "jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=" + QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.schemas", () -> QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.default-schema", () -> QUOTA_TEST_SCHEMA);
+    }
+
     @Autowired OutboxClaimService claims;
     CachingConnectionFactory factory;
     RabbitTemplate template;

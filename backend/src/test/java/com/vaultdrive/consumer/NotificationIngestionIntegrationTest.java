@@ -35,12 +35,17 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-@SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=notification_ingestion_test",
-        "spring.flyway.schemas=notification_ingestion_test", "spring.flyway.default-schema=notification_ingestion_test"
-})
+@SpringBootTest
 @ActiveProfiles("test")
 class NotificationIngestionIntegrationTest {
+    private static final String QUOTA_TEST_SCHEMA = "notification_ingestion_test_" + java.util.UUID.randomUUID().toString().replace("-", "");
+    @org.springframework.test.context.DynamicPropertySource
+    static void quotaIsolatedSchema(org.springframework.test.context.DynamicPropertyRegistry r) {
+        r.add("spring.datasource.url", () -> "jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=" + QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.schemas", () -> QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.default-schema", () -> QUOTA_TEST_SCHEMA);
+    }
+
     @Autowired private NotificationIngestor ingestor;
     @MockitoSpyBean private BackgroundJobService jobs;
     @Autowired private BackgroundJobRepository jobRepository;

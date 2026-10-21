@@ -24,13 +24,17 @@ import org.flywaydb.core.Flyway;
 
 import static org.assertj.core.api.Assertions.*;
 
-@SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=background_job_test",
-        "spring.flyway.schemas=background_job_test",
-        "spring.flyway.default-schema=background_job_test"
-})
+@SpringBootTest
 @ActiveProfiles("test")
 class BackgroundJobIntegrationTest {
+    private static final String QUOTA_TEST_SCHEMA = "background_job_test_" + java.util.UUID.randomUUID().toString().replace("-", "");
+    @org.springframework.test.context.DynamicPropertySource
+    static void quotaIsolatedSchema(org.springframework.test.context.DynamicPropertyRegistry r) {
+        r.add("spring.datasource.url", () -> "jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=" + QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.schemas", () -> QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.default-schema", () -> QUOTA_TEST_SCHEMA);
+    }
+
     @Autowired private BackgroundJobService jobs;
     @Autowired private BackgroundJobRepository repository;
     @Autowired private EntityManager entityManager;

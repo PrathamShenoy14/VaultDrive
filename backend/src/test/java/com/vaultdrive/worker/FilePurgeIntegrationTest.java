@@ -64,12 +64,17 @@ import static org.mockito.Mockito.*;
 
 /** Real PostgreSQL and Garage, scoped to fresh owner/file UUIDs; no shared storage fixtures. */
 @Import(HistoricalObjectFixtures.class)
-@SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=file_purge_test",
-        "spring.flyway.schemas=file_purge_test", "spring.flyway.default-schema=file_purge_test"
-})
+@SpringBootTest
 @ActiveProfiles("test")
 class FilePurgeIntegrationTest {
+    private static final String QUOTA_TEST_SCHEMA = "file_purge_test_" + java.util.UUID.randomUUID().toString().replace("-", "");
+    @org.springframework.test.context.DynamicPropertySource
+    static void quotaIsolatedSchema(org.springframework.test.context.DynamicPropertyRegistry r) {
+        r.add("spring.datasource.url", () -> "jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=" + QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.schemas", () -> QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.default-schema", () -> QUOTA_TEST_SCHEMA);
+    }
+
     @Autowired com.vaultdrive.deletion.DeletionOperationService operations;
 
     @Autowired HistoricalObjectFixtures historicalObjects;
@@ -428,18 +433,24 @@ class FilePurgeIntegrationTest {
         ClaimedJob claim = purge(file);
         deleteAndRecord(claim);
         try {
-            transaction.executeWithoutResult(status -> entityManager.createNativeQuery(
-                    "UPDATE files SET owner_id = :owner WHERE id = :file")
-                    .setParameter("owner", otherOwner).setParameter("file", file.getId()).executeUpdate());
+            changeOwnerFixture(file.getId(), otherOwner);
             assertThat(progress.finalizeMetadata(claim)).isFalse();
             assertReceipts(file, true, false);
             assertThat(fileRepository.findById(file.getId()).orElseThrow().getOwnerId()).isEqualTo(otherOwner);
         } finally {
-            transaction.executeWithoutResult(status -> entityManager.createNativeQuery(
-                    "UPDATE files SET owner_id = :owner WHERE id = :file")
-                    .setParameter("owner", owner).setParameter("file", file.getId()).executeUpdate());
+            changeOwnerFixture(file.getId(), owner);
             users.deleteById(otherOwner);
         }
+    }
+
+    private void changeOwnerFixture(UUID file, UUID replacementOwner) {
+        // Current quota accounting forbids this historical corruption in ordinary writes.
+        transaction.executeWithoutResult(status -> {
+            entityManager.createNativeQuery("ALTER TABLE files DISABLE TRIGGER trg_account_file_storage").executeUpdate();
+            entityManager.createNativeQuery("UPDATE files SET owner_id=:owner WHERE id=:file")
+                    .setParameter("owner", replacementOwner).setParameter("file", file).executeUpdate();
+            entityManager.createNativeQuery("ALTER TABLE files ENABLE TRIGGER trg_account_file_storage").executeUpdate();
+        });
     }
 
     @Test void finalizationPreservesPermanentAllocationTargetAndJobIdentity() throws Exception {

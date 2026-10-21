@@ -240,11 +240,23 @@ public class GlobalExceptionHandler {
 
         while (cause != null) {
 
+            if (cause instanceof org.postgresql.util.PSQLException pg
+                    && pg.getServerErrorMessage() != null
+                    && "storage_quota_exceeded".equals(pg.getServerErrorMessage().getConstraint())) {
+                return ResponseEntity.status(409).header("Cache-Control", "no-store")
+                        .body(new ApiError(409, "CONFLICT", "Storage quota exceeded"));
+            }
+
             if (cause instanceof ConstraintViolationException
                     constraintException) {
 
                 String constraintName =
                         constraintException.getConstraintName();
+
+                if ("storage_quota_exceeded".equals(constraintName)) {
+                    return ResponseEntity.status(409).header("Cache-Control", "no-store")
+                            .body(new ApiError(409, "CONFLICT", "Storage quota exceeded"));
+                }
 
                 if ("users_email_unique_lower".equals(constraintName)) {
 

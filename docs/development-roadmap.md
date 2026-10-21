@@ -175,7 +175,7 @@ Exit criteria: correctness tests remain green and measured contention improves f
 - Add health/readiness checks that distinguish PostgreSQL and object-storage failures.
 - Add structured logging, request correlation, metrics, and tracing.
 - Define backup/restore and disaster-recovery procedures.
-- Define storage quotas and lifecycle retention.
+- [x] MVP logical owner quotas, atomic multipart reservations, usage API and bounded counter repair; see [quota operations](storage-quotas.md) and [ADR-0011](decisions/0011-storage-quota-accounting.md). Physical multipart reclamation and lifecycle retention remain open.
 
 ## Phase 5 — Sharing and authorization
 
@@ -236,7 +236,7 @@ Exit criteria: correctness tests remain green and measured contention improves f
 - Granular lock mechanism and namespace key.
 - Hard-delete retention delay and user-visible cancellation policy.
 - JWT key evolution, account-state controls and refresh-history retention policy.
-- Later sharing milestones, quota model, deployment platform, and performance targets.
+- Later sharing milestones, quota notifications/plan policy, deployment platform, and performance targets.
 
 ## Phase 2E.4 bounded missing-job reconciliation
 
@@ -285,3 +285,15 @@ refresh-history retention remain separate work.
 
 This milestone ends here. Search, quotas, copy, new activity history, frontend,
 retention policy and physical reclamation remain separate work.
+
+## MVP Storage Usage & Quota Enforcement
+
+- [x] V38 owner limits, backfilled used/reserved counters and immutable known allocation lengths; V39 account cleanup compatibility.
+- [x] Atomic owner quota enforcement across direct multipart admission, READY, FAILED and metadata removal.
+- [x] Authenticated owner usage API, generic quota error and separately inventoried uncertain storage.
+- [x] Bounded explicit reconciliation and counter repair without provider-based reclamation inference.
+- [x] PostgreSQL concurrency/lifecycle and live Garage regression coverage; execution results belong in the task report.
+
+See [ADR-0011](decisions/0011-storage-quota-accounting.md), the [API contract](api-contract.md)
+and [operator procedure](storage-quotas.md). Notifications, frontend, copy, search,
+physical multipart reclamation and automatic quota cleanup are outside this milestone.

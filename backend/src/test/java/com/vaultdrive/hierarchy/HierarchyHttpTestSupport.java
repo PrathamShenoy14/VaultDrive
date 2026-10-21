@@ -48,13 +48,19 @@ import static org.mockito.Mockito.doAnswer;
 /** Real embedded HTTP server and services; fixture transactions commit before each request. */
 @Import(HistoricalUploadFixtures.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
-        "spring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=hierarchy_http_test",
-        "spring.flyway.schemas=hierarchy_http_test", "spring.flyway.default-schema=hierarchy_http_test",
         "vaultdrive.outbox.publisher.enabled=false", "vaultdrive.purge.consumer.enabled=false",
         "vaultdrive.jobs.worker.enabled=false"
 })
 @ActiveProfiles("test")
 abstract class HierarchyHttpTestSupport {
+    private static final String QUOTA_TEST_SCHEMA = "hierarchy_http_test_" + java.util.UUID.randomUUID().toString().replace("-", "");
+    @org.springframework.test.context.DynamicPropertySource
+    static void quotaIsolatedSchema(org.springframework.test.context.DynamicPropertyRegistry r) {
+        r.add("spring.datasource.url", () -> "jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=" + QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.schemas", () -> QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.default-schema", () -> QUOTA_TEST_SCHEMA);
+    }
+
     @Autowired HistoricalUploadFixtures history;
 
     @LocalServerPort int port;

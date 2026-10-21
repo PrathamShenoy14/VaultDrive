@@ -57,12 +57,17 @@ import static org.mockito.Mockito.*;
 
 /** Real PostgreSQL/Garage; only this test's fresh UUID owner/key allocations are mutated. */
 @Import(HistoricalObjectFixtures.class)
-@SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=folder_file_purge_test",
-        "spring.flyway.schemas=folder_file_purge_test", "spring.flyway.default-schema=folder_file_purge_test"
-})
+@SpringBootTest
 @ActiveProfiles("test")
 class FolderPurgeFileIntegrationTest {
+    private static final String QUOTA_TEST_SCHEMA = "folder_file_purge_test_" + java.util.UUID.randomUUID().toString().replace("-", "");
+    @org.springframework.test.context.DynamicPropertySource
+    static void quotaIsolatedSchema(org.springframework.test.context.DynamicPropertyRegistry r) {
+        r.add("spring.datasource.url", () -> "jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=" + QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.schemas", () -> QUOTA_TEST_SCHEMA);
+        r.add("spring.flyway.default-schema", () -> QUOTA_TEST_SCHEMA);
+    }
+
     @Autowired com.vaultdrive.deletion.DeletionOperationService operations;
     @Autowired HistoricalObjectFixtures historicalObjects;
 
@@ -617,18 +622,27 @@ class FolderPurgeFileIntegrationTest {
         ClaimedJob claim = accept(true);
         UUID otherOwner = users.saveAndFlush(new User(UUID.randomUUID() + "@example.com", "test-hash", "Other owner")).getId();
         try {
-            tx.executeWithoutResult(ignored -> em.createNativeQuery("UPDATE files SET owner_id = :owner, folder_id = NULL WHERE id = :file")
-                    .setParameter("owner", otherOwner).setParameter("file", file.getId()).executeUpdate());
+            changeOwnerFixture(file.getId(), otherOwner, null);
             assertThat(handler.handle(context(claim))).isEqualTo(JobHandler.Result.CONTINUE);
             assertThat(phase()).isEqualTo("DELETE_FILES");
             assertThat(count("folder_purge_file_progress", "blocked_reason = 'IDENTITY_MISMATCH'")).isEqualTo(1);
             assertBytes(file);
             verify(storage, never()).delete(any(StorageTarget.class));
         } finally {
-            tx.executeWithoutResult(ignored -> em.createNativeQuery("UPDATE files SET owner_id = :owner, folder_id = :root WHERE id = :file")
-                    .setParameter("owner", owner).setParameter("root", root).setParameter("file", file.getId()).executeUpdate());
+            changeOwnerFixture(file.getId(), owner, root);
             users.deleteById(otherOwner);
         }
+    }
+
+    private void changeOwnerFixture(UUID file, UUID replacementOwner, UUID folder) {
+        // Current quota accounting forbids this historical corruption in ordinary writes.
+        tx.executeWithoutResult(ignored -> {
+            em.createNativeQuery("ALTER TABLE files DISABLE TRIGGER trg_account_file_storage").executeUpdate();
+            em.createNativeQuery("UPDATE files SET owner_id=:owner, folder_id=:folder WHERE id=:file")
+                    .setParameter("owner", replacementOwner).setParameter("folder", folder)
+                    .setParameter("file", file).executeUpdate();
+            em.createNativeQuery("ALTER TABLE files ENABLE TRIGGER trg_account_file_storage").executeUpdate();
+        });
     }
 
     @Test void expiredClaimCannotCommitPhaseEvenWithEveryFileComplete() throws Exception {

@@ -429,7 +429,7 @@ class MultipartSessionIntegrationTest {
 
     private String upgradeSnapshot(java.sql.Connection c, boolean migrated) throws Exception {
         try (var s = c.createStatement(); var r = s.executeQuery("SELECT jsonb_build_array("
-                + "(SELECT to_jsonb(a)" + (migrated ? " - 'upload_protocol'" : "") + " FROM file_storage_objects a),"
+                + "(SELECT to_jsonb(a)" + (migrated ? " - 'upload_protocol' - 'quota_size_bytes'" : "") + " FROM file_storage_objects a),"
                 + "(SELECT to_jsonb(i) FROM upload_cleanup_intents i),(SELECT to_jsonb(f) FROM files f))::text")) {
             assertThat(r.next()).isTrue();
             return r.getString(1);

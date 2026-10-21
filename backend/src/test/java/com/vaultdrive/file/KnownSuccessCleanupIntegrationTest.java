@@ -194,7 +194,13 @@ class KnownSuccessCleanupIntegrationTest {
                 case "no-allocation" -> sql("DELETE FROM file_storage_objects WHERE file_id=:id", file.getId());
                 case "owner" -> {
                     UUID other = users.saveAndFlush(new User(UUID.randomUUID() + "@example.com", "test-hash", "Other")).getId();
-                    sql("UPDATE files SET owner_id='" + other + "' WHERE id=:id", file.getId());
+                    // Historical mismatch fixture: current quota accounting prohibits creating it normally.
+                    tx.executeWithoutResult(status -> {
+                        em.createNativeQuery("ALTER TABLE files DISABLE TRIGGER trg_account_file_storage").executeUpdate();
+                        em.createNativeQuery("UPDATE files SET owner_id=:owner WHERE id=:id")
+                                .setParameter("owner", other).setParameter("id", file.getId()).executeUpdate();
+                        em.createNativeQuery("ALTER TABLE files ENABLE TRIGGER trg_account_file_storage").executeUpdate();
+                    });
                 }
                 case "trash" -> sql("UPDATE files SET deleted_at=clock_timestamp() WHERE id=:id", file.getId());
                 case "work" -> sql("""
