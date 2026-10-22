@@ -297,3 +297,19 @@ retention policy and physical reclamation remain separate work.
 See [ADR-0011](decisions/0011-storage-quota-accounting.md), the [API contract](api-contract.md)
 and [operator procedure](storage-quotas.md). Notifications, frontend, copy, search,
 physical multipart reclamation and automatic quota cleanup are outside this milestone.
+
+## MVP Filename Search & Filtering
+
+- [x] Authenticated PostgreSQL filename substring search across files and folders.
+- [x] Reuse effective owner/direct/inherited Viewer/Editor access, lifecycle barriers and private-parent redaction.
+- [x] Literal SQL wildcard escaping, Unicode database case mapping, bounded type/MIME/size/date/owned-shared filters.
+- [x] One-statement visible counts and stable bounded mixed-resource offset pages.
+- [x] V40 active-name trigram indexes and bounded read timeouts, without measured speedup claims.
+- [x] Isolated PostgreSQL/HTTP contracts and overlapping revoke/downgrade/move/Trash/restore/purge snapshots.
+- [x] [Endpoint semantics](api-contract.md#filename-search-and-filtering-2026-10-22), architecture and learning notes.
+
+Verification results and gated skips are recorded in
+[architecture evidence](architecture.md#filename-search-verification).
+Stop at this milestone. Content/full-text/semantic search, copy operations,
+general activity history, frontend, arbitrary sorting and cursor pagination
+remain outside this implementation. Broad-query capacity and latency are unmeasured.

@@ -41,6 +41,8 @@ public class GlobalExceptionHandler {
             org.springframework.dao.CannotAcquireLockException.class,
             org.hibernate.exception.LockAcquisitionException.class,
             org.hibernate.QueryTimeoutException.class,
+            jakarta.persistence.PessimisticLockException.class,
+            jakarta.persistence.LockTimeoutException.class,
             jakarta.persistence.QueryTimeoutException.class})
     public ResponseEntity<ApiError> handleTimeout(Exception ex) {
         return ResponseEntity.status(503).header("Retry-After", "2")

@@ -1,6 +1,6 @@
 # VaultDrive architecture
 
-Last reconciled with the repository on 2026-10-21. This is the current implementation map. Earlier phase records and ADR extensions preserve history; their original boundaries are not the current inventory.
+Last reconciled with the repository on 2026-10-22. This is the current implementation map. Earlier phase records and ADR extensions preserve history; their original boundaries are not the current inventory.
 
 ## System and responsibility boundaries
 
@@ -21,6 +21,7 @@ Client -- bearer/JSON control API --> Spring Boot --> PostgreSQL metadata/eviden
 | New uploads | Multipart session/transfer/completion/cancellation services; direct multipart only |
 | Storage I/O/signing | `ObjectStorageService` / `S3ObjectStorageService`, immutable binding, SDK retries disabled |
 | Resource authority/reads | `ResourceAccessRepository`, `ResourceReadService`, PostgreSQL resolver snapshots |
+| Filename search/filtering | `search`; combined file/folder pages through the same PostgreSQL access resolver |
 | Grants, links, activity, notifications | `sharing`, permission ingestion and isolated public-link security |
 | Publication and ingestion | PostgreSQL outbox, confirmed mandatory RabbitMQ delivery, typed transactional ingestors and shared bounded ACK policy |
 | Execution and recovery | PostgreSQL jobs, bounded worker/file/folder handlers, retained evidence and independently opt-in missing-job reconciliation |
@@ -29,7 +30,7 @@ The [consolidation audit](backend-consolidation.md) records removals, retained h
 
 ## Persistence and schema
 
-Flyway V1–V39 is append-only; Hibernate validates the schema. JPA manages users, folders, files, immutable outbox writes and short job/outbox entity transactions. Native EntityManager SQL implements PostgreSQL recursive authorization, scalar evidence reads, row locks, claims and conditional transitions. JdbcTemplate manages authentication sessions/revocations without a parallel JPA entity model. All use the configured datasource/transaction manager.
+Flyway V1–V40 is append-only; Hibernate validates the schema. JPA manages users, folders, files, immutable outbox writes and short job/outbox entity transactions. Native EntityManager SQL implements PostgreSQL recursive authorization, scalar evidence reads, row locks, claims and conditional transitions. JdbcTemplate manages authentication sessions/revocations without a parallel JPA entity model. All use the configured datasource/transaction manager.
 
 Services own transactions and `spring.jpa.open-in-view=false` remains required. SQL stays in its existing responsibility's transaction service or access repository. A blanket JPA/JDBC conversion would obscure locking and atomicity. Managed mutation targets are refreshed where required; status/version bulk CAS flushes/clears the context. Scalar worker reads avoid stale managed state; independent job/outbox transactions bound cache lifetime. Never save an older entity after native SQL changed that row.
 
@@ -42,6 +43,18 @@ Registration normalizes email and enforces BCrypt's 72-byte input bound. Login/r
 Secure HttpOnly SameSite=Strict host-only refresh cookies are confined to the same-origin login/refresh/logout contract. Custom login headers and session-bound CSRF protect cookie mutations. Other APIs are bearer-only; profile records expose no credential state. See [authentication sessions](authentication-sessions.md).
 
 Resource reads bind ownership, accessible ancestry, lifecycle and strongest direct/inherited Viewer/Editor role in one statement snapshot. Shared entry points filter authority before count/page and redact private parents. Mutation authorization is fresh under owner hierarchy coordination. Owners manage moves, restore, purge, grants and links. Editors have the specifically supported content operations and multipart admission into editable folders.
+
+Authenticated filename search uses `SearchController` -> transactional `SearchService`
+-> `ResourceAccessRepository` -> the existing V32 resolver. A possible-owner set
+(actor plus owners with a current direct grant) and literal name predicate reduce
+candidates; neither replaces effective authorization. Materialized accessible and
+filtered sets bind redacted metadata, count and deterministic mixed-resource pages
+to one statement snapshot. SQL filters cover type, exact MIME, inclusive size and
+creation/modification bounds, and owned/shared scope. No Java tree traversal,
+permission cache, copied descendant grants or storage calls are introduced.
+V40 adds public `pg_trgm` and partial active-name GIN indexes. Short queries may
+scan; transaction/statement/lock budgets bound work, without a performance claim.
+See [the endpoint and validation contract](api-contract.md#filename-search-and-filtering-2026-10-22).
 
 File Viewer links use hashed secrets in a dedicated header, isolated public GET security, uniform failures, no-store/no-referrer/nosniff and bounded per-process request/download admission. Downloads stream through the backend without presigned GETs. Admitted streams may finish after revocation. Immutable activity/outbox and recipient-isolated notifications survive resource changes without conferring authority. See [Sharing M1–M6](sharing-permissions-design.md).
 
@@ -68,6 +81,13 @@ Read projections add no migration, mutation authority or lock-order change.
 - Charge changes lock the owner quota row from the file trigger: after a new reservation file insert and before its new allocation/session, or after existing-file lifecycle coordination. Counter repair uses exclusive hierarchy, then quota row, then a fresh aggregate. No lock spans Garage I/O.
 
 No transaction or hierarchy lock spans Garage, signing or broker I/O. Status/version CAS and live token/clock fences reject stale transitions. Pending-purge ancestry blocks restore root fallback and subtree escape. Lock-scope performance remains unmeasured.
+
+Cross-owner filename search follows Shared with me's single-statement snapshot
+model, acquiring no multi-owner hierarchy locks or resource row locks. Mutations
+retain all existing coordination and lock order. An overlapping transaction may
+commit after the search snapshot; result capabilities are informational and every
+later operation must freshly authorize. Search does not promise linearizable
+revocation or a snapshot across offset-page requests.
 
 ## Direct multipart and retained historical uploads
 
@@ -116,6 +136,63 @@ delegated upload, lifecycle and purge races also passed. Test isolation was
 extended to older fixed-schema suites without changing their shared data.
 
 The [browser harness](browser-multipart-interoperability.md) provides exact-body/checksum, refresh serialization and proxy checks. **Live browser interoperability remains unverified** pending approved HTTPS, real-origin CORS, browser execution and bounded clocks. Java/Node checks do not establish browser behavior.
+
+### Filename search verification
+
+On 2026-10-22, the final focused selection (`SearchIntegrationTest`,
+`ApiContractConcurrencyIntegrationTest`, `SharingIntegrationTest`,
+`SharingConcurrencyIntegrationTest`) passed **134 tests, zero failures/errors/skips**.
+The 39 search cases use a fresh `search_<UUID>` PostgreSQL schema and committed
+per-actor fixtures. They cover owner/Viewer/Editor/stranger access, multiple owners,
+direct/inherited/overlapping grants, private parents/siblings, literal `%`, `_`,
+`!` and backslash, Unicode names, MIME declarations with charset, zero/nonzero size,
+inclusive dates, invalid bounds, deterministic type/UUID tie breakers, empty/large
+offset pages, non-READY/Trash/purge barriers, cycles/depth and sanitized lock timeout.
+Latch-held transactions verify old committed search content/count/role/parent state
+during revoke, downgrade, file/folder move, Trash, restore and purge, followed by
+fresh post-commit visibility and ordinary operation reauthorization.
+
+The final clean full suite passed **1,370 tests: 1,350 passed, 20 skipped, zero
+failures/errors**, against PostgreSQL 17.11 and inspected Garage 2.3.0/RabbitMQ
+4.3.6. It includes 12 live isolated RabbitMQ tests, 27 gated Garage multipart cases,
+and the real HTTP-to-Garage asynchronous purge harness. Both harness events reported
+`initialDueAligned=false`; the test-only scheduling adjustment was unnecessary.
+The task-owned tunnel was closed after verification. Synthetic verification
+schemas remain retained; the continuous harness cleaned only its own allocations
+and private topology/schema. No shared migration checksum was repaired.
+
+| Gated suite | Skipped | Separate prerequisite, not enabled |
+|---|---:|---|
+| `AsyncPurgeProcessRecoveryTest` | 1 | `ASYNC_PROCESS_TEST` and process-kill runbook |
+| `GarageMultipartCapabilityTest` | 18 | `GARAGE_MULTIPART_TEST` and M0 characterization |
+| `GarageMultipartJournalRecoveryTest` | 1 | Separately reviewed retained-run UUID |
+
+These skipped scenarios are unverified by this milestone. `git diff --check`,
+staged-file/diff review and local documentation link checks also passed before
+commit. The real table-lock test exposed JPA `PessimisticLockException` on native
+search reads; the common timeout advice now includes JPA pessimistic/lock timeout
+exceptions so that path returns sanitized 503 instead of 500.
+
+Reproduce from `backend/` with the ignored environment loaded in the Maven shell,
+the task-owned AMQP tunnel and existing private-vhost isolation from
+[the continuous runbook](async-purge-verification.md). Set
+`RABBITMQ_TEST_VHOST=vaultdrive_outbox_test`, `ASYNC_E2E_TEST=true`,
+`ASYNC_E2E_ALIGN_INITIAL_DUE=true`, `GARAGE_MULTIPART_TRANSFER_TEST=true`,
+`GARAGE_MULTIPART_COMPLETION_TEST=true`, `GARAGE_MULTIPART_CANCELLATION_TEST=true`,
+`GARAGE_MULTIPART_PURGE_TEST=true`, and `GARAGE_MULTIPART_VERSION=2.3.0`, then run:
+
+```powershell
+.\mvnw.cmd -o clean test '-Dspring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=filename_search_final_verification' '-Dspring.flyway.schemas=filename_search_final_verification' '-Dspring.flyway.default-schema=filename_search_final_verification'
+```
+
+Default contexts use that isolated test schema; suites with their own fresh schema
+retain their isolation. Normal publisher/consumer/worker/reconciler defaults stay
+off. No development metadata, shared fixture repair, VM configuration or applied
+migration is changed. Search adds no external I/O, mutation or lock-order change.
+V40 installs `pg_trgm` only in the tested database; production deployment still
+needs the documented extension prerequisite. Capacity, latency, browser behavior,
+cross-request snapshots and content/full-text/semantic search remain unverified
+or outside scope.
 
 ## Remaining work
 

@@ -731,3 +731,32 @@ completion commit or after the source row disappears. Generic SUCCEEDED, missing
 metadata and multipart abort/discard do not establish physical reclamation. A
 bounded status projection exposes known blockers and sanitized outcomes without
 adding storage calls, retries, worker authority or an unbounded subtree walk.
+
+## Filename search must share the resource authorization authority
+
+Search is another resource read, so a second grant-inheritance algorithm would
+drift on private parents, moves, strongest roles and Trash/purge barriers. Reuse
+the bounded PostgreSQL resolver for each candidate and its existing DTO mapping.
+A possible-owner set and an indexed name predicate only reduce work; they cannot
+establish access. Materialize authorized rows, then filtered rows before count and
+pagination so hidden resources never contribute to totals or displace visible
+entries. The empty-page left join preserves totals even beyond the last page.
+
+Literal substring search must escape the escape character before `%` and `_`.
+Using `!` keeps backslashes literal, and database `lower` keeps matching consistent
+with SQL ordering's case folding without claiming Unicode normalization or accent
+folding. MIME/size filters must exclude folders instead of treating synthetic zero
+folder sizes as file metadata. Compare MIME type/subtype while ignoring declaration
+parameters such as charset. A type and UUID tie breaker makes same-name mixed
+pages repeatable. Inclusive timestamp bounds compare metadata instants, not content
+history; offset pages still move between requests when the underlying data changes.
+
+Cross-owner search uses the existing Shared with me snapshot model instead of
+holding every owner's hierarchy lock. Latch-held uncommitted mutations test old
+committed visibility, then fresh counts/roles/parents after commit. A result is
+informational; subsequent reads/writes authorize again. Trigram GIN indexes support
+leading-wildcard search but cannot guarantee cheap one-character or broad matches.
+Use bounded statement/lock/transaction budgets and report unknown capacity. V40's
+extension lives in `public` so independent Flyway test schemas share its operator
+class; deployments need extension availability and installation privilege. No
+benchmark or constant-time SQL guarantee follows from adding an index.

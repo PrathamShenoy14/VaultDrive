@@ -1,5 +1,69 @@
 # MVP API contract consistency
 
+## Filename search and filtering (2026-10-22)
+
+Authenticated `GET /api/v1/search?q=report` returns 200 with `Cache-Control: no-store`
+and `{content: [{resourceType: "FILE"|"FOLDER", resource: <existing file/folder DTO>}],
+page, size, totalElements, totalPages}`. `resource.id` opens the resource directly;
+the visible `folderId`/`parentFolderId` supports navigation. A null parent can mean
+root or redacted private parent; clients must not infer private ancestry. No owner
+ID, storage identity, ancestry names, facets or inaccessible sibling data is exposed.
+
+| Parameter | Contract |
+|---|---|
+| `q` | Required, 1..255 Unicode code points, nonblank, no ISO controls; preserved literally, including spaces |
+| `resourceType` | Optional `FILE` or `FOLDER`; omitted searches both |
+| `scope` | `ALL` (default), `OWNED` (caller is owner), `SHARED` (other owner's accessible resource) |
+| `mimeType` | Optional exact case-insensitive MIME type/subtype, at most 255 characters; stored declaration parameters (such as charset) are ignored; filter accepts no parameters or wildcards |
+| `minSizeBytes`, `maxSizeBytes` | Optional inclusive nonnegative signed 64-bit byte bounds |
+| `createdFrom`, `createdTo` | Optional inclusive creation instants |
+| `modifiedFrom`, `modifiedTo` | Optional inclusive `updated_at` instants; metadata modification, not content-version history |
+| `page`, `size` | Zero-based page, default 0; size default 50, 1..100; same integer and 64-bit offset rules as listings |
+
+Date values are ISO instants with an offset, bounded to UTC years 0001..9999
+(maximum `9999-12-31T23:59:59.999999Z`). Lower bounds cannot exceed upper bounds.
+MIME/size filters select files only; combining them with `resourceType=FOLDER`
+returns 400. Filters combine with AND. Invalid parameters return the common
+sanitized 400 envelope without echoing rejected values; absent authentication is 401.
+
+Matching uses PostgreSQL `lower(name) LIKE lower(:pattern)` with literal substring
+semantics. `%`, `_` and the SQL escape character `!` are escaped; backslash is
+literal. PostgreSQL database locale determines Unicode case mapping; no accent
+folding, Unicode normalization, tokenization, fuzzy matching or content search
+is promised. Results order by `lower(name) COLLATE "C", name COLLATE "C",
+resource_type, id` ascending. Type breaks equal file/folder names before UUID.
+
+The V32 `resolve_resource_access` function is the authorization authority. Owned
+resources and strongest current direct/inherited Viewer/Editor grants are included,
+once per resource even with overlapping grants. Only active folders and READY
+files qualify. Trashed/pending roots or ancestors, invalid/cyclic/over-256 ancestry
+fail closed. Direct grants permit discovery under private active parents, with
+the same parent redaction and fresh informational capabilities as resource reads.
+Share links alone do not establish authenticated search permission.
+
+One SQL statement resolves access and lifecycle, filters, counts and pages across
+owners, including empty and out-of-range pages. Indexed name/possible-owner
+candidate reduction confers no authority; every result passes the existing resolver.
+No application traversal, per-result authorization lookup, cached permission, or
+visibility-dependent early return is used. Like Shared with me, search takes no
+multi-owner hierarchy locks. An overlapping uncommitted change can leave the old
+committed snapshot visible; a subsequent request sees committed revoke/downgrade,
+move, inheritance and lifecycle changes. Operations must reauthorize. Pages are
+deterministic for unchanged data, not a frozen snapshot across requests.
+
+Read budgets are five seconds per transaction, three per statement and two for
+lock waits; bounded database timeouts return sanitized 503 with `Retry-After: 2`.
+V40 installs `pg_trgm` in `public` and partial GIN `lower(name)` indexes on active
+folders and active READY files. Deployment needs the PostgreSQL extension package
+and extension-install privilege (or prior installation in `public`). Existing
+owner/parent and recipient/target grant indexes support scope and resolution.
+Short terms may scan and broad searches may time out; query latency/capacity and
+index speedups have not been benchmarked. SQL execution is not constant time.
+
+Search verification and remaining gated checks are recorded in the current
+[architecture evidence](architecture.md#filename-search-verification).
+The historical milestone exclusions below do not exclude this later search API.
+
 The later [MVP storage quota contract](storage-quotas.md) adds the authenticated
 usage route and quota exhaustion response below. The historical no-quota boundary
 later in this document describes only its original milestone.
@@ -85,8 +149,9 @@ changes from name to deletion time with a UUID tie breaker.
 
 These are offset pages, not a frozen export: concurrent permission/lifecycle/name
 changes or inserts can move entries between requests. Stable unchanged data has a
-deterministic order; cross-request snapshot isolation is not promised. No search,
-cursor, arbitrary sorting or combined file/folder feed is added. Trash reads have
+deterministic order; cross-request snapshot isolation is not promised. The original
+listing milestone added no search, cursor, arbitrary sorting or combined feed;
+the later search contract above adds its own combined feed. Trash reads have
 a five-second transaction budget, three-second statement and two-second lock-wait
 bounds; timeout returns sanitized 503 and Retry-After.
 
