@@ -81,7 +81,8 @@ class FolderServiceTest {
             hierarchyCoordinator,
             outboxWriter,
             purgeRuns,
-            resourceReads
+            resourceReads,
+            org.mockito.Mockito.mock(com.vaultdrive.activity.ResourceActivityService.class)
         );
 
         lenient()

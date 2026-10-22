@@ -22,7 +22,8 @@ Client -- bearer/JSON control API --> Spring Boot --> PostgreSQL metadata/eviden
 | Storage I/O/signing | `ObjectStorageService` / `S3ObjectStorageService`, immutable binding, SDK retries disabled |
 | Resource authority/reads | `ResourceAccessRepository`, `ResourceReadService`, PostgreSQL resolver snapshots |
 | Filename search/filtering | `search`; combined file/folder pages through the same PostgreSQL access resolver |
-| Grants, links, activity, notifications | `sharing`, permission ingestion and isolated public-link security |
+| Grants, links, permission activity, notifications | `sharing`, permission ingestion and isolated public-link security |
+| General resource history | `activity`; immutable owner-only snapshots joined to existing mutation transactions |
 | Publication and ingestion | PostgreSQL outbox, confirmed mandatory RabbitMQ delivery, typed transactional ingestors and shared bounded ACK policy |
 | Execution and recovery | PostgreSQL jobs, bounded worker/file/folder handlers, retained evidence and independently opt-in missing-job reconciliation |
 
@@ -30,7 +31,7 @@ The [consolidation audit](backend-consolidation.md) records removals, retained h
 
 ## Persistence and schema
 
-Flyway V1–V40 is append-only; Hibernate validates the schema. JPA manages users, folders, files, immutable outbox writes and short job/outbox entity transactions. Native EntityManager SQL implements PostgreSQL recursive authorization, scalar evidence reads, row locks, claims and conditional transitions. JdbcTemplate manages authentication sessions/revocations without a parallel JPA entity model. All use the configured datasource/transaction manager.
+Flyway V1–V41 is append-only; Hibernate validates the schema. JPA manages users, folders, files, immutable outbox writes and short job/outbox entity transactions. Native EntityManager SQL implements PostgreSQL recursive authorization, scalar evidence reads, row locks, claims and conditional transitions. JdbcTemplate manages authentication sessions/revocations without a parallel JPA entity model. All use the configured datasource/transaction manager.
 
 Services own transactions and `spring.jpa.open-in-view=false` remains required. SQL stays in its existing responsibility's transaction service or access repository. A blanket JPA/JDBC conversion would obscure locking and atomicity. Managed mutation targets are refreshed where required; status/version bulk CAS flushes/clears the context. Scalar worker reads avoid stale managed state; independent job/outbox transactions bound cache lifetime. Never save an older entity after native SQL changed that row.
 
@@ -88,6 +89,26 @@ retain all existing coordination and lock order. An overlapping transaction may
 commit after the search snapshot; result capabilities are informational and every
 later operation must freshly authorize. Search does not promise linearizable
 revocation or a snapshot across offset-page requests.
+
+## General file and folder activity
+
+V41 adds immutable `resource_activity_events` and frozen completion-actor columns.
+`ResourceActivityService` appends database-only historical snapshots in the existing
+successful mutation transactions: create, rename, move, Trash, restore, READY and
+proof-backed permanent metadata removal. Editors remain distinct from owners.
+Multipart records the decision actor at freeze and reuses it during recovery;
+pre-V41 decisions retain an explicitly documented initiator fallback. No-ops,
+rollback, stale optimistic writes and retained READY/finalization replays emit
+nothing. PostgreSQL guards shapes, immutability and unique terminal events.
+
+Authenticated `/api/v1/activity` uses immutable owner-only visibility and bounded
+filters/pages in a single statement. Collaborator/actor status never grants
+history or live authority, avoiding historical-name/private-parent leaks after
+move or revoke. No resource/account FK cascades remove snapshots; retention
+matches existing permission history. Permission events/outbox/notifications stay
+separate. Existing hierarchy/row/allocation/session/work/job ordering, quota
+accounting and external-I/O boundaries are unchanged. See the
+[complete event/API/retention contract](resource-activity.md).
 
 ## Direct multipart and retained historical uploads
 
@@ -193,6 +214,71 @@ V40 installs `pg_trgm` only in the tested database; production deployment still
 needs the documented extension prerequisite. Capacity, latency, browser behavior,
 cross-request snapshots and content/full-text/semantic search remain unverified
 or outside scope.
+
+### General activity verification
+
+On 2026-10-22, the initial focused selection passed **279 tests** and the expanded
+PostgreSQL/API/race/Garage/RabbitMQ selection passed **324 tests**, both with zero
+failures/errors/skips. The expanded selection includes 27 live Garage multipart
+cases, 12 isolated RabbitMQ cases and the continuous HTTP-to-Garage purge harness.
+Final attribution provenance, additional identical-folder-rename concurrency,
+upgrade/no-backfill checks and HTTP retained-history assertions are included in
+the subsequent clean full run below.
+
+The final clean full suite passed **1,402 tests: 1,382 passed, 20 skipped, zero
+failures/errors**. All 29 new activity API/PostgreSQL cases passed, including
+immutable actor attribution, failed inserts/rollback, concurrent no-op rename,
+revocation/privacy, snapshots, bounded filters/pagination and lock timeout. Existing
+sharing races assert the authorized/optimistic winner's event. READY and purge
+suites assert atomic history/proof, duplicate recovery, stale-fence rollback,
+retained recursive history and standalone/folder finalization participation.
+Live Garage cases assert one completion event. The HTTP purge harness reads
+owner history through the authenticated API after metadata removal; both events
+reported `initialDueAligned=false`, so no scheduling adjustment was needed.
+
+| Gated suite | Skipped | Separate prerequisite, not enabled |
+|---|---:|---|
+| `AsyncPurgeProcessRecoveryTest` | 1 | `ASYNC_PROCESS_TEST` and process-kill runbook |
+| `GarageMultipartCapabilityTest` | 18 | `GARAGE_MULTIPART_TEST` and M0 characterization |
+| `GarageMultipartJournalRecoveryTest` | 1 | Separately reviewed retained-run UUID |
+
+These scenarios remain unverified by this milestone. `git diff --check`, staged
+file/diff review and 123 local documentation file-link checks passed. The task-owned
+tunnel was closed after verification. Synthetic immutable history remains only in
+isolated test schemas; no shared metadata, migration checksum, VM configuration,
+service credential, storage identity or quota policy was changed.
+
+Verification uses PostgreSQL 17.11, read-only inspected Garage 2.3.0 and RabbitMQ
+4.3.6. Default test contexts use only `vaultdrive_test.activity_final_verification`;
+suites with their own fresh UUID schemas retain isolation. The new history suite
+uses `activity_<UUID>`, committed per-actor fixtures and no shared-schema repair.
+Normal async execution defaults remain disabled. Live broker tests use the existing
+private `vaultdrive_outbox_test` vhost via the task-owned localhost SSH tunnel.
+Garage fixtures use only their disposable resources and established uncertainty
+journals; no retained ambiguous allocation or reviewed journal is adopted.
+
+Reproduce from `backend/` with the ignored local environment loaded in the Maven
+shell and the documented [verification tunnel](async-purge-verification.md):
+
+```powershell
+. .\.env.local.ps1
+$env:RABBITMQ_TEST_VHOST = 'vaultdrive_outbox_test'
+$env:ASYNC_E2E_TEST = 'true'
+$env:ASYNC_E2E_ALIGN_INITIAL_DUE = 'true'
+$env:GARAGE_MULTIPART_TRANSFER_TEST = 'true'
+$env:GARAGE_MULTIPART_COMPLETION_TEST = 'true'
+$env:GARAGE_MULTIPART_CANCELLATION_TEST = 'true'
+$env:GARAGE_MULTIPART_PURGE_TEST = 'true'
+$env:GARAGE_MULTIPART_VERSION = '2.3.0'
+.\mvnw.cmd -o clean test '-Dspring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=activity_final_verification' '-Dspring.flyway.schemas=activity_final_verification' '-Dspring.flyway.default-schema=activity_final_verification'
+```
+
+Use a fresh verification schema when reproducing a changed migration revision;
+never repair checksums in shared data. The continuous harness independently owns
+its schema, topology and disposable allocation cleanup. Private credentials and
+local environment files are never committed. Performance, cross-request snapshots,
+physical reclamation, live browser release and retention/erasure remain outside
+this milestone; see [the full history contract](resource-activity.md).
 
 ## Remaining work
 

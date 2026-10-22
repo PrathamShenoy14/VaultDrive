@@ -36,6 +36,7 @@ class SharingConcurrencyIntegrationTest {
     @Autowired HierarchyCoordinator hierarchy;
     @Autowired OutboxEventRepository events;
     @Autowired EntityManager em;
+    @Autowired com.vaultdrive.activity.ResourceActivityService activity;
     @Autowired PlatformTransactionManager manager;
     @Autowired com.vaultdrive.storage.ObjectStorageService storage;
     @Autowired software.amazon.awssdk.services.s3.S3Client s3;
@@ -285,6 +286,9 @@ class SharingConcurrencyIntegrationTest {
                     ? FileNotFoundException.class : com.vaultdrive.folder.exception.FolderNotFoundException.class);
             else assertThat(loser).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
         } else assertThat(loser).isNull();
+        var history = activity.list(owner, null, null, null, null, null, null, 0, 100);
+        assertThat(history.content()).hasSize(changeFirst ? 0 : 1);
+        assertThat(history.content()).allSatisfy(e -> { assertThat(e.actorId()).isEqualTo(viewer); assertThat(e.ownerId()).isEqualTo(owner); });
         var persistedFolder = folders.findById(child).orElseThrow();
         var persistedFile = files.findById(file).orElseThrow();
         assertThat(persistedFolder.getName()).isEqualTo(!changeFirst && operation == EditorMutation.FOLDER_RENAME ? "edited" : "child");
@@ -361,6 +365,9 @@ class SharingConcurrencyIntegrationTest {
         assertThat(persisted.getName()).isEqualTo(editorFirst && rename ? "edited.txt" : "file.txt");
         assertThat(persisted.getDeletedAt() != null).isEqualTo(editorFirst && !rename);
         assertThat(persisted.getVersion()).isEqualTo(1);
+        var history = activity.list(owner, null, null, null, null, null, null, 0, 100).content();
+        assertThat(history).hasSize(1);
+        assertThat(history.getFirst().actorId()).isEqualTo(editorFirst ? viewer : owner);
     }
 
     /** First operation flushes under its real transaction/locks before the competitor starts. */

@@ -57,6 +57,7 @@ class UploadFinalizationRecoveryIntegrationTest {
     @Autowired private UserRepository users;
     @Autowired private StaleUploadExpiryTransactions expiry;
     @Autowired private EntityManager em;
+    @Autowired private com.vaultdrive.activity.ResourceActivityService activity;
     @Autowired private PlatformTransactionManager manager;
     @Autowired private DataSource dataSource;
     @Autowired private com.vaultdrive.job.BackgroundJobService jobs;
@@ -106,6 +107,9 @@ class UploadFinalizationRecoveryIntegrationTest {
         assertThat(allocation(file)).isEqualTo(receipt);
         assertThat(transactions.recover(file.getId())).isEqualTo(RECOVERED);
         assertThat(transactions.recover(file.getId())).isEqualTo(ALREADY_READY);
+        assertThat(activity.list(owner, com.vaultdrive.activity.ResourceActivityService.ResourceType.FILE, file.getId(), null, null, null, null, 0, 100).content()).hasSize(1);
+        assertThat(activity.list(owner, com.vaultdrive.activity.ResourceActivityService.ResourceType.FILE, file.getId(), null, null, null, null, 0, 100).content().getFirst().actorAttribution())
+                .isEqualTo(com.vaultdrive.activity.ResourceActivityService.ActorAttribution.UPLOAD_INITIATOR);
         history.receipt(file);
         assertThat(allocation(file)).isEqualTo(receipt);
         assertThat(scalar("SELECT version FROM files WHERE id = :id", file.getId())).isEqualTo(file.getVersion() + 1);
@@ -125,6 +129,7 @@ class UploadFinalizationRecoveryIntegrationTest {
         String receipt = allocation(file);
         tx.executeWithoutResult(status -> { assertThat(raw().recover(file.getId())).isEqualTo(RECOVERED); status.setRollbackOnly(); });
         assertUploading(file);
+        assertThat(activity.list(owner, com.vaultdrive.activity.ResourceActivityService.ResourceType.FILE, file.getId(), null, null, null, null, 0, 100).content()).isEmpty();
         assertThat(allocation(file)).isEqualTo(receipt);
         assertThat(transactions.recover(file.getId())).isEqualTo(RECOVERED);
     }
@@ -327,7 +332,7 @@ class UploadFinalizationRecoveryIntegrationTest {
 
     @Test void pageHardCapAndCandidateTransactionAreIndependentOfCallerRollback() {
         for (int i = 0; i < 101; i++) { proven(null); }
-        var max = new UploadFinalizationTransactions(em, hierarchy, files, new UploadFinalizationRecoveryProperties(100));
+        var max = new UploadFinalizationTransactions(em, hierarchy, files, new UploadFinalizationRecoveryProperties(100), activity);
         List<UUID> selected = tx.execute(status -> max.scan(null));
         assertThat(selected).hasSize(100);
         UUID id = transactions.scan(null).getFirst();
@@ -398,7 +403,7 @@ class UploadFinalizationRecoveryIntegrationTest {
         assertThat(scalar("SELECT EXISTS (SELECT 1 FROM file_purge_work WHERE file_id = :id)", file.getId())).isEqualTo(false);
     }
 
-    private UploadFinalizationTransactions raw() { return new UploadFinalizationTransactions(em, hierarchy, files, properties); }
+    private UploadFinalizationTransactions raw() { return new UploadFinalizationTransactions(em, hierarchy, files, properties, activity); }
     /** Hold the first real operation's transaction open; observe PostgreSQL blocking before releasing it. */
     private void race(Supplier<?> first, Supplier<?> second, Object firstExpected, Object secondExpected) throws Exception {
         var held = new CountDownLatch(1); var release = new CountDownLatch(1);

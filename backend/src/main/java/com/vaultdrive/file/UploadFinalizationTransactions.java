@@ -1,5 +1,7 @@
 package com.vaultdrive.file;
 
+import com.vaultdrive.activity.ResourceActivityService;
+
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
 import jakarta.persistence.EntityManager;
 import org.springframework.stereotype.Service;
@@ -17,13 +19,16 @@ public class UploadFinalizationTransactions {
     private final HierarchyCoordinator hierarchy;
     private final StoredFileRepository files;
     private final UploadFinalizationRecoveryProperties properties;
+    private final ResourceActivityService activity;
 
     public UploadFinalizationTransactions(EntityManager em, HierarchyCoordinator hierarchy,
-                                         StoredFileRepository files, UploadFinalizationRecoveryProperties properties) {
+                                         StoredFileRepository files, UploadFinalizationRecoveryProperties properties,
+            ResourceActivityService activity) {
         this.em = em;
         this.hierarchy = hierarchy;
         this.files = files;
         this.properties = properties;
+        this.activity = activity;
     }
 
     public enum Outcome { RECOVERED, ALREADY_READY, BLOCKED, NO_RECEIPT }
@@ -95,6 +100,7 @@ public class UploadFinalizationTransactions {
         if (files.transitionUploadStatus(id, owner, FileStatus.UPLOADING, version, FileStatus.READY, Instant.now()) != 1) {
             throw new IllegalStateException("Upload finalization state changed");
         }
+        activity.uploadCompleted(id);
         return Outcome.RECOVERED;
     }
 

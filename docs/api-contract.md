@@ -1,5 +1,45 @@
 # MVP API contract consistency
 
+## General resource activity (2026-10-22)
+
+Authenticated `GET /api/v1/activity` returns 200, `Cache-Control: no-store` and
+`{content, page, size, totalElements, totalPages}`. Defaults are page 0/size 50,
+with nonnegative integer pages, size 1..100 and 64-bit offsets. Optional AND
+filters are `resourceType` (FILE/FOLDER), `resourceId` (UUID, requires type),
+`eventType`, `actorId` (UUID), and inclusive occurrence instants `from`/`to`.
+Dates use the same UTC 0001..9999 bounds as search; from must not exceed to.
+Invalid parameters return sanitized 400; missing authentication returns 401.
+
+Events are UPLOAD_COMPLETED, FOLDER_CREATED, RENAMED, MOVED, TRASHED, RESTORED,
+and PERMANENTLY_DELETED. Entries expose immutable `id`, `actorId`,
+`actorDisplayName`, `actorAttribution`, `ownerId`, `resourceType`, `resourceId`, `resourceName`,
+`eventType`, `beforeName`, `afterName`, `beforeParentId`, `afterParentId`,
+`beforeTrashed`, `afterTrashed`, `beforeStatus`, `afterStatus`, `occurredAt`.
+Missing before/after sides are null; status is null for folders. A present side
+with null parent means root. Restore snapshots include root fallback/collision
+renaming. Permanent deletion means durable logical metadata completion, with
+one event per removed member; it does not assert physical reclamation.
+
+Only the event's immutable owner sees it, including Trash, pending purge and
+removed resources. JWT ownership filters before count/page; there is no client
+owner selector. Being the actor, a current/former Editor/Viewer, recipient or link
+holder grants no history visibility. Foreign/unknown resource filters return the
+same empty page. No recipient, ancestor path/name, storage identity or secret is
+exposed. Private-parent redaction on ordinary resource responses is unchanged.
+History confers no resource authority; revoked access remains revoked.
+
+Order is `occurred_at DESC, id DESC`; totals/page share one statement snapshot,
+including empty/out-of-range pages. Concurrent inserts can shift later offset
+requests. Read transaction/statement/lock budgets are 5/3/2 seconds; timeout returns
+503 with `Retry-After: 2`. Snapshots and events commit with their database mutation;
+no-ops, failed transactions, idempotent replays and purge retries add no duplicates.
+Upload actor is the frozen completion decision caller, preserved through recovery;
+pre-V41 decisions use the retained initiator because the decision caller is unknown.
+`actorAttribution` distinguishes CALLER, legacy UPLOAD_INITIATOR and async
+DELETION_REQUESTER. See [schema, attribution, retention and guarantees](resource-activity.md).
+Permission history remains at `/api/v1/permission-activity` with its own contract.
+The historical milestone exclusions below predate this activity extension.
+
 ## Filename search and filtering (2026-10-22)
 
 Authenticated `GET /api/v1/search?q=report` returns 200 with `Cache-Control: no-store`

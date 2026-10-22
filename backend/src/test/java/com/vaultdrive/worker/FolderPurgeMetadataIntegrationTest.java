@@ -214,6 +214,25 @@ class FolderPurgeMetadataIntegrationTest {
         assertFinalized(1, 0);
     }
 
+    @Test void activityInsertFailureRollsBackFolderRemovalReceiptAndRootFinalization() throws Exception {
+        ClaimedJob claim = ready();
+        tx.executeWithoutResult(status -> {
+            em.createNativeQuery("CREATE FUNCTION test_delete_activity_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'history unavailable'; END $$").executeUpdate();
+            em.createNativeQuery("CREATE TRIGGER test_delete_activity_failure BEFORE INSERT ON resource_activity_events FOR EACH ROW EXECUTE FUNCTION test_delete_activity_failure()").executeUpdate();
+        });
+        try {
+            assertThatThrownBy(() -> remove(claim, 20)).isInstanceOf(RuntimeException.class);
+            assertThat(folderRepository.existsById(root)).isTrue();
+            assertThat(phase()).isEqualTo("DELETE_FOLDERS"); assertThat(count("folder_purge_removals", "TRUE")).isZero();
+        } finally {
+            tx.executeWithoutResult(status -> {
+                em.createNativeQuery("DROP TRIGGER test_delete_activity_failure ON resource_activity_events").executeUpdate();
+                em.createNativeQuery("DROP FUNCTION test_delete_activity_failure()").executeUpdate();
+            });
+        }
+        assertThat(remove(claim, 20)).isEqualTo(JobHandler.Result.SUCCEEDED); assertFinalized(1, 0);
+    }
+
     @Test void staleCheckpointRollsBackRootRemovalReceiptAndRunFinalization() throws Exception {
         ClaimedJob claim = ready();
         long before = version();
@@ -221,6 +240,8 @@ class FolderPurgeMetadataIntegrationTest {
         assertThat(folderRepository.existsById(root)).isTrue();
         assertThat(phase()).isEqualTo("DELETE_FOLDERS");
         assertThat(count("folder_purge_removals", "TRUE")).isZero();
+        assertThat(((Number) tx.execute(status -> em.createNativeQuery("SELECT count(*) FROM resource_activity_events WHERE owner_id = :owner AND event_type = 'PERMANENTLY_DELETED'")
+                .setParameter("owner", owner).getSingleResult())).longValue()).isZero();
         assertThat(version()).isEqualTo(before);
     }
 
@@ -509,6 +530,8 @@ class FolderPurgeMetadataIntegrationTest {
         return jobs.claimNext(JobType.FOLDER_PURGE).orElseThrow();
     }
     private void assertFinalized(long folders, long files) {
+        assertThat(((Number) tx.execute(status -> em.createNativeQuery("SELECT count(*) FROM resource_activity_events WHERE owner_id = :owner AND event_type = 'PERMANENTLY_DELETED'")
+                .setParameter("owner", owner).getSingleResult())).longValue()).isEqualTo(folders + files);
         assertThat(phase()).isEqualTo("FINALIZED");
         assertThat(folderRepository.existsById(root)).isFalse();
         assertThat(scalar("SELECT finalized_at FROM folder_purge_runs WHERE event_id = :event")).isNotNull();

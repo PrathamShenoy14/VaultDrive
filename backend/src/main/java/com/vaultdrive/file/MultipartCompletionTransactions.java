@@ -1,5 +1,7 @@
 package com.vaultdrive.file;
 
+import com.vaultdrive.activity.ResourceActivityService;
+
 import com.vaultdrive.file.MultipartSessionService.*;
 import com.vaultdrive.storage.*;
 import com.vaultdrive.storage.MultipartStorage.*;
@@ -20,10 +22,13 @@ public class MultipartCompletionTransactions {
     private final StoredFileRepository files;
     private final StorageBinding binding;
     private final ObjectMapper mapper;
+    private final ResourceActivityService activity;
 
     public MultipartCompletionTransactions(EntityManager em, MultipartSessionService sessions,
-            StoredFileRepository files, StorageBinding binding, ObjectMapper mapper) {
+            StoredFileRepository files, StorageBinding binding, ObjectMapper mapper,
+            ResourceActivityService activity) {
         this.em = em; this.sessions = sessions; this.files = files; this.binding = binding; this.mapper = mapper;
+        this.activity = activity;
     }
 
     public record Snapshot(Session session, StorageTarget target, List<RegisteredPart> registered,
@@ -52,8 +57,10 @@ public class MultipartCompletionTransactions {
                 && fresh.registered().equals(expected.registered()) && live(current.id()));
         UUID decision = UUID.randomUUID();
         sessions.decide(actor, current.id(), current.revision(), Decision.COMPLETE, decision);
-        em.createNativeQuery("INSERT INTO multipart_completions(session_id, decision_id, garage_upload_id, manifest) "
-                + "VALUES (:id,:decision,:upload,cast(:manifest AS jsonb))")
+        em.createNativeQuery("INSERT INTO multipart_completions(session_id, decision_id, garage_upload_id, manifest, activity_actor_id, activity_actor_display_name) "
+                + "VALUES (:id,:decision,:upload,cast(:manifest AS jsonb),:actor,"
+                + "coalesce((SELECT display_name FROM users WHERE id = :actor), '[deleted account]'))")
+                .setParameter("actor", actor)
                 .setParameter("id", current.id()).setParameter("decision", decision).setParameter("upload", current.uploadId())
                 .setParameter("manifest", mapper.writeValueAsString(manifest)).executeUpdate();
         return snapshot(sessions.lockForEvidence(current.ownerId(), current.id()));
@@ -128,6 +135,7 @@ public class MultipartCompletionTransactions {
             long version = ((Number) em.createNativeQuery("SELECT original_file_version FROM upload_sessions WHERE id = :id")
                     .setParameter("id", id).getSingleResult()).longValue();
             require(files.transitionUploadStatus(s.session().fileId(), owner, FileStatus.UPLOADING, version, FileStatus.READY, Instant.now()) == 1);
+            activity.uploadCompleted(s.session().fileId());
             transition(id, "READY", null);
         }
         return sessions.lockForEvidence(owner, id);

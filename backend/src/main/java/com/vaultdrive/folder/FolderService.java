@@ -1,5 +1,9 @@
 package com.vaultdrive.folder;
 
+import com.vaultdrive.activity.ResourceActivityService;
+import com.vaultdrive.activity.ResourceActivityService.Snapshot;
+import static com.vaultdrive.activity.ResourceActivityService.EventType.*;
+
 import com.vaultdrive.folder.dto.FolderResponse;
 import com.vaultdrive.folder.dto.TrashPageResponse;
 import com.vaultdrive.folder.dto.FolderPageResponse;
@@ -36,6 +40,7 @@ public class FolderService {
     private final OutboxWriter outboxWriter;
     private final FolderPurgeRunService purgeRuns;
     private final ResourceReadService resourceReads;
+    private final ResourceActivityService activity;
 
     public FolderService(
             FolderRepository folderRepository,
@@ -45,7 +50,8 @@ public class FolderService {
             HierarchyCoordinator hierarchyCoordinator,
             OutboxWriter outboxWriter,
             FolderPurgeRunService purgeRuns,
-            ResourceReadService resourceReads
+            ResourceReadService resourceReads,
+            ResourceActivityService activity
     ) {
         this.folderRepository = folderRepository;
         this.folderAccessValidator = folderAccessValidator;
@@ -55,6 +61,7 @@ public class FolderService {
         this.outboxWriter = outboxWriter;
         this.purgeRuns = purgeRuns;
         this.resourceReads = resourceReads;
+        this.activity = activity;
     }
 
     @Transactional
@@ -106,6 +113,7 @@ public class FolderService {
         );
 
         folderRepository.saveAndFlush(folder);
+        activity.append(actorId, FOLDER_CREATED, null, Snapshot.of(folder));
 
         return folder.getId();
     }
@@ -176,10 +184,12 @@ public class FolderService {
         }
 
         // JPA tracks changes to this entity within the transaction.
+        Snapshot before = Snapshot.of(folder);
         folder.rename(normalizedName);
 
         // Flush now so database uniqueness violations surface here.
         folderRepository.flush();
+        activity.append(actorId, RENAMED, before, Snapshot.of(folder));
 
         return toResponse(folder, permission);
     }
@@ -274,10 +284,12 @@ public class FolderService {
         }
     
         // 6. Update the folder's parent and modification timestamp.
+        Snapshot before = Snapshot.of(folder);
         folder.move(destinationFolderId);
     
         // Flush to detect database constraint violations immediately.
         folderRepository.flush();
+        activity.append(ownerId, MOVED, before, Snapshot.of(folder));
     
         return toResponse(folder);
     }
@@ -295,8 +307,10 @@ public class FolderService {
                 );
     
         resourceReads.refreshForMutation(folder);
+        Snapshot before = Snapshot.of(folder);
         folder.softDelete();
         folderRepository.flush();
+        activity.append(actorId, TRASHED, before, Snapshot.of(folder));
     }
 
     public TrashPageResponse listTrashedFolders(UUID ownerId, int page, int size) {
@@ -354,9 +368,11 @@ public class FolderService {
         );
     
         // Preserve the original folder ID.
+        Snapshot before = Snapshot.of(folder);
         folder.restore(destinationParentId, restoredName);
     
         folderRepository.flush();
+        activity.append(ownerId, RESTORED, before, Snapshot.of(folder));
     
         return new RestoreFolderResponse(
                 folder.getId(),

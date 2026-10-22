@@ -53,6 +53,7 @@ class MultipartCompletionIntegrationTest {
         r.add("spring.flyway.schemas", () -> SCHEMA); r.add("spring.flyway.default-schema", () -> SCHEMA);
     }
     @Autowired MultipartSessionService sessions;
+    @Autowired com.vaultdrive.activity.ResourceActivityService activity;
     @Autowired MultipartCompletionTransactions transactions;
     @Autowired MultipartCompletionService completions;
     @Autowired MultipartCancellationService cancellations;
@@ -180,6 +181,22 @@ class MultipartCompletionIntegrationTest {
             assertThat(result.completion().disposition()).isEqualTo("BLOCKED");
             assertThat(result.completion().reason()).isEqualTo("FINALIZATION_BLOCKED");
         } finally { failReady(false); }
+        clearInvocations(storage);
+        assertReady(completions.recover(owner, session.id())); verifyNoInteractions(storage);
+    }
+
+    @Test void activityInsertFailureRollsBackReadyCasAndProgressButRetainsReceipt() {
+        jdbc.execute("CREATE FUNCTION test_activity_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture history failure'; END $$");
+        jdbc.execute("CREATE TRIGGER test_activity_failure BEFORE INSERT ON resource_activity_events FOR EACH ROW EXECUTE FUNCTION test_activity_failure()");
+        try {
+            var result = completions.complete(owner, session.id());
+            assertThat(result.completion().receiptRecorded()).isTrue();
+            assertThat(result.completion().ready()).isFalse();
+            assertThat(jdbc.queryForObject("SELECT status FROM files WHERE id = ?", String.class, session.fileId())).isEqualTo("UPLOADING");
+            assertThat(activity.list(owner, null, null, null, null, null, null, 0, 100).content()).isEmpty();
+        } finally {
+            jdbc.execute("DROP TRIGGER test_activity_failure ON resource_activity_events"); jdbc.execute("DROP FUNCTION test_activity_failure()");
+        }
         clearInvocations(storage);
         assertReady(completions.recover(owner, session.id())); verifyNoInteractions(storage);
     }
@@ -331,6 +348,9 @@ class MultipartCompletionIntegrationTest {
     }
 
     @Test void frozenManifestDispatchAndReceiptCannotBeChangedOrDeleted() {
+        frozen();
+        assertThatThrownBy(() -> jdbc.update("UPDATE multipart_completions SET activity_actor_id = ? WHERE session_id = ?", UUID.randomUUID(), session.id())).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> jdbc.update("UPDATE multipart_completions SET activity_actor_display_name = 'changed' WHERE session_id = ?", session.id())).isInstanceOf(RuntimeException.class);
         assertReady(completions.complete(owner, session.id()));
         for (String sql : List.of("UPDATE multipart_completions SET manifest = '[]'::jsonb WHERE session_id = ?",
                 "UPDATE multipart_completions SET dispatch_id = gen_random_uuid(), revision = revision + 1 WHERE session_id = ?",
@@ -368,6 +388,8 @@ class MultipartCompletionIntegrationTest {
                 .isEqualTo(readyFirst ? "READY" : "UPLOADING");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM multipart_completion_receipts WHERE session_id = ?", Integer.class, session.id())).isEqualTo(1);
         assertThatThrownBy(() -> sessions.get(owner, session.id())).isInstanceOf(FileNotFoundException.class);
+        assertThat(activity.list(owner, com.vaultdrive.activity.ResourceActivityService.ResourceType.FILE, session.fileId(), null, null, null, null, 0, 100).content())
+                .hasSize(readyFirst ? 1 : 0);
         verifyNoInteractions(storage);
     }
 
@@ -505,6 +527,10 @@ class MultipartCompletionIntegrationTest {
     private void assertReady(Session result) {
         assertThat(result.completion().disposition()).isEqualTo("READY"); assertThat(result.completion().receiptRecorded()).isTrue();
         assertThat(jdbc.queryForObject("SELECT status FROM files WHERE id = ?", String.class, result.fileId())).isEqualTo("READY");
+        var events = activity.list(owner, com.vaultdrive.activity.ResourceActivityService.ResourceType.FILE, result.fileId(),
+                com.vaultdrive.activity.ResourceActivityService.EventType.UPLOAD_COMPLETED, null, null, null, 0, 100).content();
+        assertThat(events).hasSize(1);
+        assertThat(events.getFirst().actorId()).isEqualTo(owner);
     }
     private void failReceipt(boolean install) {
         if (install) { jdbc.execute("CREATE FUNCTION test_receipt_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture receipt failure'; END $$");

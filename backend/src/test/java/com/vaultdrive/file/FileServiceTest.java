@@ -76,7 +76,8 @@ class FileServiceTest {
                 storedFileRepository,
                 fileNameExtensionResolver,
                 hierarchyCoordinator,
-                resourceReads
+                resourceReads,
+                org.mockito.Mockito.mock(com.vaultdrive.activity.ResourceActivityService.class)
         );
     }
 

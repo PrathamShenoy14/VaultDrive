@@ -2,6 +2,26 @@
 
 This is a living explanation of lessons demonstrated by committed VaultDrive code. It is not a claim that every production concern is solved.
 
+## History records facts without becoming permission
+
+A historical name or location can disclose private information even when today's
+resource is shared. The MVP activity feed therefore scopes immutable snapshots
+to their owner before count/pagination, like permission history. Editor actions
+retain the authenticated actor separately; acting on another owner's content
+never creates authority to inspect that owner's history. Current resource APIs
+still resolve permissions and ancestry after revocation or moves.
+
+Appending after a successful flush in the same transaction makes history share
+optimistic-write, constraint and rollback outcomes. Upload evidence is different:
+positive storage receipts must survive a failed READY/history commit so recovery
+can finish metadata without repeating Complete. Retaining the actor at manifest
+freeze also avoids misattributing owner takeover to the recovery caller. Older
+decisions cannot reconstruct that caller and use an explicit initiator fallback.
+Purge history belongs with metadata-finalization proof, rather than request
+acceptance or byte deletion. Stale worker fences roll back proof and activity
+together. A logically discarded unfinished upload still has unresolved storage
+effects even after its deletion event. See [the contract](resource-activity.md).
+
 ## Logical quota and physical uncertainty are independent
 
 An UPLOADING file needs capacity before Garage work starts. Its reservation moves

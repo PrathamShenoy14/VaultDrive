@@ -313,3 +313,18 @@ Verification results and gated skips are recorded in
 Stop at this milestone. Content/full-text/semantic search, copy operations,
 general activity history, frontend, arbitrary sorting and cursor pagination
 remain outside this implementation. Broad-query capacity and latency are unmeasured.
+
+## MVP general file and folder activity history (completed)
+
+- [x] Immutable V41 resource activity, separate from permission activity and notifications.
+- [x] Atomic upload READY, folder creation, rename, move, Trash, restore and permanent metadata completion snapshots.
+- [x] Authenticated actor/owner separation, including Editors and retained multipart completion actors.
+- [x] No-op, replay, rollback, optimistic-concurrency and worker-fence guarantees with PostgreSQL constraints.
+- [x] Bounded authenticated owner-only history API, deterministic pages and inclusive filters without historical access authority.
+- [x] Retained history after resource/account deletion, matching the existing undecided erasure/retention boundary.
+- [x] Isolated PostgreSQL/API/race/failure tests and Garage/RabbitMQ regression verification.
+
+See [the implementation contract](resource-activity.md) and
+[executed verification](architecture.md#general-activity-verification). This milestone
+ends here. Copy, quota notifications, collaborator history feeds, frontend work,
+retention/erasure policy, cursor exports and performance targets remain separate.

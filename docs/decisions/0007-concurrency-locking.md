@@ -442,3 +442,16 @@ logical disposal. Facts permitted earlier may commit after removal without file
 resurrection. PostgreSQL race tests observe actual blocking in both orders; live
 Garage tests exercise late parts/completion outside every database transaction.
 See [M5 proof and recovery semantics](../multipart-purge-compatibility.md).
+
+## General resource activity extension
+
+V41 activity writes follow the existing coordinated mutation/flush, in the same
+transaction, without a new lock class or hierarchy upgrade. Snapshot reads are
+under existing resource coordination. Multipart freeze retains the actor on the
+completion identity; the READY CAS and history share their final transaction.
+Purge snapshots/removal/proof/history share the existing final job/checkpoint
+fence, including bounded member pages. History introduces no resource lock after
+a job lock and no external I/O. Owner-only history reads acquire no hierarchy
+locks and confer no authority. Existing optimistic/lifecycle/revoke/purge races
+now assert only the winning transition's activity. See
+[the activity contract](../resource-activity.md).

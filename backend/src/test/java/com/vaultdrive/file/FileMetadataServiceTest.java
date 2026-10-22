@@ -59,7 +59,8 @@ class FileMetadataServiceTest {
                 folderAccessValidator,
                 hierarchyCoordinator,
                 outboxWriter,
-                storageIdentity
+                storageIdentity,
+                org.mockito.Mockito.mock(com.vaultdrive.activity.ResourceActivityService.class)
         );
 
         ownerId = UUID.randomUUID();

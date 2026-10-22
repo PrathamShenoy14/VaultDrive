@@ -303,6 +303,7 @@ class GarageMultipartCompletionIntegrationTest {
         f.event("M3_BYTES_METADATA", "size=" + result.asByteArray().length + " actual_sha256=" + sha(result.asByteArray()) + " metadata=true");
     }
     private void assertReady(Session s) {
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM resource_activity_events WHERE resource_id = ? AND event_type = 'UPLOAD_COMPLETED'", Integer.class, s.fileId())).isEqualTo(1);
         assertThat(s.completion().disposition()).isEqualTo("READY"); assertThat(s.completion().receiptRecorded()).isTrue();
         assertThat(jdbc.queryForObject("SELECT put_succeeded_at IS NULL AND admitted_file_version IS NULL FROM file_storage_objects WHERE file_id = ?", Boolean.class, s.fileId())).isTrue();
     }

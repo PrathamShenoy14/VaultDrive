@@ -1,5 +1,9 @@
 package com.vaultdrive.file;
 
+import com.vaultdrive.activity.ResourceActivityService;
+import com.vaultdrive.activity.ResourceActivityService.Snapshot;
+import static com.vaultdrive.activity.ResourceActivityService.EventType.*;
+
 import com.vaultdrive.file.exception.DuplicateFileNameException;
 import com.vaultdrive.file.exception.FileNotFoundException;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
@@ -33,6 +37,7 @@ public class FileMetadataService {
     private final HierarchyCoordinator hierarchyCoordinator;
     private final OutboxWriter outboxWriter;
     private final FileStorageIdentityService storageIdentity;
+    private final ResourceActivityService activity;
 
     public FileMetadataService(
             StoredFileRepository storedFileRepository,
@@ -40,7 +45,8 @@ public class FileMetadataService {
             FolderAccessValidator folderAccessValidator,
             HierarchyCoordinator hierarchyCoordinator,
             OutboxWriter outboxWriter,
-            FileStorageIdentityService storageIdentity
+            FileStorageIdentityService storageIdentity,
+            ResourceActivityService activity
     ) {
         this.storedFileRepository = storedFileRepository;
         this.userRepository = userRepository;
@@ -48,6 +54,7 @@ public class FileMetadataService {
         this.hierarchyCoordinator = hierarchyCoordinator;
         this.outboxWriter = outboxWriter;
         this.storageIdentity = storageIdentity;
+        this.activity = activity;
     }
 
     @Transactional
@@ -156,9 +163,12 @@ public class FileMetadataService {
                         file.getName()
                 );
     
+        Snapshot before = Snapshot.of(file);
         file.restore(destinationFolderId, restoredName);
 
-        return storedFileRepository.saveAndFlush(file);
+        StoredFile saved = storedFileRepository.saveAndFlush(file);
+        activity.append(ownerId, RESTORED, before, Snapshot.of(saved));
+        return saved;
     }
 
     @Transactional

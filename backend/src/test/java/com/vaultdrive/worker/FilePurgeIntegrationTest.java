@@ -282,6 +282,25 @@ class FilePurgeIntegrationTest {
         assertThat(fileRepository.findById(file.getId())).isEmpty();
     }
 
+    @Test void activityInsertFailureRollsBackFileRemovalAndFinalizationReceipt() {
+        StoredFile file = uploaded();
+        ClaimedJob claim = purge(file); deleteAndRecord(claim);
+        transaction.executeWithoutResult(status -> {
+            entityManager.createNativeQuery("CREATE FUNCTION test_delete_activity_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'history unavailable'; END $$").executeUpdate();
+            entityManager.createNativeQuery("CREATE TRIGGER test_delete_activity_failure BEFORE INSERT ON resource_activity_events FOR EACH ROW EXECUTE FUNCTION test_delete_activity_failure()").executeUpdate();
+        });
+        try {
+            assertThatThrownBy(() -> progress.finalizeMetadata(claim)).isInstanceOf(RuntimeException.class);
+            assertThat(fileRepository.findById(file.getId())).isPresent(); assertReceipts(file, true, false);
+        } finally {
+            transaction.executeWithoutResult(status -> {
+                entityManager.createNativeQuery("DROP TRIGGER test_delete_activity_failure ON resource_activity_events").executeUpdate();
+                entityManager.createNativeQuery("DROP FUNCTION test_delete_activity_failure()").executeUpdate();
+            });
+        }
+        assertThat(progress.finalizeMetadata(claim)).isTrue(); assertReceipts(file, true, true);
+    }
+
     @Test void workReceiptAndMetadataTransactionsRollBackIndependently() {
         StoredFile file = uploaded();
         ClaimedJob claim = purge(file);
@@ -975,6 +994,11 @@ class FilePurgeIntegrationTest {
     }
 
     private void assertReceipts(StoredFile file, boolean bytes, boolean finalized) {
+        transaction.executeWithoutResult(status -> {
+            long events = ((Number) entityManager.createNativeQuery("SELECT count(*) FROM resource_activity_events WHERE resource_type = 'FILE' AND resource_id = :file AND event_type = 'PERMANENTLY_DELETED' AND actor_attribution = 'DELETION_REQUESTER'")
+                    .setParameter("file", file.getId()).getSingleResult()).longValue();
+            assertThat(events).isEqualTo(finalized ? 1 : 0);
+        });
         transaction.executeWithoutResult(status -> {
             Object[] receipts = (Object[]) entityManager.createNativeQuery("""
                     SELECT bytes_deleted_at IS NOT NULL, metadata_finalized_at IS NOT NULL

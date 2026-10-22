@@ -1,5 +1,9 @@
 package com.vaultdrive.file;
 
+import com.vaultdrive.activity.ResourceActivityService;
+import com.vaultdrive.activity.ResourceActivityService.Snapshot;
+import static com.vaultdrive.activity.ResourceActivityService.EventType.*;
+
 import com.vaultdrive.file.dto.FilePageResponse;
 import com.vaultdrive.file.dto.FileResponse;
 import com.vaultdrive.file.dto.FileDownload;
@@ -27,6 +31,7 @@ public class FileService {
     private final FileNameExtensionResolver fileNameExtensionResolver;
     private final HierarchyCoordinator hierarchyCoordinator;
     private final ResourceReadService resourceReads;
+    private final ResourceActivityService activity;
 
     public FileService(
             FolderAccessValidator folderAccessValidator,
@@ -36,7 +41,8 @@ public class FileService {
             StoredFileRepository storedFileRepository,
             FileNameExtensionResolver fileNameExtensionResolver,
             HierarchyCoordinator hierarchyCoordinator,
-            ResourceReadService resourceReads
+            ResourceReadService resourceReads,
+            ResourceActivityService activity
     ) {
         this.folderAccessValidator = folderAccessValidator;
         this.fileNameValidator = fileNameValidator;
@@ -46,6 +52,7 @@ public class FileService {
         this.fileNameExtensionResolver = fileNameExtensionResolver;
         this.hierarchyCoordinator = hierarchyCoordinator;
         this.resourceReads = resourceReads;
+        this.activity = activity;
     }
 
     public FilePageResponse listFiles(UUID actorId, UUID folderId, int page, int size) {
@@ -110,11 +117,15 @@ public class FileService {
                 storedFile.getFolderId()
         );
     
+        Snapshot before = Snapshot.of(storedFile);
         StoredFile renamedFile =
                 fileMetadataService.rename(
                         storedFile,
                         finalName
                 );
+        if (!before.equals(Snapshot.of(renamedFile))) {
+            activity.append(actorId, RENAMED, before, Snapshot.of(renamedFile));
+        }
     
         return toFileResponse(renamedFile, permission);
     }
@@ -151,11 +162,15 @@ public class FileService {
                 destinationFolderId
         );
 
+        Snapshot before = Snapshot.of(storedFile);
         StoredFile movedFile =
                 fileMetadataService.move(
                         storedFile,
                         destinationFolderId
                 );
+        if (!before.equals(Snapshot.of(movedFile))) {
+            activity.append(ownerId, MOVED, before, Snapshot.of(movedFile));
+        }
     
         return toFileResponse(movedFile);
     }
@@ -187,8 +202,10 @@ public class FileService {
                 storedFile.getFolderId()
         );
 
+        Snapshot before = Snapshot.of(storedFile);
         StoredFile trashedFile =
                 fileMetadataService.softDelete(storedFile);
+        activity.append(actorId, TRASHED, before, Snapshot.of(trashedFile));
     
         return new FileResponse(trashedFile.getId(), trashedFile.getName(),
                 permission.parentVisible() ? trashedFile.getFolderId() : null,

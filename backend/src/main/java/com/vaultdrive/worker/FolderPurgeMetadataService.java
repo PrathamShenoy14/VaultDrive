@@ -1,5 +1,9 @@
 package com.vaultdrive.worker;
 
+import com.vaultdrive.activity.ResourceActivityService;
+import com.vaultdrive.activity.ResourceActivityService.Snapshot;
+import static com.vaultdrive.activity.ResourceActivityService.EventType.*;
+
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
 import com.vaultdrive.job.BackgroundJobService;
 import com.vaultdrive.job.ClaimedJob;
@@ -20,15 +24,18 @@ public class FolderPurgeMetadataService {
     private final FolderPurgeRunService runs;
     private final FilePurgeProgressService files;
     private final BackgroundJobService jobs;
+    private final ResourceActivityService activity;
 
     public FolderPurgeMetadataService(EntityManager em, HierarchyCoordinator hierarchy,
                                       FolderPurgeRunService runs, FilePurgeProgressService files,
-                                      BackgroundJobService jobs) {
+                                      BackgroundJobService jobs,
+            ResourceActivityService activity) {
         this.em = em;
         this.hierarchy = hierarchy;
         this.runs = runs;
         this.files = files;
         this.jobs = jobs;
+        this.activity = activity;
     }
 
     @Transactional(timeout = 10, rollbackFor = InterruptedException.class)
@@ -116,6 +123,7 @@ public class FolderPurgeMetadataService {
         query("SELECT event_id FROM folder_purge_runs WHERE event_id = :event FOR UPDATE", claim).getSingleResult();
         for (UUID folder : leaves) {
             context.checkActive();
+            Snapshot before = activity.snapshot(ResourceActivityService.ResourceType.FOLDER, folder);
             int removed = query("""
                     DELETE FROM folders f USING folder_purge_frontier m, folder_purge_runs r
                     WHERE m.event_id = :event AND r.event_id = m.event_id AND m.folder_id = :folder AND f.id = m.folder_id
@@ -130,6 +138,7 @@ public class FolderPurgeMetadataService {
             if (removed != 1) { throw new IllegalStateException("Folder lacks matching removable metadata"); }
             query("INSERT INTO folder_purge_removals(event_id, folder_id) VALUES (:event, :folder)", claim)
                     .setParameter("folder", folder).executeUpdate();
+            activity.append(owner, PERMANENTLY_DELETED, before, null);
         }
         if (root) {
             query("UPDATE folder_purge_runs SET phase = 'FINALIZED', finalized_at = clock_timestamp() WHERE event_id = :event", claim)

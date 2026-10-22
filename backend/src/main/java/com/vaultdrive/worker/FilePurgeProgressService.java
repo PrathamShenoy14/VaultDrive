@@ -1,5 +1,9 @@
 package com.vaultdrive.worker;
 
+import com.vaultdrive.activity.ResourceActivityService;
+import com.vaultdrive.activity.ResourceActivityService.Snapshot;
+import static com.vaultdrive.activity.ResourceActivityService.EventType.*;
+
 import com.vaultdrive.folder.FolderRepository;
 import com.vaultdrive.hierarchy.HierarchyCoordinator;
 import com.vaultdrive.job.ClaimedJob;
@@ -19,12 +23,15 @@ public class FilePurgeProgressService {
     private final EntityManager entityManager;
     private final HierarchyCoordinator hierarchy;
     private final FolderRepository folders;
+    private final ResourceActivityService activity;
 
     public FilePurgeProgressService(EntityManager entityManager, HierarchyCoordinator hierarchy,
-                                    FolderRepository folders) {
+                                    FolderRepository folders,
+            ResourceActivityService activity) {
         this.entityManager = entityManager;
         this.hierarchy = hierarchy;
         this.folders = folders;
+        this.activity = activity;
     }
 
     public record Prepared(StorageTarget target, boolean bytesDeleted) { }
@@ -251,6 +258,7 @@ public class FilePurgeProgressService {
             if (exists) { throw new IllegalStateException("Finalized file metadata reappeared"); }
             return false;
         }
+        Snapshot before = activity.snapshot(ResourceActivityService.ResourceType.FILE, file);
         int deleted = entityManager.createNativeQuery("""
                 DELETE FROM files f USING file_purge_work w WHERE w.file_id = :file AND f.id = w.file_id
                     AND ROW(f.owner_id, f.folder_id, f.version, f.status, f.created_at, f.updated_at,
@@ -265,6 +273,7 @@ public class FilePurgeProgressService {
                 UPDATE file_purge_work SET metadata_finalized_at = clock_timestamp()
                 WHERE file_id = :file AND metadata_finalized_at IS NULL
                 """).setParameter("file", file).executeUpdate();
+        activity.append(before.ownerId(), PERMANENTLY_DELETED, before, null);
         return true;
     }
 

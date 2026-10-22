@@ -54,6 +54,7 @@ class DelegatedMultipartIntegrationTest {
         r.add("spring.flyway.schemas", () -> SCHEMA); r.add("spring.flyway.default-schema", () -> SCHEMA);
     }
     @Autowired MultipartSessionService sessions;
+    @Autowired com.vaultdrive.activity.ResourceActivityService activity;
     @Autowired MultipartTransferService transfers;
     @Autowired MultipartCompletionService completions;
     @Autowired MultipartCompletionTransactions completionTx;
@@ -104,6 +105,7 @@ class DelegatedMultipartIntegrationTest {
         var s = sessions.reserve(editor, "same-key", request);
         assertThat(s.ownerId()).isEqualTo(owner); assertThat(s.initiatorUserId()).isEqualTo(editor);
         assertThat(sessions.reserve(editor, "same-key", request)).isEqualTo(s);
+        assertThat(activity.list(owner, com.vaultdrive.activity.ResourceActivityService.ResourceType.FILE, s.fileId(), null, null, null, null, 0, 100).content()).isEmpty();
         assertThat(sessions.get(owner, s.id())).isEqualTo(s);
         assertThat(jdbc.queryForObject("SELECT owner_id FROM files WHERE id = ?", UUID.class, s.fileId())).isEqualTo(owner);
         assertThat(jdbc.queryForObject("SELECT owner_id FROM file_storage_objects WHERE file_id = ?", UUID.class, s.fileId())).isEqualTo(owner);
@@ -177,6 +179,8 @@ class DelegatedMultipartIntegrationTest {
         revoke();
         assertThatThrownBy(() -> reads.file(editor, s.fileId())).isInstanceOf(FileNotFoundException.class);
         assertThat(reads.file(owner, s.fileId()).ownerId()).isEqualTo(owner);
+        var events = activity.list(owner, com.vaultdrive.activity.ResourceActivityService.ResourceType.FILE, s.fileId(), null, null, null, null, 0, 100).content();
+        assertThat(events).hasSize(1); assertThat(events.getFirst().actorId()).isEqualTo(actor);
         verify(storage, times(1)).completeMultipart(any(), any(), anyList(), any());
     }
 
@@ -228,12 +232,19 @@ class DelegatedMultipartIntegrationTest {
 
     @Test void frozenManifestDoesNotAuthorizeDispatchAfterRevokeAndOwnerCanRecover() {
         var s = open(); var frozen = freeze(s); revoke();
+        String actorName = users.findById(editor).orElseThrow().getDisplayName();
+        jdbc.update("UPDATE users SET display_name = 'changed later' WHERE id = ?", editor);
         assertThatThrownBy(() -> completionTx.claim(editor, s.id())).isInstanceOf(FileNotFoundException.class);
         assertThat(jdbc.queryForObject("SELECT dispatch_id FROM multipart_completions WHERE session_id = ?", UUID.class, s.id())).isNull();
         assertThat(sessions.get(owner, s.id()).decisionId()).isEqualTo(frozen.session().decisionId());
         assertThatThrownBy(() -> cancellations.cancel(owner, s.id())).isInstanceOf(MultipartConflictException.class);
         evidence(s);
         assertThat(completions.recover(owner, s.id()).completion().ready()).isTrue();
+        var events = activity.list(owner, com.vaultdrive.activity.ResourceActivityService.ResourceType.FILE, s.fileId(), null, null, null, null, 0, 100).content();
+        assertThat(events).hasSize(1); assertThat(events.getFirst().actorId()).isEqualTo(editor);
+        assertThat(events.getFirst().actorDisplayName()).isEqualTo(actorName);
+        assertThat(events.getFirst().actorAttribution()).isEqualTo(com.vaultdrive.activity.ResourceActivityService.ActorAttribution.CALLER);
+        assertThat(activity.list(editor, null, null, null, null, null, null, 0, 100).content()).isEmpty();
     }
 
     @Test void uncertainCallsRemainSingleDispatchAfterRevokeAndRegrant() {
@@ -396,7 +407,7 @@ class DelegatedMultipartIntegrationTest {
                 for (String table : tables) {
                     String predicate = table.equals("users") ? "t.id = ?" : List.of("files", "file_storage_objects", "upload_sessions").contains(table)
                             ? "t.owner_id = ?" : "t.session_id IN (SELECT id FROM upload_sessions WHERE owner_id = ?)";
-                    var rows = jdbc.queryForList("SELECT (to_jsonb(t)" + (table.equals("upload_sessions") ? " - 'initiator_user_id'" : "")
+                    var rows = jdbc.queryForList("SELECT (to_jsonb(t)" + (table.equals("upload_sessions") ? " - 'initiator_user_id'" : table.equals("multipart_completions") ? " - 'activity_actor_id' - 'activity_actor_display_name'" : "")
                             + ")::text FROM " + table + " t WHERE " + predicate + " ORDER BY 1", String.class, owner);
                     before.put(table, rows);
                     // Copy valid production-created states into the pre-M3 fixture, including READY
@@ -413,10 +424,12 @@ class DelegatedMultipartIntegrationTest {
             }
             org.flywaydb.core.Flyway.configure().dataSource(source).schemas(schema).defaultSchema(schema).load().migrate();
             for (String table : tables) {
-                assertThat(jdbc.queryForList("SELECT (to_jsonb(t)" + (table.equals("upload_sessions") ? " - 'initiator_user_id'" : "")
+                assertThat(jdbc.queryForList("SELECT (to_jsonb(t)" + (table.equals("upload_sessions") ? " - 'initiator_user_id'" : table.equals("multipart_completions") ? " - 'activity_actor_id' - 'activity_actor_display_name'" : "")
                         + ")::text FROM " + schema + "." + table + " t ORDER BY 1", String.class)).isEqualTo(before.get(table));
             }
             assertThat(jdbc.queryForObject("SELECT count(*) FROM " + schema + ".upload_sessions WHERE initiator_user_id = owner_id", Integer.class)).isEqualTo(6);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM " + schema + ".resource_activity_events", Integer.class)).isZero();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM " + schema + ".multipart_completions WHERE activity_actor_id IS NOT NULL OR activity_actor_display_name IS NOT NULL", Integer.class)).isZero();
             assertThatThrownBy(() -> jdbc.update("UPDATE " + schema + ".upload_sessions SET initiator_user_id = ?", editor)).isInstanceOf(RuntimeException.class);
         } finally {
             org.flywaydb.core.Flyway.configure().dataSource(source).schemas(schema).defaultSchema(schema).cleanDisabled(false).load().clean();

@@ -332,7 +332,11 @@ class AsyncPurgeEndToEndTest {
         });
     }
 
-    private void assertFileProof(UUID file, UUID job) {
+    private void assertFileProof(UUID file, UUID job) throws Exception {
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM resource_activity_events WHERE resource_id = ? AND event_type = 'PERMANENTLY_DELETED'", Long.class, file)).isOne();
+        var history = mapper.readTree(request("GET", "/activity?resourceType=FILE&resourceId=" + file, null, 200));
+        assertThat(history.get("totalElements").asInt()).isGreaterThanOrEqualTo(2);
+        assertThat(history.get("content").get(0).get("eventType").asText()).isEqualTo("PERMANENTLY_DELETED");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM file_purge_work w JOIN file_storage_objects a USING(file_id)"
                 + " WHERE w.file_id = ? AND w.byte_receipt_job_id = ? AND w.bytes_deleted_at IS NOT NULL"
                 + " AND w.metadata_finalized_at >= w.bytes_deleted_at AND a.write_started"
