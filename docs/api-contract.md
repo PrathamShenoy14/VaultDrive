@@ -1,5 +1,39 @@
 # MVP API contract consistency
 
+## Safe file copy (Copy M1, 2026-10-22)
+
+Authenticated owner-only POST `/api/v1/files/{sourceId}/copy` accepts required
+`Idempotency-Key` (1..128 printable ASCII excluding spaces) and
+`{destinationFolderId: UUID|null, name: string}`. Omitted/null destination is root.
+The source must be accessible READY, and the destination owned and accessible.
+Viewer/Editor receives 403; strangers/missing/hidden resources receive 404.
+Name uses existing trimmed case-sensitive validation. Collision or quota exhaustion
+returns 409 without overwrite, suffix allocation or partial reservation.
+
+Responses expose `{id, sourceFileId, fileId, destinationFolderId, name, state,
+revision, storageVerified, createdAt}`. New file/key/allocation and quota charge
+are independent of the source. No storage identity or provider evidence is public.
+The owner file capability list adds COPY. Same owner/key/normalized request replays
+the retained operation; changing source/destination/name returns 409. Historical
+replay/status survives Trash and removal without granting current resource access.
+
+GET `/api/v1/copy-operations/{id}` returns 200 and performs no storage work.
+POST suffixes `/execute`, `/recover`, `/cancel` respectively retry only undispatched
+RESERVED work, probe positive evidence or finalize an existing receipt, and
+permanently abandon eligible unfinished publication. READY cannot be cancelled.
+Mutation responses are 200 for READY/CANCELLED/FAILED and 202 for
+RESERVED/UNKNOWN/STORAGE_COMPLETE/BLOCKED, with Location pointing to status.
+All responses use no-store; nonterminal responses include Retry-After: 2.
+Unknown/foreign operation IDs return 404. There is no autonomous worker/long poll.
+
+After dispatch, timeout, failure or absence retains uncertainty and reservation;
+CopyObject is never repeated. READY requires positive object verification,
+independently committed receipt and fresh durable metadata finalization. Logical
+cancellation/folder discard can release charge while retaining possible storage
+effects. See [full protocol, bounded calls, response semantics and runbook](file-copy.md)
+and [ADR-0012](decisions/0012-safe-file-copy.md). Folder copy, quota notifications
+and frontend are outside M1. Historical exclusions below predate this extension.
+
 ## General resource activity (2026-10-22)
 
 Authenticated `GET /api/v1/activity` returns 200, `Cache-Control: no-store` and
@@ -10,7 +44,7 @@ filters are `resourceType` (FILE/FOLDER), `resourceId` (UUID, requires type),
 Dates use the same UTC 0001..9999 bounds as search; from must not exceed to.
 Invalid parameters return sanitized 400; missing authentication returns 401.
 
-Events are UPLOAD_COMPLETED, FOLDER_CREATED, RENAMED, MOVED, TRASHED, RESTORED,
+Events are UPLOAD_COMPLETED, COPIED, FOLDER_CREATED, RENAMED, MOVED, TRASHED, RESTORED,
 and PERMANENTLY_DELETED. Entries expose immutable `id`, `actorId`,
 `actorDisplayName`, `actorAttribution`, `ownerId`, `resourceType`, `resourceId`, `resourceName`,
 `eventType`, `beforeName`, `afterName`, `beforeParentId`, `afterParentId`,
@@ -144,7 +178,7 @@ the client acts. A capability is never a credential or an authorization input.
 
 | Active resource | Owner | Editor | Viewer |
 |---|---|---|---|
-| File | READ_METADATA, DOWNLOAD, RENAME, MOVE, TRASH, MANAGE_GRANTS | READ_METADATA, DOWNLOAD, RENAME; conditional TRASH | READ_METADATA, DOWNLOAD |
+| File | READ_METADATA, DOWNLOAD, COPY, RENAME, MOVE, TRASH, MANAGE_GRANTS | READ_METADATA, DOWNLOAD, RENAME; conditional TRASH | READ_METADATA, DOWNLOAD |
 | Folder | READ_METADATA, LIST_CHILDREN, CREATE_FOLDER, UPLOAD, RENAME, MOVE, TRASH, MANAGE_GRANTS | READ_METADATA, LIST_CHILDREN, CREATE_FOLDER, UPLOAD, RENAME; conditional TRASH | READ_METADATA, LIST_CHILDREN |
 
 Editor TRASH requires effective Editor on the immediate parent as well as the

@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /** Sealed membership authorizes shared file work, never storage I/O in these transactions. */
@@ -77,8 +78,16 @@ public class FolderPurgeFileService {
         Prepared prepared = verify(file, context.claim(), false);
         if (!prepared.proven()) {
             if (prepared.logicalOnly()) {
-                em.createNativeQuery("UPDATE file_purge_work SET multipart_discarded_at = clock_timestamp() "
-                        + "WHERE file_id = :file AND multipart_discarded_at IS NULL")
+                // COPY publication is permanently abandoned with logical proof, before the final job fence.
+                // Do not change the sealed file/version snapshot or release quota until metadata removal.
+                em.createNativeQuery("UPDATE file_copy_operations SET state='CANCELLED',revision=revision+1 "
+                        + "WHERE file_id=:file AND state NOT IN ('READY','CANCELLED','FAILED')")
+                        .setParameter("file",file).executeUpdate();
+                em.createNativeQuery("UPDATE file_purge_work w SET "
+                        + "multipart_discarded_at = CASE WHEN a.upload_protocol='DIRECT_MULTIPART' THEN clock_timestamp() ELSE w.multipart_discarded_at END, "
+                        + "copy_discarded_at = CASE WHEN a.upload_protocol='COPY' THEN clock_timestamp() ELSE w.copy_discarded_at END "
+                        + "FROM file_storage_objects a WHERE w.file_id = :file AND a.file_id=w.file_id "
+                        + "AND w.multipart_discarded_at IS NULL AND w.copy_discarded_at IS NULL")
                         .setParameter("file", file).executeUpdate();
             } else if (prepared.neverWritten()) {
                 em.createNativeQuery("""
@@ -172,6 +181,9 @@ public class FolderPurgeFileService {
                 .setParameter("file", file).getResultList();
         em.createNativeQuery("SELECT file_id FROM file_storage_objects WHERE file_id = :file FOR UPDATE")
                 .setParameter("file", file).getResultList();
+        // Copy operation progress follows its file/allocation and precedes work/member/job locks.
+        em.createNativeQuery("SELECT id FROM file_copy_operations WHERE file_id = :file FOR UPDATE")
+                .setParameter("file", file).getResultList();
     }
 
     private void validateRoot(ClaimedJob claim, UUID owner) {
@@ -195,7 +207,7 @@ public class FolderPurgeFileService {
         List<?> allocations = em.createNativeQuery("""
                 SELECT a.storage_namespace, a.endpoint, a.region, a.bucket, a.storage_key, a.write_started,
                     m.file_status, m.purge_requested_at, m.standalone_event_id, a.upload_protocol,
-                    multipart_completed_allocation(a.file_id)
+                    multipart_completed_allocation(a.file_id) OR copy_completed_allocation(a.file_id)
                 FROM folder_purge_files m JOIN file_storage_objects a ON a.file_id = m.file_id
                 WHERE m.event_id = :event AND m.file_id = :file AND a.storage_namespace IS NOT NULL
                     AND ROW(a.owner_id, a.storage_key, a.storage_namespace, a.endpoint, a.region, a.bucket)
@@ -203,11 +215,11 @@ public class FolderPurgeFileService {
                 """).setParameter("event", claim.id()).setParameter("file", file).getResultList();
         if (allocations.isEmpty()) { throw new BlockedFile("UNKNOWN_BINDING"); }
         Object[] allocation = (Object[]) allocations.getFirst();
-        boolean multipart = "DIRECT_MULTIPART".equals(allocation[9]);
-        boolean logicalOnly = multipart && !"READY".equals(allocation[6]);
-        boolean neverWritten = !multipart && !(Boolean) allocation[5];
-        if (multipart && !logicalOnly && !(Boolean) allocation[10]) { throw new BlockedFile("UNSAFE_WRITER"); }
-        if (!multipart && !neverWritten && !"READY".equals(allocation[6])) { throw new BlockedFile("UNSAFE_WRITER"); }
+        boolean receiptProtocol = Set.of("DIRECT_MULTIPART", "COPY").contains(allocation[9]);
+        boolean logicalOnly = receiptProtocol && !"READY".equals(allocation[6]);
+        boolean neverWritten = !receiptProtocol && !(Boolean) allocation[5];
+        if (receiptProtocol && !logicalOnly && !(Boolean) allocation[10]) { throw new BlockedFile("UNSAFE_WRITER"); }
+        if (!receiptProtocol && !neverWritten && !"READY".equals(allocation[6])) { throw new BlockedFile("UNSAFE_WRITER"); }
         if (allocation[7] != null) {
             boolean target = (Boolean) em.createNativeQuery("""
                     SELECT EXISTS (SELECT 1 FROM folder_purge_files m JOIN file_purge_targets t
@@ -238,7 +250,7 @@ public class FolderPurgeFileService {
                     .setParameter("event", claim.id()).setParameter("file", file).executeUpdate();
         }
         List<?> work = em.createNativeQuery("""
-                SELECT w.bytes_deleted_at IS NOT NULL OR w.never_written_at IS NOT NULL OR w.multipart_discarded_at IS NOT NULL
+                SELECT w.bytes_deleted_at IS NOT NULL OR w.never_written_at IS NOT NULL OR w.multipart_discarded_at IS NOT NULL OR w.copy_discarded_at IS NOT NULL
                 FROM file_purge_work w JOIN folder_purge_files m ON m.file_id = w.file_id
                 WHERE m.event_id = :event AND m.file_id = :file
                     AND ROW(w.owner_id, w.folder_id, w.file_version, w.file_status, w.file_created_at,

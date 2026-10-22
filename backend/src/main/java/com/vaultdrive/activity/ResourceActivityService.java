@@ -22,7 +22,7 @@ import java.util.UUID;
 public class ResourceActivityService {
     public enum ResourceType { FILE, FOLDER }
     public enum ActorAttribution { CALLER, UPLOAD_INITIATOR, DELETION_REQUESTER }
-    public enum EventType { UPLOAD_COMPLETED, FOLDER_CREATED, RENAMED, MOVED, TRASHED, RESTORED, PERMANENTLY_DELETED }
+    public enum EventType { UPLOAD_COMPLETED, COPIED, FOLDER_CREATED, RENAMED, MOVED, TRASHED, RESTORED, PERMANENTLY_DELETED }
     public record Snapshot(UUID id, UUID ownerId, ResourceType type, String name, UUID parentId,
                            boolean trashed, String status) {
         public static Snapshot of(StoredFile f) {
@@ -49,6 +49,11 @@ public class ResourceActivityService {
     public void append(UUID actor, EventType event, Snapshot before, Snapshot after) {
         append(actor, null, event == EventType.PERMANENTLY_DELETED ? ActorAttribution.DELETION_REQUESTER : ActorAttribution.CALLER,
                 event, before, after);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void copied(UUID owner, String actorName, UUID file) {
+        append(owner, actorName, ActorAttribution.CALLER, EventType.COPIED, null, snapshot(ResourceType.FILE, file));
     }
 
     private void append(UUID actor, String actorName, ActorAttribution attribution, EventType event, Snapshot before, Snapshot after) {

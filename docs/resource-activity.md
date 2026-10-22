@@ -15,6 +15,7 @@ parent on a present side means root. Folder status is always null.
 | Event type | Successful transition |
 |---|---|
 | UPLOAD_COMPLETED | Winning UPLOADING -> READY, including receipt-backed recovery |
+| COPIED | Receipt-backed publication of a new independent copied file as READY |
 | FOLDER_CREATED | New folder inserted and flushed |
 | RENAMED | Normalized effective name actually changes |
 | MOVED | Immediate parent actually changes |
@@ -50,6 +51,17 @@ mutation/decision caller, UPLOAD_INITIATOR for legacy upload attribution, and
 DELETION_REQUESTER for the owner behind async permanent deletion.
 
 ## Transaction and replay guarantees
+
+Copy M1 freezes the owner actor's display name at admission. Its independently
+committed copy receipt precedes READY; READY, quota transfer, operation state and
+one COPIED event share the final transaction. COPIED has an absent before side
+and a READY after side for the new destination file. It is not an UPLOAD_COMPLETED
+event on either source or destination. PostgreSQL guards its shape and uniqueness.
+Activity insertion failure rolls finalization back while preserving the receipt
+for metadata-only recovery. Unknown operations, failed admission, cancellation,
+logical disposal and idempotent/recovery replay add no COPIED event. Ordinary
+permanent deletion of a copied file retains its separate deletion event. See
+[Copy M1](file-copy.md).
 
 Metadata services capture before state after existing hierarchy coordination and
 fresh authorization, flush the mutation, then use a MANDATORY history writer in
@@ -149,5 +161,6 @@ Live Garage completion asserts one event with exact bytes and retained receipts.
 Executed commands/results and gated checks are recorded in
 [architecture evidence](architecture.md#general-activity-verification). Query
 cost, latency, capacity, physical reclamation, browser release and retention/erasure
-remain unmeasured or undecided. This milestone stops before copy, quota
-notifications, collaborator history feeds or frontend work.
+remain unmeasured or undecided. The original activity milestone stopped before
+copy; Copy M1 adds the COPIED extension above. Quota notifications, collaborator
+history feeds and frontend work remain separate.

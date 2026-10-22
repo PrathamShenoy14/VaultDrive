@@ -1,5 +1,11 @@
 # ADR-0011: MVP logical storage quota
 
+[Copy M1](0012-safe-file-copy.md) extends admission with a full-size independent
+UPLOADING reservation using the same atomic trigger. READY transfers its charge;
+uncertainty/evidence alone releases nothing. Permanent logical cancellation or
+folder disposal releases charge through FAILED/removal while retaining physical
+uncertainty. No source charge or prior allocation identity is changed.
+
 - Status: Implemented
 - Date: 2026-10-21
 

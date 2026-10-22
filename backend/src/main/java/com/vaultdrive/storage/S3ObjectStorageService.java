@@ -30,6 +30,39 @@ public class S3ObjectStorageService implements ObjectStorageService {
     public static final Duration DELETE_TIMEOUT = Duration.ofSeconds(10);
     public static final Duration DELETE_ATTEMPT_TIMEOUT = Duration.ofSeconds(5);
 
+    @Override
+    public CopyStorage.ObjectInfo inspectCopyObject(StorageTarget target) {
+        requireNoTransaction();
+        if (!binding.matches(target)) { throw new CopyStorage.Uncertain(); }
+        try {
+            var head = s3Client.headObject(HeadObjectRequest.builder().bucket(target.bucket()).key(target.key())
+                    .overrideConfiguration(c -> c.apiCallTimeout(DELETE_TIMEOUT).apiCallAttemptTimeout(DELETE_ATTEMPT_TIMEOUT))
+                    .build());
+            return new CopyStorage.ObjectInfo(head.contentLength(), head.eTag(), head.contentType(), head.metadata());
+        } catch (RuntimeException unavailable) { throw new CopyStorage.Uncertain(); }
+    }
+
+    @Override
+    public void copyObject(CopyStorage.Command command) {
+        requireNoTransaction();
+        if (!binding.matches(command.source()) || !binding.matches(command.destination())
+                || command.source().equals(command.destination())) { throw new CopyStorage.Uncertain(); }
+        try {
+            // SDK v2 encodes the source bucket/key. REPLACE prevents copying source session metadata.
+            var result = s3Client.copyObject(CopyObjectRequest.builder()
+                    .sourceBucket(command.source().bucket()).sourceKey(command.source().key())
+                    .destinationBucket(command.destination().bucket()).destinationKey(command.destination().key())
+                    .copySourceIfMatch(command.sourceEtag()).metadataDirective(MetadataDirective.REPLACE)
+                    .contentType(command.contentType())
+                    .metadata(Map.of("vaultdrive-copy", command.operationId().toString()))
+                    .overrideConfiguration(c -> c.apiCallTimeout(DELETE_TIMEOUT).apiCallAttemptTimeout(DELETE_ATTEMPT_TIMEOUT))
+                    .build());
+            if (result.copyObjectResult() == null || result.copyObjectResult().eTag() == null) {
+                throw new CopyStorage.Uncertain();
+            }
+        } catch (RuntimeException uncertain) { throw new CopyStorage.Uncertain(); }
+    }
+
     public S3ObjectStorageService(
             S3Client s3Client,
             S3StorageProperties properties,

@@ -1,5 +1,18 @@
 # ADR-0007: Transaction-scoped hierarchy coordination
 
+Copy M1 adds the bounded lock order recorded in [ADR-0012](0012-safe-file-copy.md):
+shared owner hierarchy, admission-only owner/idempotency advisory lock, existing
+files in lexical UUID order, allocations in the same order, then copy operation.
+Admission locks its destination namespace before creating the new file/quota
+reservation/allocation/operation. Final charge changes use the existing quota
+trigger after existing resource coordination. Fresh source/destination state is
+validated after locks at admission/dispatch; no lock spans Garage. COPY folder
+purge locks copy progress after allocation and before work/member/job, and commits
+publication abandonment with its separate logical-discard proof before the final
+job fence. File removal never updates copy progress after that fence.
+Deterministic PostgreSQL tests cover source Trash versus dispatch and destination
+Trash versus READY in both orders, concurrent dispatch, idempotency and collisions.
+
 Current consolidation: [ADR-0010](0010-backend-consolidation.md) retires synchronous new-upload admission/PUT and foreground receipt creation. Historical phase descriptions below remain records of their original revisions; retained receipts, recovery and locking guarantees still apply. Current new uploads use direct multipart only.
 
 - Status: Accepted; folder operations and current file metadata mutation paths implemented

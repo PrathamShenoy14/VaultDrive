@@ -1,5 +1,17 @@
 # Phase 2D.2: Safe recursive folder purge and metadata finalization
 
+Copy M1 extension: READY COPY members use their own completion receipt before
+normal exact-key byte deletion. Unfinished COPY members use copy_discarded_at,
+separate from multipart logical, byte and never-written receipts. The worker
+locks copy progress after allocation and before work/member/job, and commits
+permanent CANCELLED publication authority with logical proof before its final
+job fence. It preserves the sealed file snapshot and reservation until metadata
+removal. Final removal checks that proof without acquiring a new copy-progress
+lock after the job fence. Late positive facts can be retained after removal but
+cannot resurrect metadata. Logical completion makes no reclamation claim; never
+repeat an uncertain CopyObject or delete its possible late object. See
+[copy recovery](file-copy.md) and [ADR-0012](decisions/0012-safe-file-copy.md).
+
 Current API update: [MVP API contract consistency](api-contract.md) supersedes
 historical capability, folder/Trash pagination, deletion-polling and error-envelope
 descriptions below. Storage, authorization and worker protocols are unchanged.

@@ -1,5 +1,15 @@
 # Storage quota operations
 
+Copy M1 reserves the source's full logical length for the owner's new UPLOADING
+file, atomically with its independent allocation and retained idempotent intent.
+READY transfers reserved to used once. Replays reserve nothing again; collision
+or exhausted quota rolls the whole admission back. Source Trash/deletion does not
+change the destination's charge. UNKNOWN, positive receipt and BLOCKED remain
+reserved. Explicit logical cancellation commits FAILED and releases the charge;
+sealed folder logical discard releases it on metadata removal. Both retain
+possible late bytes in the uncertain-allocation inventory, never physical
+reclamation proof. See [copy recovery and cancellation](file-copy.md).
+
 The MVP owner limit defaults to 10 GiB (10,737,418,240 bytes). An operator can
 change `storage_quotas.limit_bytes` for an existing owner in a short transaction.
 Lowering it below current used plus reserved does not remove data; available
@@ -22,9 +32,10 @@ investigation, not a blind counter update. The exclusive hierarchy lock gives
 the repair a fresh aggregate against supported writers. Repair cannot establish
 Garage reclamation or clear unknown allocations.
 
-An UPLOADING file after uncertain Create/Complete or blocked recovery remains
-reserved. Use the existing multipart completion, cancellation or expiry procedures
-to establish a durable eligible transition; never free it based on time or
+An UPLOADING file after uncertain Create/Complete/CopyObject or blocked recovery remains
+reserved. Use the matching multipart completion/cancellation/expiry or
+[copy recovery/cancellation](file-copy.md) procedure to establish a durable eligible
+transition; never free it based on time or
 provider absence. FAILED/removed allocations can contribute to uncertain storage
 indefinitely. Investigate original receipts, storage identities and purge runbooks
 before any manual repair. Do not rewrite or delete retained allocations to fix

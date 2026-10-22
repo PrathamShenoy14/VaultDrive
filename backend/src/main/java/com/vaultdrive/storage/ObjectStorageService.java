@@ -5,6 +5,11 @@ import java.util.UUID;
 
 public interface ObjectStorageService {
 
+    CopyStorage.ObjectInfo inspectCopyObject(StorageTarget target);
+
+    /** Exactly one SDK attempt; caller must hold a newly committed durable dispatch permit. */
+    void copyObject(CopyStorage.Command command);
+
     StorageObject download(String storageKey);
 
     /** Purge uses the durable target; adapters must reject incompatible storage bindings. */

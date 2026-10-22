@@ -132,7 +132,7 @@ public class FilePurgeProgressService {
                      AND a.storage_key = t.storage_key AND a.storage_namespace = t.storage_namespace
                      AND a.endpoint = t.endpoint AND a.region = t.region AND a.bucket = t.bucket
                     WHERE t.event_id = :event AND a.write_started AND (a.upload_protocol = 'SERVER_PUT'
-                        OR multipart_completed_allocation(a.file_id)))
+                        OR multipart_completed_allocation(a.file_id) OR copy_completed_allocation(a.file_id)))
                 """).setParameter("event", target.event()).getSingleResult();
         if (!verified) { throw new IllegalStateException("Purge allocation does not match target"); }
     }
@@ -266,7 +266,7 @@ public class FilePurgeProgressService {
                     IS NOT DISTINCT FROM ROW(w.owner_id, w.folder_id, w.file_version, w.file_status,
                         w.file_created_at, w.file_updated_at, w.deleted_at, w.purge_requested_at, w.storage_key)
                     AND (w.bytes_deleted_at IS NOT NULL OR w.never_written_at IS NOT NULL
-                        OR w.multipart_discarded_at IS NOT NULL)
+                        OR w.multipart_discarded_at IS NOT NULL OR w.copy_discarded_at IS NOT NULL)
                 """).setParameter("file", file).executeUpdate();
         if (deleted != 1) { throw new IllegalStateException("File finalization lost its matching resource"); }
         entityManager.createNativeQuery("""

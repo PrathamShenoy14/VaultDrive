@@ -2,6 +2,18 @@
 
 This is a living explanation of lessons demonstrated by committed VaultDrive code. It is not a claim that every production concern is solved.
 
+## Copy can safely finish later without repeating its write
+
+Copy M1 separates one immutable dispatch permission, positive object evidence and
+READY publication. A lost successful CopyObject response is recoverable because
+the fresh immutable destination key carries a backend operation marker and its
+verified length/type. Absence cannot prove that the one permitted request will
+never arrive; a crash between dispatch commit and network I/O can remain unknown.
+Logical cancellation removes publication authority and quota charge while retaining
+the allocation and every possible late effect. This relies on trusted writers and
+key nonreuse, not an external fence. A copied file's storage identity and lifecycle
+are independent even if Garage shares physical blocks internally.
+
 ## History records facts without becoming permission
 
 A historical name or location can disclose private information even when today's

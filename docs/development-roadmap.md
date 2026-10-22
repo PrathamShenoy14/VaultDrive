@@ -328,3 +328,19 @@ See [the implementation contract](resource-activity.md) and
 [executed verification](architecture.md#general-activity-verification). This milestone
 ends here. Copy, quota notifications, collaborator history feeds, frontend work,
 retention/erasure policy, cursor exports and performance targets remain separate.
+
+## Copy M1 - Safe File Copy (completed)
+
+- [x] Owner-only active READY source and owner destination/root, explicit filename and 409 collision policy.
+- [x] Independent immutable file/allocation/key and atomic full-size quota reservation.
+- [x] Retained owner-scoped idempotency, one durable dispatch and positive COPY-specific receipt.
+- [x] Bounded status/execute/recover/cancel APIs; uncertain writes are never redispatched.
+- [x] Fresh admission/dispatch authorization, receipt-backed READY and atomic COPIED activity.
+- [x] Independent READY purge and unfinished folder logical-discard evidence with retained uncertainty.
+- [x] Isolated PostgreSQL race/failure and real Garage CopyObject/lost-response verification.
+- [x] API, quota, history, architecture and [operator recovery documentation](file-copy.md).
+
+See [ADR-0012](decisions/0012-safe-file-copy.md) and
+[executed evidence](architecture.md#copy-m1-verification). Stop after M1. Folder
+copy, frontend, quota notifications, automatic unknown-object cleanup, retention
+policy, five-GiB capacity and performance measurement remain separate.

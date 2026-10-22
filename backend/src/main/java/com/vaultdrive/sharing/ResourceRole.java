@@ -11,7 +11,7 @@ public enum ResourceRole {
             return folder
                     ? List.of("READ_METADATA", "LIST_CHILDREN", "CREATE_FOLDER", "UPLOAD", "RENAME",
                               "MOVE", "TRASH", "MANAGE_GRANTS")
-                    : List.of("READ_METADATA", "DOWNLOAD", "RENAME", "MOVE", "TRASH", "MANAGE_GRANTS");
+                    : List.of("READ_METADATA", "DOWNLOAD", "COPY", "RENAME", "MOVE", "TRASH", "MANAGE_GRANTS");
         }
         if (this == EDITOR) {
             return folder ? List.of("READ_METADATA", "LIST_CHILDREN", "CREATE_FOLDER", "UPLOAD", "RENAME", "TRASH")

@@ -19,6 +19,7 @@ Client -- bearer/JSON control API --> Spring Boot --> PostgreSQL metadata/eviden
 | Registration, login, refresh/logout, profile | `auth`, `security`, `user`; BCrypt, bearer JWTs, PostgreSQL families/revocation |
 | Metadata, Trash, restore, purge intent | `folder`, `file`, `hierarchy`; service transactions and PostgreSQL constraints |
 | New uploads | Multipart session/transfer/completion/cancellation services; direct multipart only |
+| File copying | Owner-only COPY allocation, durable one-dispatch operation, positive receipt and explicit bounded recovery |
 | Storage I/O/signing | `ObjectStorageService` / `S3ObjectStorageService`, immutable binding, SDK retries disabled |
 | Resource authority/reads | `ResourceAccessRepository`, `ResourceReadService`, PostgreSQL resolver snapshots |
 | Filename search/filtering | `search`; combined file/folder pages through the same PostgreSQL access resolver |
@@ -31,7 +32,7 @@ The [consolidation audit](backend-consolidation.md) records removals, retained h
 
 ## Persistence and schema
 
-Flyway V1–V41 is append-only; Hibernate validates the schema. JPA manages users, folders, files, immutable outbox writes and short job/outbox entity transactions. Native EntityManager SQL implements PostgreSQL recursive authorization, scalar evidence reads, row locks, claims and conditional transitions. JdbcTemplate manages authentication sessions/revocations without a parallel JPA entity model. All use the configured datasource/transaction manager.
+Flyway V1–V42 is append-only; Hibernate validates the schema. JPA manages users, folders, files, immutable outbox writes and short job/outbox entity transactions. Native EntityManager SQL implements PostgreSQL recursive authorization, scalar evidence reads, row locks, claims and conditional transitions. JdbcTemplate manages authentication sessions/revocations without a parallel JPA entity model. All use the configured datasource/transaction manager.
 
 Services own transactions and `spring.jpa.open-in-view=false` remains required. SQL stays in its existing responsibility's transaction service or access repository. A blanket JPA/JDBC conversion would obscure locking and atomicity. Managed mutation targets are refreshed where required; status/version bulk CAS flushes/clears the context. Scalar worker reads avoid stale managed state; independent job/outbox transactions bound cache lifetime. Never save an older entity after native SQL changed that row.
 
@@ -77,6 +78,10 @@ Read projections add no migration, mutation authority or lock-order change.
 - Folder structural/grant mutations use exclusive owner hierarchy coordination. File operations use shared coordination plus optimistic versions or fresh eligible-row locks.
 - Restore uses hierarchy → eligible file row → destination namespace lock.
 - Multipart uses hierarchy → fresh file → allocation → session → decision/progress.
+- Copy uses hierarchy, admission-only idempotency lock, lexical-UUID file locks,
+  allocations in the same order, then operation; new admission takes destination
+  namespace before inserting its new file/quota reservation. Folder copy disposal
+  locks copy progress after allocation and before work/member/job.
 - Purge uses hierarchy → resource rows → allocation/work/run/progress → final job fence. Metadata pages use exclusive coordination and UUID row order. Job-only transactions acquire no later resource locks.
 - Authentication locks its refresh family before mutable family/token reads.
 - Charge changes lock the owner quota row from the file trigger: after a new reservation file insert and before its new allocation/session, or after existing-file lifecycle coordination. Counter repair uses exclusive hierarchy, then quota row, then a fresh aggregate. No lock spans Garage I/O.
@@ -123,6 +128,22 @@ Historical SERVER_PUT allocations, receipts, migrations and targets remain. Read
 The size policy remains positive files up to five GiB, fixed eight-MiB parts and bounded part count. Zero-byte uploads require a separate product decision. See [sessions](multipart-upload-sessions.md), [transfers](multipart-part-transfers.md), [completion](multipart-completion-recovery.md), [cancellation](multipart-cancellation-expiry.md) and [historical recovery](upload-success-recovery.md).
 
 ## Trash, purge and asynchronous work
+
+Copy M1 adds `FileCopyController`, `FileCopyService` and short
+`FileCopyTransactions` boundaries. V42 retains independent COPY allocations,
+owner/key-unique immutable intent, single-assignment dispatch and positive object
+receipt. Admission atomically reserves quota and name; source/destination
+ownership and lifecycle are checked under hierarchy/row coordination at admission
+and dispatch. One bounded CopyObject outside transactions uses source ETag and
+backend operation metadata. Positive exact-key verification commits a receipt
+before READY, quota transfer and COPIED history commit together. Recovery never
+repeats an uncertain copy. Logical cancellation releases charge through FAILED
+without claiming bytes gone. Source deletion after dispatch cannot remove a
+verified independent copy. Existing READY purge uses COPY-specific receipt
+verification; unfinished sealed folder members use separate copy_discarded_at
+logical evidence and retain possible late effects. Retained owner-only polling
+survives resource removal and provides no current access capability. See
+[protocol, API and recovery](file-copy.md) and [ADR-0012](decisions/0012-safe-file-copy.md).
 
 Per-owner quota accounting uses READY file lengths as used and UPLOADING lengths
 as reserved. Trash and pending purge remain charged through durable file metadata
@@ -279,6 +300,73 @@ its schema, topology and disposable allocation cleanup. Private credentials and
 local environment files are never committed. Performance, cross-request snapshots,
 physical reclamation, live browser release and retention/erasure remain outside
 this milestone; see [the full history contract](resource-activity.md).
+
+## Copy M1 verification
+
+Executed on 2026-10-22 with PostgreSQL 17.11, read-only inspected Garage 2.3.0
+and RabbitMQ 4.3.6. Final focused copy/adapter/Garage/activity/multipart-purge
+selection: **99 passed, zero failures/errors/skips**. Final clean full backend
+suite: **1,446 tests, 1,426 passed, 20 skipped, zero failures/errors**.
+
+The 44 new cases comprise 38 isolated PostgreSQL/API/race cases, three adapter
+cases and three live Garage cases. They cover owner versus Viewer/Editor/stranger
+authorization, lifecycle/ancestry, collisions, concurrent idempotency/reservation/
+dispatch, quota exhaustion/rollback, unknown/mismatched bindings, receipt/READY
+rollback, READY versus cancel, source Trash versus dispatch and destination Trash
+versus READY in both lock orders, stale folder job fencing, independent deletion,
+logical disposal and retained late positive facts. Blocking tests observe actual
+PostgreSQL waiters and re-read committed state after locks.
+
+Live Garage tests copy a real multipart source, verify exact downloaded bytes and
+replacement operation metadata, independently purge source/destination, and retain
+a receipt when the destination is trashed during copy. A one-request TCP proxy
+consumes Garage's successful CopyObject response and drops it downstream; the
+operation remains UNKNOWN and positive HEAD recovers READY with no second copy.
+Three run journals report no retained ambiguous copy allocations. Their cleanup
+touches only freshly owned, positively verified destinations and known complete
+source/control objects. Physical block duplication/reclamation is not inferred.
+
+The full suite includes 12 live isolated RabbitMQ tests, 27 enabled Garage
+multipart cases and the continuous HTTP/outbox/broker/job/Garage purge harness.
+Default contexts use only `vaultdrive_test.copy_final_f27548d6218f48a58faf5beb0b2e1312`;
+suites with explicit fresh schemas retain their own isolation. No shared metadata,
+allocation, migration checksum, VM/storage/broker configuration or normal async
+execution default changed. The task-owned localhost AMQP tunnel was closed after
+verification. Synthetic database evidence and local test journals remain retained.
+
+| Separately gated suite | Skipped | Gate not enabled |
+|---|---:|---|
+| AsyncPurgeProcessRecoveryTest | 1 | ASYNC_PROCESS_TEST and process-kill runbook |
+| GarageMultipartCapabilityTest | 18 | GARAGE_MULTIPART_TEST and separate M0 characterization |
+| GarageMultipartJournalRecoveryTest | 1 | Explicitly reviewed retained-run UUID |
+
+These scenarios remain unverified by Copy M1. Five-GiB capacity, multi-node
+failure, latency, browser/client integration, physical reclamation and retention
+policy are unverified or undecided. A dispatch-commit/crash gap can remain UNKNOWN
+forever; no negative probe permits redispatch. Logical cancellation/disposal
+retains possible bytes and is not automatic physical cleanup.
+
+Reproduce with a task-owned [AMQP verification tunnel](async-purge-verification.md),
+the ignored environment loaded in the same Maven shell and a fresh schema:
+
+```powershell
+. .\.env.local.ps1
+$env:RABBITMQ_TEST_VHOST='vaultdrive_outbox_test'
+$env:ASYNC_E2E_TEST='true'
+$env:ASYNC_E2E_ALIGN_INITIAL_DUE='true'
+$env:GARAGE_MULTIPART_TRANSFER_TEST='true'
+$env:GARAGE_MULTIPART_COMPLETION_TEST='true'
+$env:GARAGE_MULTIPART_CANCELLATION_TEST='true'
+$env:GARAGE_MULTIPART_PURGE_TEST='true'
+$env:GARAGE_MULTIPART_VERSION='2.3.0'
+$env:GARAGE_COPY_TEST='true'
+$copySchema='copy_verify_'+[Guid]::NewGuid().ToString('N')
+.\mvnw.cmd -o clean test "-Dspring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=$copySchema" "-Dspring.flyway.schemas=$copySchema" "-Dspring.flyway.default-schema=$copySchema"
+```
+
+See [the copy API and operator recovery procedure](file-copy.md) and
+[ADR-0012](decisions/0012-safe-file-copy.md). Copy M1 stops before folder copy,
+frontend and quota notifications.
 
 ## Remaining work
 

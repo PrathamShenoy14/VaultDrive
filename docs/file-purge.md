@@ -1,5 +1,12 @@
 # Physical file purge (Phase 2D.1 and Phase 2D.2 Slices 2–6)
 
+Copy M1 extension: READY COPY allocations require their own positive receipt and
+original retained allocation before the existing exact-key byte/deletion proof
+can execute. Source and copied files have independent targets and charges. COPY
+cannot acquire legacy PUT cleanup or never-written proof. Unfinished copies use
+the separate sealed folder logical-discard protocol; cancellation/absence never
+authorizes physical deletion. See [copy operations and recovery](file-copy.md).
+
 Current API update: [MVP API contract consistency](api-contract.md) supersedes
 historical capability, folder/Trash pagination, deletion-polling and error-envelope
 descriptions below. Storage, authorization and worker protocols are unchanged.
