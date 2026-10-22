@@ -1,5 +1,9 @@
 # ADR-0012: Safe owner-only file copy
 
+Copy M2 composes this file protocol inside the bounded hidden-tree jobs in
+[ADR-0013](0013-bounded-folder-copy.md). Its member idempotency has a separate
+database namespace; public M1 keys/replays and storage recovery remain supported.
+
 - Status: Implemented
 - Date: 2026-10-22
 

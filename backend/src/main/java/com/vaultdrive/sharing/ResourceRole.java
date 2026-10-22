@@ -9,7 +9,7 @@ public enum ResourceRole {
     public List<String> capabilities(boolean folder) {
         if (this == OWNER) {
             return folder
-                    ? List.of("READ_METADATA", "LIST_CHILDREN", "CREATE_FOLDER", "UPLOAD", "RENAME",
+                    ? List.of("READ_METADATA", "LIST_CHILDREN", "CREATE_FOLDER", "UPLOAD", "COPY", "RENAME",
                               "MOVE", "TRASH", "MANAGE_GRANTS")
                     : List.of("READ_METADATA", "DOWNLOAD", "COPY", "RENAME", "MOVE", "TRASH", "MANAGE_GRANTS");
         }

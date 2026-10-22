@@ -22,6 +22,7 @@ public class FolderAccessValidator {
             UUID ownerId,
             UUID folderId
     ) {
+        requirePublished(folderId);
         Folder folder = folderRepository
                 .findByIdAndOwnerIdAndDeletedAtIsNull(
                         folderId,
@@ -49,6 +50,7 @@ public class FolderAccessValidator {
             return null;
         }
 
+        requirePublished(parentFolderId);
         Folder parent = folderRepository
                 .findByIdAndOwnerIdAndDeletedAtIsNull(
                         parentFolderId,
@@ -81,6 +83,10 @@ public class FolderAccessValidator {
         }
     }
 
+    private void requirePublished(UUID id) {
+        if (folderRepository.isCopyHidden(id)) throw new FolderNotFoundException("Folder not found");
+    }
+
     private void validateAncestorChain(
             UUID ownerId,
             UUID parentFolderId
@@ -97,6 +103,7 @@ public class FolderAccessValidator {
                 );
             }
 
+            requirePublished(currentId);
             Folder currentFolder = folderRepository
                     .findByIdAndOwnerIdAndDeletedAtIsNull(
                             currentId,

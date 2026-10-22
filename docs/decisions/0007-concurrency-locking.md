@@ -1,5 +1,12 @@
 # ADR-0007: Transaction-scoped hierarchy coordination
 
+Copy M2 uses exclusive owner hierarchy before snapshot and each folder job
+mutation, with M1 file/allocation/operation/namespace locks before checkpoint
+writes. Explicit storage execution retains the existing shared M1 lock order
+and transaction-free I/O. Hidden staging has no ordinary mutation authority.
+See [ADR-0013](0013-bounded-folder-copy.md) for snapshot/publication/cancellation
+and existing-purge disposal coordination.
+
 Copy M1 adds the bounded lock order recorded in [ADR-0012](0012-safe-file-copy.md):
 shared owner hierarchy, admission-only owner/idempotency advisory lock, existing
 files in lexical UUID order, allocations in the same order, then copy operation.

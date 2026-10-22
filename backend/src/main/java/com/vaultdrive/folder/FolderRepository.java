@@ -13,6 +13,9 @@ import java.util.UUID;
 
 public interface FolderRepository extends JpaRepository<Folder, UUID> {
 
+    @Query(value = "SELECT folder_copy_hidden(:id)", nativeQuery = true)
+    boolean isCopyHidden(@Param("id") UUID id);
+
     Optional<Folder> findByIdAndOwnerIdAndDeletedAtIsNull(
             UUID id,
             UUID ownerId

@@ -341,6 +341,24 @@ retention/erasure policy, cursor exports and performance targets remain separate
 - [x] API, quota, history, architecture and [operator recovery documentation](file-copy.md).
 
 See [ADR-0012](decisions/0012-safe-file-copy.md) and
-[executed evidence](architecture.md#copy-m1-verification). Stop after M1. Folder
-copy, frontend, quota notifications, automatic unknown-object cleanup, retention
+[executed evidence](architecture.md#copy-m1-verification). M1 ended before folder
+copy; M2 below adds it. Frontend, quota notifications, automatic unknown-object cleanup, retention
 policy, five-GiB capacity and performance measurement remain separate.
+
+
+## Copy M2 - Bounded, Resumable Folder Copy (completed)
+
+- [x] Owner-only idempotent admission, explicit root naming/collision contract and descendant-target rejection.
+- [x] Durable immutable capped subtree snapshot and independent folder/file/storage identities.
+- [x] Caller-driven bounded batches/checkpoints and status/execute/recover/cancel/discard APIs.
+- [x] Reuse M1 dispatch/positive receipt/recovery with no uncertain write retries.
+- [x] Hidden staging, atomic publication and frozen actor-attributed file/folder activity.
+- [x] Incremental quota, durable cancellation and existing bounded purge disposal preserving uncertainty.
+- [x] Isolated PostgreSQL/API/concurrency/restart/visibility/quota tests and live Garage folder-copy checks.
+- [x] [API and operational documentation](folder-copy.md), quotas, activity and architecture updates.
+
+See [ADR-0013](decisions/0013-bounded-folder-copy.md) and
+[executed verification](architecture.md#copy-m2-verification). Stop after M2.
+Arbitrary-size snapshots, source pinning, autonomous copy workers, automatic
+unknown-byte reclamation, process-kill characterization, retention/erasure,
+quota notifications and frontend work remain separate.

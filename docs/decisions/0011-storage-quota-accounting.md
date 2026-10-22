@@ -1,5 +1,10 @@
 # ADR-0011: MVP logical storage quota
 
+[Copy M2](0013-bounded-folder-copy.md) reserves incrementally per M1 member. Hidden
+READY members remain used; cancellation of the whole job does not release charge.
+Explicit discard reuses bounded folder purge and its metadata-removal accounting,
+retaining all uncertain allocations.
+
 [Copy M1](0012-safe-file-copy.md) extends admission with a full-size independent
 UPLOADING reservation using the same atomic trigger. READY transfers its charge;
 uncertainty/evidence alone releases nothing. Permanent logical cancellation or

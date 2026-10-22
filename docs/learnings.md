@@ -792,3 +792,23 @@ Use bounded statement/lock/transaction budgets and report unknown capacity. V40'
 extension lives in `public` so independent Flyway test schemas share its operator
 class; deployments need extension availability and installation privilege. No
 benchmark or constant-time SQL guarantee follows from adding an index.
+
+
+## Copy M2: membership, publication and storage are separate facts
+
+A resumable copy needs immutable membership, not repeated enumeration of a changing
+source. A capped statement snapshot under exclusive hierarchy freezes names/IDs;
+short batches link each member to M1 rather than inventing another storage retry.
+M1 READY is a file fact; a hidden tree can contain charged READY files while the
+job is incomplete. One atomic publication decision makes that distinction visible
+without allowing partial files to escape through search, grants or owner moves.
+
+Cancellation closes future publication but cannot recall admitted storage. Keeping
+charges/evidence and separately submitting existing purge avoids rewriting a sealed
+snapshot or pretending late effects disappeared. A lost checkpoint is recovered
+from committed M1 truth, not another reservation or CopyObject. Actor snapshots
+must travel from job admission through each later file reservation and publication.
+
+The maximum-size test caught full-snapshot validation repeated by every deferred
+member trigger. Validate each immutable mapping locally, then verify completeness
+once at admission commit. A bounded returned page alone does not bound commit work.

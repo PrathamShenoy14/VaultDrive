@@ -1,5 +1,15 @@
 # Storage quota operations
 
+Copy M2 charges incrementally through the same M1 file reservation. Snapshot
+admission charges no bytes. Hidden READY members count as used; unfinished
+UNKNOWN/BLOCKED members stay reserved. Quota exhaustion rolls back only the next
+member reservation/link and records a resumable BLOCKED job. Replays cannot
+double charge. Whole-job cancellation closes publication but releases no charge;
+separate discard submits existing bounded folder purge, releasing charge only
+through eligible file abandonment or metadata removal. Retained unknown allocations
+survive disposal and remain uncertain physical storage. See the
+[folder-copy quota and disposal procedure](folder-copy.md).
+
 Copy M1 reserves the source's full logical length for the owner's new UPLOADING
 file, atomically with its independent allocation and retained idempotent intent.
 READY transfers reserved to used once. Replays reserve nothing again; collision

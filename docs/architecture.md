@@ -19,7 +19,7 @@ Client -- bearer/JSON control API --> Spring Boot --> PostgreSQL metadata/eviden
 | Registration, login, refresh/logout, profile | `auth`, `security`, `user`; BCrypt, bearer JWTs, PostgreSQL families/revocation |
 | Metadata, Trash, restore, purge intent | `folder`, `file`, `hierarchy`; service transactions and PostgreSQL constraints |
 | New uploads | Multipart session/transfer/completion/cancellation services; direct multipart only |
-| File copying | Owner-only COPY allocation, durable one-dispatch operation, positive receipt and explicit bounded recovery |
+| File/folder copying | Owner-only M1 COPY protocol plus bounded M2 immutable subtree jobs, hidden staging and atomic publication |
 | Storage I/O/signing | `ObjectStorageService` / `S3ObjectStorageService`, immutable binding, SDK retries disabled |
 | Resource authority/reads | `ResourceAccessRepository`, `ResourceReadService`, PostgreSQL resolver snapshots |
 | Filename search/filtering | `search`; combined file/folder pages through the same PostgreSQL access resolver |
@@ -32,7 +32,7 @@ The [consolidation audit](backend-consolidation.md) records removals, retained h
 
 ## Persistence and schema
 
-Flyway V1–V42 is append-only; Hibernate validates the schema. JPA manages users, folders, files, immutable outbox writes and short job/outbox entity transactions. Native EntityManager SQL implements PostgreSQL recursive authorization, scalar evidence reads, row locks, claims and conditional transitions. JdbcTemplate manages authentication sessions/revocations without a parallel JPA entity model. All use the configured datasource/transaction manager.
+Flyway V1-V43 is append-only; Hibernate validates the schema. JPA manages users, folders, files, immutable outbox writes and short job/outbox entity transactions. Native EntityManager SQL implements PostgreSQL recursive authorization, scalar evidence reads, row locks, claims and conditional transitions. JdbcTemplate manages authentication sessions/revocations without a parallel JPA entity model. All use the configured datasource/transaction manager.
 
 Services own transactions and `spring.jpa.open-in-view=false` remains required. SQL stays in its existing responsibility's transaction service or access repository. A blanket JPA/JDBC conversion would obscure locking and atomicity. Managed mutation targets are refreshed where required; status/version bulk CAS flushes/clears the context. Scalar worker reads avoid stale managed state; independent job/outbox transactions bound cache lifetime. Never save an older entity after native SQL changed that row.
 
@@ -82,6 +82,10 @@ Read projections add no migration, mutation authority or lock-order change.
   allocations in the same order, then operation; new admission takes destination
   namespace before inserting its new file/quota reservation. Folder copy disposal
   locks copy progress after allocation and before work/member/job.
+- Folder copy admission and job mutations use exclusive owner hierarchy before
+  protected reads. M1 file/allocation/operation/namespace locks precede job
+  checkpoint writes. Storage execution retains M1's shared order. Cancellation
+  closes dispatch/publication; separate discard reuses existing folder purge.
 - Purge uses hierarchy → resource rows → allocation/work/run/progress → final job fence. Metadata pages use exclusive coordination and UUID row order. Job-only transactions acquire no later resource locks.
 - Authentication locks its refresh family before mutable family/token reads.
 - Charge changes lock the owner quota row from the file trigger: after a new reservation file insert and before its new allocation/session, or after existing-file lifecycle coordination. Counter repair uses exclusive hierarchy, then quota row, then a fresh aggregate. No lock spans Garage I/O.
@@ -144,6 +148,20 @@ verification; unfinished sealed folder members use separate copy_discarded_at
 logical evidence and retain possible late effects. Retained owner-only polling
 survives resource removal and provides no current access capability. See
 [protocol, API and recovery](file-copy.md) and [ADR-0012](decisions/0012-safe-file-copy.md).
+
+Copy M2 adds caller-driven `FolderCopyController`, `FolderCopyService` and short
+`FolderCopyTransactions` boundaries. V43 freezes at most 1,000 active folder/READY
+file members and names under exclusive owner coordination, with independent
+folder/file identities and one linked M1 operation per file. At most four member
+steps per explicit execute/recover request advance durable checkpoints; recovery
+never reserves or redispatches a file. The access resolver and scalar mutation
+checks hide staging members until receipt-backed whole-tree publication and
+folder COPIED history commit atomically. M1 file history still records each
+independently committed READY member. Quota is incremental and hidden READY files
+remain used. Job cancellation permanently closes publication without erasing
+charges or uncertain facts; explicit idempotent discard submits existing bounded
+folder purge. See [the complete API, snapshot and operational contract](folder-copy.md)
+and [ADR-0013](decisions/0013-bounded-folder-copy.md). This stops at M2.
 
 Per-owner quota accounting uses READY file lengths as used and UPLOADING lengths
 as reserved. Trash and pending purge remain charged through durable file metadata
@@ -367,6 +385,81 @@ $copySchema='copy_verify_'+[Guid]::NewGuid().ToString('N')
 See [the copy API and operator recovery procedure](file-copy.md) and
 [ADR-0012](decisions/0012-safe-file-copy.md). Copy M1 stops before folder copy,
 frontend and quota notifications.
+
+## Copy M2 verification
+
+Executed on 2026-10-22 against PostgreSQL 17.11, read-only inspected Garage 2.3.0
+and RabbitMQ 4.3.6. Final focused selection (`FolderCopyIntegrationTest`,
+`FileCopyIntegrationTest`, `GarageFileCopyIntegrationTest`, `S3CopyStorageTest`,
+`FolderAccessValidatorTest`): **88 passed, zero failures/errors/skips**.
+
+Final clean full backend suite: **1,483 tests, 1,463 passed, 20 skipped, zero
+failures/errors**, including 12 isolated live RabbitMQ cases, 27 enabled Garage
+multipart cases, all six live copy cases and the continuous HTTP/outbox/broker/
+job/Garage purge harness. The harness required no initial due-time alignment and
+removed only its seven owned objects and fresh schema/topology. Default contexts
+used only `vaultdrive_test.folder_copy_final_c21d8aeeaf16432395e784e5e7ae8ae3`;
+explicitly isolated suites retained their own fresh schemas. Six copy run journals
+reported no retained ambiguous copy objects. The task-owned AMQP tunnel was closed
+after verification. No shared metadata, old allocation, migration checksum,
+VM/storage/broker configuration or normal async default was changed.
+
+| Separately gated suite | Skipped | Gate not enabled |
+|---|---:|---|
+| AsyncPurgeProcessRecoveryTest | 1 | ASYNC_PROCESS_TEST and separate process-kill runbook |
+| GarageMultipartCapabilityTest | 18 | GARAGE_MULTIPART_TEST and separate M0 characterization |
+| GarageMultipartJournalRecoveryTest | 1 | Explicitly reviewed retained-run UUID |
+
+
+The 34 new isolated PostgreSQL/API cases cover nested/large/maximum 1,000-member
+admission and publication, depth/cap rejection, owner versus collaborator/stranger
+authorization, naming/collisions, descendant rejection, immutable membership/names,
+source changes before/after reservation, public/internal key isolation, concurrent
+admission/execution, reconstructed orchestration after interruption, positive-only
+UNKNOWN recovery, partial READY invisibility/search/move barriers, quota blocking,
+publication/history rollback, durable cancellation, late receipts, independent
+purge and parent-led sealed disposal. Latch-held transactions observe actual
+pg_blocking_pids and assert both snapshot/Trash and cancel/publication winner orders.
+
+The six live Garage cases include three M2 additions: nested folder publication
+with a real multipart object and independent source/destination deletion, successful
+CopyObject response loss through the one-request proxy followed by positive HEAD
+without redispatch, and destination Trash with receipt-only publication after
+restore. Exact downloaded bytes and per-file replacement metadata are checked.
+Cleanup touches only this run's fresh positively verified destination keys and
+known completed source/control objects; uncertain allocations/journals are retained.
+
+A maximum-size test initially exposed repeated whole-snapshot validation in each
+deferred member trigger. V43 now validates mappings per insert, checks completeness
+once at admission commit, and verifies each internal M1 linkage once. The final
+maximum-size test publishes the complete tree within the configured transaction
+bound. No latency, throughput or production-capacity improvement is claimed.
+
+From `backend/`, reproduce after read-only Garage attestation using the task-owned
+[isolated AMQP tunnel](async-purge-verification.md) and private environment:
+
+```powershell
+. .\.env.local.ps1
+$env:RABBITMQ_TEST_VHOST='vaultdrive_outbox_test'
+$env:ASYNC_E2E_TEST='true'
+$env:ASYNC_E2E_ALIGN_INITIAL_DUE='true'
+$env:GARAGE_MULTIPART_TRANSFER_TEST='true'
+$env:GARAGE_MULTIPART_COMPLETION_TEST='true'
+$env:GARAGE_MULTIPART_CANCELLATION_TEST='true'
+$env:GARAGE_MULTIPART_PURGE_TEST='true'
+$env:GARAGE_MULTIPART_VERSION='2.3.0'
+$env:GARAGE_COPY_TEST='true'
+$m2Schema='folder_copy_verify_'+[Guid]::NewGuid().ToString('N')
+.\mvnw.cmd -o clean test "-Dspring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=$m2Schema" "-Dspring.flyway.schemas=$m2Schema" "-Dspring.flyway.default-schema=$m2Schema"
+```
+
+Separately gated process-kill, capability characterization and retained-journal
+recovery are not established by these focused checks. Arbitrary-size snapshots,
+five-GiB capacity, multi-node failure, browser/client integration, performance,
+physical block independence/reclamation and retention/erasure remain unverified
+or deferred. The dispatch-commit/crash gap can remain UNKNOWN forever; no negative
+probe permits redispatch. There is no automatic copy executor or uncertain-byte
+cleanup. See [the complete operational contract](folder-copy.md).
 
 ## Remaining work
 

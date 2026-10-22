@@ -1,5 +1,15 @@
 # MVP general file and folder activity history
 
+Copy M2 extends COPIED to folders: whole-tree publication commits one event per
+new folder, absent before side, active after side and null status, atomically with
+the COMPLETED decision/checkpoint. Hidden staging emits no FOLDER_CREATED event.
+Each independently committed M1 READY member retains its single file COPIED event
+even if the folder job later fails/cancels; that event is not whole-job completion.
+All use the owner actor/name frozen at job admission. Event insertion failure
+rolls publication back and leaves M1 evidence reusable without dispatch. No folder
+COPIED event is emitted for failed/cancelled jobs or discard acceptance. See
+[Copy M2 visibility and history](folder-copy.md).
+
 General history is separate from [permission activity](sharing-m5.md). It records
 successful resource transitions in PostgreSQL, without a new event framework,
 outbox event, consumer, notification, or external I/O.
@@ -15,7 +25,7 @@ parent on a present side means root. Folder status is always null.
 | Event type | Successful transition |
 |---|---|
 | UPLOAD_COMPLETED | Winning UPLOADING -> READY, including receipt-backed recovery |
-| COPIED | Receipt-backed publication of a new independent copied file as READY |
+| COPIED | Receipt-backed M1 file READY or atomic Copy M2 folder publication |
 | FOLDER_CREATED | New folder inserted and flushed |
 | RENAMED | Normalized effective name actually changes |
 | MOVED | Immediate parent actually changes |

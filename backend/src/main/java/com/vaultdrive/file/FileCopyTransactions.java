@@ -50,22 +50,46 @@ public class FileCopyTransactions {
 
     public Status reserve(UUID actor, UUID source, String key, Request request) {
         if (request == null || key == null || !key.matches("[!-~]{1,128}")) { throw invalid(); }
+        return reserve(actor, source, key, request, null, null, null);
+    }
+
+    /** Called only inside a coordinated folder batch; joins its checkpoint transaction. */
+    public Status reserveFolderMember(UUID actor, UUID job, int ordinal) {
+        bounds(); hierarchy.acquireExclusive(actor);
+        Object[] m = (Object[]) em.createNativeQuery("SELECT m.source_id,m.destination_id,m.parent_id,m.name,m.size_bytes,m.content_type,j.actor_display_name "
+                + "FROM folder_copy_members m JOIN folder_copy_jobs j ON j.id=m.job_id WHERE j.id=:job AND j.owner_id=:owner "
+                + "AND j.state IN ('ACTIVE','BLOCKED','UNKNOWN') AND m.ordinal=:ordinal AND m.kind='FILE'")
+                .setParameter("job",job).setParameter("owner",actor).setParameter("ordinal",ordinal).getSingleResult();
+        requireOwner(actor,false,(UUID)m[0]);
+        Object[] current=(Object[])em.createNativeQuery("SELECT size_bytes,content_type FROM files WHERE id=:id")
+                .setParameter("id",m[0]).getSingleResult();
+        if (!Objects.equals(current[0],m[4]) || !Objects.equals(current[1],m[5])) { throw conflict(); }
+        return reserve(actor,(UUID)m[0],"folder:"+job+":"+m[0],new Request((UUID)m[2],(String)m[3]),job,(UUID)m[1],(String)m[6]);
+    }
+
+    private Status reserve(UUID actor, UUID source, String key, Request request, UUID job, UUID destinationId, String actorName) {
         String name = names.validateAndNormalize(request.name());
         bounds(); hierarchy.acquireShared(actor);
         em.createNativeQuery("SELECT pg_advisory_xact_lock(1129271385,hashtext(:key))")
                 .setParameter("key", actor + ":" + key).getSingleResult();
-        List<?> replay = em.createNativeQuery("SELECT id,source_file_id,folder_id,name FROM file_copy_operations WHERE owner_id=:owner AND idempotency_key=:key")
-                .setParameter("owner", actor).setParameter("key", key).getResultList();
+        List<?> replay = em.createNativeQuery("SELECT id,source_file_id,file_id,folder_id,name FROM file_copy_operations WHERE owner_id=:owner AND idempotency_key=:key "
+                + "AND folder_copy_job_id IS NOT DISTINCT FROM cast(:job AS uuid)")
+                .setParameter("owner", actor).setParameter("key", key).setParameter("job",job).getResultList();
         if (!replay.isEmpty()) {
             Object[] r = (Object[]) replay.getFirst();
-            if (!source.equals(r[1]) || !Objects.equals(request.destinationFolderId(),r[2]) || !name.equals(r[3])) { throw conflict(); }
+            if (!source.equals(r[1]) || !Objects.equals(request.destinationFolderId(),r[3]) || !name.equals(r[4])
+                    || (destinationId!=null && !destinationId.equals(r[2]))) { throw conflict(); }
             return read(actor, (UUID) r[0]).status(); // Retained owner-only result; no new resource authority.
         }
         // Owner lock is known from the authenticated caller; do not lock a foreign resource.
         requireOwner(actor, false, source);
         lockFile(source, actor); lockAllocation(source, actor);
         requireOwner(actor, false, source); // Fresh after source-row acquisition (file move uses shared coordination).
-        if (request.destinationFolderId() != null) { requireOwner(actor, true, request.destinationFolderId()); }
+        if (request.destinationFolderId() != null) {
+            if (job == null) { requireOwner(actor, true, request.destinationFolderId()); }
+            else if (!(Boolean)em.createNativeQuery("SELECT EXISTS (SELECT 1 FROM pre_folder_copy_access(:owner,NULL,:folder))")
+                    .setParameter("owner",actor).setParameter("folder",request.destinationFolderId()).getSingleResult()) { throw conflict(); }
+        }
         Object[] src = (Object[]) em.createNativeQuery("SELECT size_bytes,content_type FROM files WHERE id=:id AND owner_id=:owner AND status='READY'")
                 .setParameter("id",source).setParameter("owner",actor).getSingleResult();
         long size = ((Number) src[0]).longValue();
@@ -78,7 +102,7 @@ public class FileCopyTransactions {
                 .setParameter("owner",actor).setParameter("folder",request.destinationFolderId()).setParameter("name",name).getSingleResult()) {
             throw new DuplicateFileNameException("A file with this name already exists");
         }
-        UUID fileId = UUID.randomUUID(), id = UUID.randomUUID();
+        UUID fileId = destinationId == null ? UUID.randomUUID() : destinationId, id = UUID.randomUUID();
         StoredFile file = files.saveAndFlush(new StoredFile(fileId,actor,request.destinationFolderId(),name,
                 keys.generateFileKey(actor,fileId),(String)src[1],size)); // Atomic quota reservation.
         StorageTarget dest = binding.target(file.getStorageKey());
@@ -87,11 +111,11 @@ public class FileCopyTransactions {
                 .setParameter("key",dest.key()).setParameter("file",fileId).setParameter("owner",actor)
                 .setParameter("namespace",dest.namespace()).setParameter("endpoint",dest.endpoint()).setParameter("region",dest.region())
                 .setParameter("bucket",dest.bucket()).executeUpdate();
-        em.createNativeQuery("INSERT INTO file_copy_operations(id,owner_id,actor_display_name,source_file_id,file_id,folder_id,name,size_bytes,content_type,idempotency_key) "
-                + "VALUES (:id,:owner,(SELECT display_name FROM users WHERE id=:owner),:source,:file,:folder,:name,:size,:type,:key)")
+        em.createNativeQuery("INSERT INTO file_copy_operations(id,owner_id,actor_display_name,source_file_id,file_id,folder_id,name,size_bytes,content_type,idempotency_key,folder_copy_job_id) "
+                + "VALUES (:id,:owner,coalesce(cast(:actorName AS varchar),(SELECT display_name FROM users WHERE id=:owner)),:source,:file,:folder,:name,:size,:type,:key,:job)")
                 .setParameter("id",id).setParameter("owner",actor).setParameter("source",source).setParameter("file",fileId)
                 .setParameter("folder",request.destinationFolderId()).setParameter("name",name).setParameter("size",size)
-                .setParameter("type",src[1]).setParameter("key",key).executeUpdate();
+                .setParameter("type",src[1]).setParameter("key",key).setParameter("job",job).setParameter("actorName",actorName).executeUpdate();
         return read(actor,id).status();
     }
 

@@ -1,5 +1,13 @@
 # Phase 2D.2: Safe recursive folder purge and metadata finalization
 
+Copy M2 adds a separate owner-authorized discard admission for FAILED/CANCELLED
+hidden copy trees. It records normal folder purge intent/outbox/run and returns
+that deletion operation ID; all discovery, sealed snapshots, bounded worker phases,
+COPY byte/logical-discard proof and finalization rules below are reused unchanged.
+An existing parent pending purge owns the subtree and prevents overlapping discard.
+Cancellation alone never frees quota or proves uncertain bytes gone. See the
+[folder-copy operational procedure](folder-copy.md).
+
 Copy M1 extension: READY COPY members use their own completion receipt before
 normal exact-key byte deletion. Unfinished COPY members use copy_discarded_at,
 separate from multipart logical, byte and never-written receipts. The worker

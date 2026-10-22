@@ -174,7 +174,7 @@ public class ResourceReadService {
                     SELECT NOT EXISTS (SELECT 1 FROM ancestry WHERE purge_requested_at IS NOT NULL)
                         AND (t.%s IS NULL OR EXISTS (SELECT 1 FROM ancestry WHERE parent_folder_id IS NULL)) ok
                 ) barrier
-                WHERE t.owner_id = :actor AND t.deleted_at IS NOT NULL AND barrier.ok %s
+                WHERE t.owner_id = :actor AND t.deleted_at IS NOT NULL AND NOT folder_copy_hidden(t.id) AND barrier.ok %s
                 """.formatted(parent, folder ? "NOT EXISTS (WITH RECURSIVE subtree AS ("
                         + "SELECT f.id, f.purge_requested_at FROM folders f WHERE f.id = t.id "
                         + "UNION SELECT f.id, f.purge_requested_at FROM folders f JOIN subtree s "

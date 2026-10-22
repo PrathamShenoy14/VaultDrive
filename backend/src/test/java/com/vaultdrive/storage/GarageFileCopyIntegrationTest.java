@@ -3,6 +3,8 @@ package com.vaultdrive.storage;
 import com.vaultdrive.file.*;
 import com.vaultdrive.file.FileCopyTransactions.*;
 import com.vaultdrive.folder.FolderService;
+import com.vaultdrive.folder.FolderCopyTransactions;
+import com.vaultdrive.folder.FolderCopyService;
 import com.vaultdrive.job.*;
 import com.vaultdrive.user.*;
 import com.vaultdrive.worker.*;
@@ -37,6 +39,8 @@ class GarageFileCopyIntegrationTest {
         r.add("spring.datasource.url",()->"jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema="+SCHEMA);
         r.add("spring.flyway.schemas",()->SCHEMA);r.add("spring.flyway.default-schema",()->SCHEMA);
     }
+    @Autowired FolderCopyTransactions folderCopies;
+    @Autowired FolderCopyService folderCopyService;
     @Autowired FileCopyService copies;
     @Autowired FileCopyTransactions transactions;
     @Autowired FileService files;
@@ -135,6 +139,48 @@ class GarageFileCopyIntegrationTest {
         assertThat(blocked.state()).isEqualTo("BLOCKED");assertThat(blocked.storageVerified()).isTrue();
         folders.restoreFolder(owner,folder);clearInvocations(s3);
         assertThat(copies.recover(owner,blocked.id()).state()).isEqualTo("READY");verifyNoInteractions(s3);
+    }
+
+    @Test void nestedFolderCopyPublishesVerifiedIndependentMultipartObject() throws Exception {
+        UUID root=folders.createFolder(owner,null,"folder source"),child=folders.createFolder(owner,root,"nested");
+        files.moveFile(owner,source,child);
+        var job=folderCopies.admit(owner,root,"folder-live",new FolderCopyTransactions.Request(null,"folder copy"));
+        assertThat(folderCopyService.execute(owner,job.id()).state()).isEqualTo("COMPLETED");
+        UUID operation=jdbc.queryForObject("SELECT operation_id FROM folder_copy_members WHERE job_id=? AND kind='FILE'",UUID.class,job.id());
+        var copied=transactions.get(owner,operation);verifyObject(copied);
+        filePurge(source);assertThat(repository.existsById(source)).isFalse();verifyObject(copied);
+        filePurge(copied.fileId());assertThat(repository.existsById(copied.fileId())).isFalse();
+        assertThat(usage.get(owner).usedBytes()).isZero();verify(s3,times(1)).copyObject(any(CopyObjectRequest.class));
+        assertThat(folderCopies.get(owner,job.id()).state()).isEqualTo("COMPLETED");
+    }
+
+    @Test void folderLostWireResponseRecoversFromPositiveEvidenceWithoutRedispatch() throws Exception {
+        UUID root=folders.createFolder(owner,null,"lost source");files.moveFile(owner,source,root);
+        var job=folderCopies.admit(owner,root,"folder-drop",new FolderCopyTransactions.Request(null,"lost copy"));
+        try(var proxy=new CopyDropProxy(fixture)) {
+            var adapter=new S3ObjectStorageService(proxy.client,fixture.properties,binding,signer);
+            doAnswer(c->{CopyStorage.Command command=c.getArgument(0);destinations.put(command.destination().key(),command.operationId());
+                fixture.event("FOLDER_COPY_PROXY",command.operationId()+" "+command.destination().key());adapter.copyObject(command);return null;
+            }).when(storage).copyObject(any());
+            assertThat(folderCopyService.execute(owner,job.id()).state()).isEqualTo("UNKNOWN");proxy.verifyAccepted();
+        }
+        UUID operation=jdbc.queryForObject("SELECT operation_id FROM folder_copy_members WHERE job_id=? AND kind='FILE'",UUID.class,job.id());
+        verifyObject(transactions.get(owner,operation));
+        assertThat(folderCopyService.recover(owner,job.id()).state()).isEqualTo("COMPLETED");
+        folderCopyService.execute(owner,job.id());folderCopyService.recover(owner,job.id());
+        verify(storage,times(1)).copyObject(any());verify(s3,never()).copyObject(any(CopyObjectRequest.class));
+    }
+
+    @Test void folderDestinationTrashDuringCopyRetainsReceiptUntilAtomicPublication() throws Exception {
+        UUID root=folders.createFolder(owner,null,"blocked source"),destination=folders.createFolder(owner,null,"parent");files.moveFile(owner,source,root);
+        var job=folderCopies.admit(owner,root,"folder-trash",new FolderCopyTransactions.Request(destination,"blocked copy"));
+        doAnswer(c->{CopyStorage.Command command=c.getArgument(0);destinations.put(command.destination().key(),command.operationId());
+            fixture.event("FOLDER_COPY_TRASH",command.operationId()+" "+command.destination().key());c.callRealMethod();folders.deleteFolder(owner,destination);return null;
+        }).when(storage).copyObject(any());
+        assertThat(folderCopyService.execute(owner,job.id()).state()).isEqualTo("BLOCKED");
+        UUID operation=jdbc.queryForObject("SELECT operation_id FROM folder_copy_members WHERE job_id=? AND kind='FILE'",UUID.class,job.id());
+        verifyObject(transactions.get(owner,operation));folders.restoreFolder(owner,destination);clearInvocations(storage,s3);
+        assertThat(folderCopyService.recover(owner,job.id()).state()).isEqualTo("COMPLETED");verifyNoInteractions(storage,s3);
     }
 
     private void verifyObject(Status s) throws Exception {

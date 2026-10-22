@@ -1,5 +1,34 @@
 # MVP API contract consistency
 
+## Bounded folder copy (Copy M2, 2026-10-22)
+
+Owner-only authenticated POST `/api/v1/folders/{sourceId}/copy` accepts the same
+required Idempotency-Key syntax as M1 and `{destinationFolderId: UUID|null, name:
+string}`. Name is the exact normalized destination root name; active folder
+collisions and source/descendant destinations return 409. Viewer/Editor receives
+403; strangers/missing/hidden resources receive 404. Admission snapshots at most
+1,000 active folder/READY file members, depth 64, and returns 202 without storage
+I/O. Owner folder capabilities include COPY. No grants or public links are copied.
+
+GET `/api/v1/folder-copy-operations/{id}` returns retained owner-only status:
+`{id, sourceFolderId, destinationFolderId, folderId, name, state, checkpoint,
+totalMembers, completedFiles, totalFiles, revision, createdAt, disposalOperationId}`.
+States are ACTIVE, BLOCKED, UNKNOWN, FAILED, CANCELLED and COMPLETED. POST suffixes
+`/execute` and `/recover` advance at most four member steps; recover neither
+allocates a file nor dispatches CopyObject. `/cancel` closes publication permanently;
+`/discard` separately accepts idempotent existing folder purge for FAILED/CANCELLED.
+Poll the returned disposalOperationId using deletion-operation polling. Mutation
+results are 200 for terminal copy states and 202 otherwise; GET is 200. Location,
+no-store and nonterminal Retry-After: 2 follow M1. Foreign/unknown jobs return 404.
+
+The complete destination is hidden from ordinary reads/search/downloads/mutations
+until atomic publication. Each file uses the existing one-dispatch M1 protocol,
+independent identities and incremental quota. Cancellation retains charges until
+eligible abandonment/removal and never erases uncertain evidence. Internal M1
+member keys have a separate database namespace; public M1 keys remain compatible. Snapshot,
+checkpoint, visibility, lifecycle, quota, activity and operator details are in the
+[folder-copy contract](folder-copy.md) and [ADR-0013](decisions/0013-bounded-folder-copy.md).
+
 ## Safe file copy (Copy M1, 2026-10-22)
 
 Authenticated owner-only POST `/api/v1/files/{sourceId}/copy` accepts required
@@ -179,7 +208,7 @@ the client acts. A capability is never a credential or an authorization input.
 | Active resource | Owner | Editor | Viewer |
 |---|---|---|---|
 | File | READ_METADATA, DOWNLOAD, COPY, RENAME, MOVE, TRASH, MANAGE_GRANTS | READ_METADATA, DOWNLOAD, RENAME; conditional TRASH | READ_METADATA, DOWNLOAD |
-| Folder | READ_METADATA, LIST_CHILDREN, CREATE_FOLDER, UPLOAD, RENAME, MOVE, TRASH, MANAGE_GRANTS | READ_METADATA, LIST_CHILDREN, CREATE_FOLDER, UPLOAD, RENAME; conditional TRASH | READ_METADATA, LIST_CHILDREN |
+| Folder | READ_METADATA, LIST_CHILDREN, CREATE_FOLDER, UPLOAD, COPY, RENAME, MOVE, TRASH, MANAGE_GRANTS | READ_METADATA, LIST_CHILDREN, CREATE_FOLDER, UPLOAD, RENAME; conditional TRASH | READ_METADATA, LIST_CHILDREN |
 
 Editor TRASH requires effective Editor on the immediate parent as well as the
 target. A null/root, private or Viewer-only parent omits TRASH, even with a direct

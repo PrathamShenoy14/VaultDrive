@@ -1,5 +1,10 @@
 # Copy M1: file copy API and recovery operations
 
+[Copy M2](folder-copy.md) adds bounded owner-only folder jobs using this same file
+protocol. Internal folder-member idempotency uses a separate database namespace;
+all previously valid public M1 keys/replays remain supported. The M1
+dispatch/receipt/recovery protocol continues unchanged.
+
 Copy is owner-only. It requires an accessible READY source and an accessible
 destination folder owned by the authenticated caller, or the caller's root.
 Viewer/Editor access returns 403; strangers, missing and lifecycle/ancestry-hidden

@@ -56,6 +56,11 @@ public class ResourceActivityService {
         append(owner, actorName, ActorAttribution.CALLER, EventType.COPIED, null, snapshot(ResourceType.FILE, file));
     }
 
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void copiedFolder(UUID owner, String actorName, UUID folder) {
+        append(owner, actorName, ActorAttribution.CALLER, EventType.COPIED, null, snapshot(ResourceType.FOLDER, folder));
+    }
+
     private void append(UUID actor, String actorName, ActorAttribution attribution, EventType event, Snapshot before, Snapshot after) {
         Snapshot resource = after == null ? before : after;
         em.createNativeQuery("""
