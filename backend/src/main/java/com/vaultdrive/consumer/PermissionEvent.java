@@ -11,6 +11,10 @@ import java.util.UUID;
 
 record PermissionEvent(UUID id, Instant createdAt) {
     static PermissionEvent parse(Message message, ObjectMapper mapper) {
+        return parseEnvelope(message, mapper, "PERMISSION_ACTIVITY_RECORDED", "PERMISSION_ACTIVITY", "activityEventId");
+    }
+
+    static PermissionEvent parseEnvelope(Message message, ObjectMapper mapper, String type, String aggregate, String pointer) {
         UUID id = null;
         try {
             if (message.getBody().length > 65536) throw new IllegalArgumentException();
@@ -21,14 +25,14 @@ record PermissionEvent(UUID id, Instant createdAt) {
             JsonNode version = root.get("payloadVersion");
             if (version == null || !version.isInt()) throw new IllegalArgumentException();
             if (version.asInt() != 1) throw new InvalidNotification(InvalidNotification.Reason.UNSUPPORTED_VERSION, id);
-            if (!"PERMISSION_ACTIVITY_RECORDED".equals(string(root, "eventType"))) {
+            if (!type.equals(string(root, "eventType"))) {
                 throw new InvalidNotification(InvalidNotification.Reason.UNSUPPORTED_TYPE, id);
             }
             String amqpType = message.getMessageProperties().getType();
-            if ((amqpType != null && !amqpType.equals("PERMISSION_ACTIVITY_RECORDED"))
-                    || !"PERMISSION_ACTIVITY".equals(string(root, "aggregateType"))
+            if ((amqpType != null && !amqpType.equals(type))
+                    || !aggregate.equals(string(root, "aggregateType"))
                     || !id.equals(uuid(string(root, "aggregateId")))
-                    || !id.equals(uuid(string(root.get("payload"), "activityEventId")))) throw new IllegalArgumentException();
+                    || !id.equals(uuid(string(root.get("payload"), pointer)))) throw new IllegalArgumentException();
             return new PermissionEvent(id, Instant.parse(string(root, "createdAt")));
         } catch (InvalidNotification invalid) {
             throw invalid;

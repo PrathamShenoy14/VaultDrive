@@ -1,5 +1,13 @@
 # Copy M2: bounded, resumable folder copy
 
+The later [quota notification milestone](quota-notifications.md) observes each
+incremental M1 reservation through the same accounting transaction. Hidden READY
+transfer, checkpoint/publication recovery and idempotent replays do not duplicate
+alerts. Whole-job cancellation releases nothing and rearms nothing by itself;
+eligible abandonment or discard's bounded metadata removal can rearm boundaries.
+Only the storage owner receives alerts; a notification never authorizes the next
+member reservation, which still uses fresh quota state.
+
 Copy M2 uses the verified [Copy M1 protocol](file-copy.md) for every file. PostgreSQL
 owns the snapshot, checkpoints and publication decision. There is no copy broker,
 scheduler, lease takeover or automatic storage retry. Execution is caller driven.

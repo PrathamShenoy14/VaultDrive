@@ -1,5 +1,26 @@
 # MVP API contract consistency
 
+## Storage quota notifications (2026-10-22)
+
+The existing authenticated `/api/v1/notifications` list, `/unread-count` and
+`/{id}/read` APIs now include owner-only `STORAGE_QUOTA_THRESHOLD_CROSSED` alerts.
+Optional `eventType` accepts this fourth type. Existing JWT recipient scope,
+pagination/filter/count/order, no-store, unread and idempotent mark-read semantics
+remain. Unknown/foreign IDs both return 404; missing JWT returns 401.
+
+Every item adds nullable `quota`; grant items return null. Quota items return
+`quota: {threshold: 80|90|100, logicalUsageBytes: <int64>, limitBytes: <int64>,
+occurredAt: <UTC instant>}`, with `actionable:false` and null resource fields/role.
+Usage and limit are immutable event-time snapshots; `createdAt` remains delivery
+persistence time. Only the storage owner receives them, including Editor-caused
+crossings. No actor identity or resource/storage details are exposed.
+
+Thresholds use positive logical used plus reserved charge, exact percentage
+comparisons, all newly crossed boundaries per transition and strict-below rearming.
+Limit edits participate. Empty zero-limit accounts stay quiet; positive charge
+at zero limit reaches all boundaries. Notifications never authorize admission;
+mutations check fresh quota state. See [delivery, thresholds and operations](quota-notifications.md).
+
 ## Bounded folder copy (Copy M2, 2026-10-22)
 
 Owner-only authenticated POST `/api/v1/folders/{sourceId}/copy` accepts the same

@@ -42,6 +42,30 @@ public class PermissionEventIngestor {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void acceptQuota(QuotaEvent event) {
+        var source = outbox.findById(event.id()).orElseThrow(() ->
+                new InvalidNotification(InvalidNotification.Reason.UNKNOWN_EVENT, event.id()));
+        if (!source.getEventType().equals("STORAGE_QUOTA_THRESHOLD_CROSSED")
+                || !source.getAggregateType().equals("STORAGE_QUOTA_EVENT")
+                || source.getPayloadVersion() != 1 || !source.getAggregateId().equals(event.id())
+                || !source.getCreatedAt().equals(event.createdAt())
+                || !event.id().toString().equals(source.getPayload().get("quotaEventId"))) {
+            throw new InvalidNotification(InvalidNotification.Reason.EVENT_MISMATCH, event.id());
+        }
+        var rows = entityManager.createNativeQuery("SELECT occurred_at FROM storage_quota_events WHERE id = :id")
+                .setParameter("id", event.id()).getResultList();
+        if (rows.isEmpty() || !com.vaultdrive.sharing.ResourceAccessRepository.instant(rows.getFirst()).equals(event.createdAt())) {
+            throw new InvalidNotification(InvalidNotification.Reason.EVENT_MISMATCH, event.id());
+        }
+        // The immutable source owner is the sole recipient, regardless of the upload actor.
+        entityManager.createNativeQuery("""
+                INSERT INTO sharing_notifications(id, source_event_id, recipient_user_id, event_type)
+                SELECT :notification, id, owner_id, 'STORAGE_QUOTA_THRESHOLD_CROSSED' FROM storage_quota_events
+                WHERE id = :id ON CONFLICT (source_event_id, recipient_user_id) DO NOTHING
+                """).setParameter("notification", UUID.randomUUID()).setParameter("id", event.id()).executeUpdate();
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void quarantine(String digest, InvalidNotification invalid) {
         entityManager.createNativeQuery("""
                 INSERT INTO notification_quarantine(body_sha256, event_id, reason_code)

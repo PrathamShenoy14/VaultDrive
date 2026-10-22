@@ -1,5 +1,11 @@
 # ADR-0011: MVP logical storage quota
 
+V44 [quota notifications](0014-storage-quota-notifications.md) evaluate OLD/NEW
+logical charge and limit under the existing accounting lock. They atomically
+append immutable crossing/outbox snapshots, including limit changes and counter
+repair, without changing capacity enforcement or storage uncertainty. Existing
+usage is the rollout baseline; strict-below rearming permits a later new alert.
+
 [Copy M2](0013-bounded-folder-copy.md) reserves incrementally per M1 member. Hidden
 READY members remain used; cancellation of the whole job does not release charge.
 Explicit discard reuses bounded folder purge and its metadata-removal accounting,

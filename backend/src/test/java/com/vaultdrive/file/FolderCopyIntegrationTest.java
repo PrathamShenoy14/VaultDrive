@@ -115,6 +115,17 @@ class FolderCopyIntegrationTest {
     void charge(long used,long reserved) { var u=usage.get(owner);assertThat(u.usedBytes()).isEqualTo(used);assertThat(u.reservedBytes()).isEqualTo(reserved); }
     org.springframework.test.web.servlet.request.RequestPostProcessor as(UUID actor) { return jwt().jwt(j->j.subject(actor.toString())); }
 
+    @Test void quotaCrossingsSurviveFolderCopyReplayAndCompletion() {
+        jdbc.update("UPDATE storage_quotas SET limit_bytes=6 WHERE owner_id=?",owner);
+        var s=admit("quota-notifications");
+        assertThat(finish(s.id()).state()).isEqualTo("COMPLETED");
+        assertThat(folderCopyService.recover(owner,s.id()).state()).isEqualTo("COMPLETED");
+        assertThat(admit("quota-notifications").id()).isEqualTo(s.id());
+        assertThat(jdbc.queryForList("SELECT threshold FROM storage_quota_events WHERE owner_id=? ORDER BY threshold",Integer.class,owner))
+                .containsExactly(80,90,100);
+        charge(6,0);
+    }
+
     @Test void nestedSnapshotIndependentIdentitiesActorAndAtomicVisibility() throws Exception {
         UUID child=folderService.createFolder(owner,sourceFolder,"child");
         fileService.moveFile(owner,source,child);
@@ -325,14 +336,23 @@ class FolderCopyIntegrationTest {
     }
 
     @Test void cancellationDiscardUsesExistingPurgeAndRetainsUnknownEvidence() throws Exception {
+        jdbc.update("UPDATE storage_quotas SET limit_bytes=6 WHERE owner_id=?",owner);
         doThrow(new CopyStorage.Uncertain()).when(storage).copyObject(any());var s=admit("dispose");
         folderCopyService.execute(owner,s.id());UUID file=copiedFile(s.id());folderCopies.cancel(owner,s.id());
+        charge(3,3);
+        assertThat(jdbc.queryForList("SELECT threshold FROM storage_quota_events WHERE owner_id=? ORDER BY threshold",Integer.class,owner))
+                .containsExactly(80,90,100);
         var discarded=folderCopies.discard(owner,s.id());drain(discarded.disposalOperationId(),s.folderId());
         assertThat(folders.existsById(s.folderId())).isFalse();assertThat(files.existsById(file)).isFalse();charge(3,0);
         assertThat(usage.get(owner).uncertainStorageAllocations()).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT copy_discarded_at IS NOT NULL AND metadata_finalized_at IS NOT NULL FROM file_purge_work WHERE file_id=?",Boolean.class,file)).isTrue();
         assertThat(folderCopies.get(owner,s.id()).state()).isEqualTo("CANCELLED");
         assertThat(admit("dispose").folderId()).isEqualTo(s.folderId());verify(storage,never()).delete(any());
+        assertThat(jdbc.queryForList("SELECT threshold FROM storage_quota_events WHERE owner_id=? ORDER BY threshold",Integer.class,owner))
+                .containsExactly(80,90,100);
+        copies.reserve(owner,source,"after-discard",new FileCopyTransactions.Request(destination,"after-discard"));
+        assertThat(jdbc.queryForList("SELECT threshold FROM storage_quota_events WHERE owner_id=? ORDER BY threshold",Integer.class,owner))
+                .containsExactly(80,80,90,90,100,100);
     }
 
     @Test void completedDestinationPurgeDoesNotAffectSource() throws Exception {

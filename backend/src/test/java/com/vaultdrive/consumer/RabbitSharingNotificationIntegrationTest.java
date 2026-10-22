@@ -68,6 +68,9 @@ class RabbitSharingNotificationIntegrationTest extends SharingNotificationFixtur
     @AfterEach void disconnect() {
         containers.forEach(SimpleMessageListenerContainer::destroy);
         hashes.forEach(hash -> jdbc.update("DELETE FROM notification_quarantine WHERE body_sha256 = ?", hash));
+        // Keep the immutable quota sources/notifications, but never let a later
+        // test publisher claim this fixture's remaining quota messages.
+        jdbc.update("DELETE FROM outbox_events WHERE id IN (SELECT id FROM storage_quota_events WHERE owner_id=?)",owner);
         if (factory != null) {
             try {
                 admin.deleteQueue(properties.queue()); admin.deleteQueue(properties.permissionQueue()); admin.deleteExchange(properties.exchange());
@@ -171,4 +174,52 @@ class RabbitSharingNotificationIntegrationTest extends SharingNotificationFixtur
     }
     private SimpleMessageListenerContainer start(PermissionEventListener listener) { var c = build(listener); c.start(); return c; }
     private void send(Message message) { template.send(properties.exchange(), properties.permissionRoutingKey(), message); }
+
+    List<QuotaEvent> quotaEvents() {
+        jdbc.update("UPDATE storage_quotas SET limit_bytes=3 WHERE owner_id=?",owner);
+        return jdbc.query("SELECT id,occurred_at FROM storage_quota_events WHERE owner_id=? ORDER BY threshold",
+                (r,n)->new QuotaEvent(r.getObject(1,UUID.class),r.getTimestamp(2).toInstant()),owner);
+    }
+    Message quotaMessage(QuotaEvent e) {
+        var p=new MessageProperties();p.setMessageId(e.id().toString());p.setType("STORAGE_QUOTA_THRESHOLD_CROSSED");
+        return new Message(mapper.writeValueAsBytes(Map.of("eventId",e.id(),"eventType",p.getType(),"aggregateType","STORAGE_QUOTA_EVENT",
+                "aggregateId",e.id(),"payloadVersion",1,"createdAt",e.createdAt().toString(),"payload",Map.of("quotaEventId",e.id()))),p);
+    }
+
+    @Test void quotaPublisherUsesExistingQueueAndReorderedDuplicateDeliveryIsOwnerOnly() throws Exception {
+        var events=quotaEvents();assertThat(events).hasSize(3);
+        var publisher=new OutboxPublisher(claims,new RabbitOutboxTransport(template,admin,mapper,properties));
+        for(int i=0;i<3;i++) assertThat(publisher.publishNext()).isTrue();
+        var messages=new ArrayList<Message>();
+        for(int i=0;i<3;i++) {var m=template.receive(properties.permissionQueue(),3000);assertThat(m).isNotNull();messages.add(m);}
+        Collections.reverse(messages);
+        var acked=new CountDownLatch(6);var failure=new AtomicReference<Throwable>();
+        var listener=new PermissionEventListener(ingestor,mapper,1) {
+            @Override public void onMessage(Message m,Channel c) {
+                try {super.onMessage(m,c);assertThat(page(owner).content()).isNotEmpty();}
+                catch(Throwable e) {failure.set(e);throw e;} finally {acked.countDown();}
+            }
+        };
+        start(listener);start(listener);for(var m:messages) {send(m);send(m);}
+        assertThat(acked.await(10,TimeUnit.SECONDS)).isTrue();assertThat(failure.get()).isNull();
+        assertThat(page(owner).content()).hasSize(3).allSatisfy(n->assertThat(n.quota().logicalUsageBytes()).isEqualTo(3));
+        assertThat(page(recipient).content()).isEmpty();assertThat(page(stranger).content()).isEmpty();
+        assertThat(template.receive(properties.queue(),100)).isNull();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM background_jobs WHERE id IN (SELECT id FROM storage_quota_events WHERE owner_id=?)",Integer.class,owner)).isZero();
+    }
+
+    @Test void quotaCommitBeforeAckRedeliveryPreservesReadState() throws Exception {
+        var e=quotaEvents().getFirst();var committed=new CountDownLatch(1);
+        var first=start(new PermissionEventListener(ingestor,mapper,1) {
+            @Override public void onMessage(Message m,Channel c) {ingestor.acceptQuota(QuotaEvent.parse(m,mapper));committed.countDown();}
+        });
+        send(quotaMessage(e));assertThat(committed.await(10,TimeUnit.SECONDS)).isTrue();
+        var n=page(owner).content().getFirst();notifications.markRead(owner,n.id());
+        first.destroy();factory.resetConnection();var acked=new CountDownLatch(1);var redelivered=new AtomicBoolean();
+        start(new PermissionEventListener(ingestor,mapper,1) {
+            @Override public void onMessage(Message m,Channel c) {redelivered.set(m.getMessageProperties().isRedelivered());super.onMessage(m,c);acked.countDown();}
+        });
+        assertThat(acked.await(10,TimeUnit.SECONDS)).isTrue();assertThat(redelivered).isTrue();
+        assertThat(page(owner).content()).hasSize(1);assertThat(notifications.unreadCount(owner).unreadCount()).isZero();
+    }
 }

@@ -215,12 +215,25 @@ class FileCopyIntegrationTest {
     }
 
     @Test void sourceReadFailureBeforeDispatchCanRetrySafelyAndNeverChargesTwice() {
+        jdbc.update("UPDATE storage_quotas SET limit_bytes=6 WHERE owner_id=?",owner);
         var s=reserve("preflight","preflight");
         String sourceKey=key(source);
         doThrow(new CopyStorage.Uncertain()).when(storage).inspectCopyObject(argThat(t->t!=null && t.key().equals(sourceKey)));
         assertThat(service.execute(owner,s.id()).state()).isEqualTo("RESERVED"); verify(storage,never()).copyObject(any()); assertCharge(3,3);
         doReturn(sourceInfo()).when(storage).inspectCopyObject(argThat(t->t!=null && t.key().equals(sourceKey)));
         assertThat(service.execute(owner,s.id()).state()).isEqualTo("READY"); verify(storage,times(1)).copyObject(any());
+        assertThat(jdbc.queryForList("SELECT threshold FROM storage_quota_events WHERE owner_id=? ORDER BY threshold",Integer.class,owner))
+                .containsExactly(80,90,100);
+    }
+
+    @Test void copyCancellationRearmsQuotaButReplayCannotReleaseOrNotifyTwice() {
+        jdbc.update("UPDATE storage_quotas SET limit_bytes=6 WHERE owner_id=?",owner);
+        var s=reserve("cancel quota","cancel-quota"); copies.cancel(owner,s.id());copies.cancel(owner,s.id());
+        assertThat(reserve("cancel quota","cancel-quota").id()).isEqualTo(s.id());assertCharge(3,0);
+        var next=reserve("next quota","next-quota");assertCharge(3,3);
+        assertThat(jdbc.queryForList("SELECT threshold FROM storage_quota_events WHERE owner_id=? ORDER BY threshold",Integer.class,owner))
+                .containsExactly(80,80,90,90,100,100);
+        copies.cancel(owner,next.id());assertCharge(3,0);
     }
 
     @Test void sourceDeletionBeforeDispatchFailsSafelyAndAfterDispatchDoesNotPreventIndependentRecovery() throws Exception {

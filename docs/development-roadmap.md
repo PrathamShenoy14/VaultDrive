@@ -236,7 +236,7 @@ Exit criteria: correctness tests remain green and measured contention improves f
 - Granular lock mechanism and namespace key.
 - Hard-delete retention delay and user-visible cancellation policy.
 - JWT key evolution, account-state controls and refresh-history retention policy.
-- Later sharing milestones, quota notifications/plan policy, deployment platform, and performance targets.
+- Later sharing milestones, quota plan policy, deployment platform, and performance targets. Quota notifications are implemented in the milestone below.
 
 ## Phase 2E.4 bounded missing-job reconciliation
 
@@ -362,3 +362,18 @@ See [ADR-0013](decisions/0013-bounded-folder-copy.md) and
 Arbitrary-size snapshots, source pinning, autonomous copy workers, automatic
 unknown-byte reclamation, process-kill characterization, retention/erasure,
 quota notifications and frontend work remain separate.
+
+## MVP Storage Quota Notifications (completed)
+
+- [x] V44 immutable owner-only 80/90/100% snapshots and outbox events atomic with logical used-plus-reserved accounting.
+- [x] Exact threshold calculations, strict-below rearming, limit changes and explicit repair semantics.
+- [x] Existing RabbitMQ route, bounded commit-before-ACK consumer, database event/recipient deduplication and preserved sharing isolation.
+- [x] Existing JWT notification list/filter/unread/read APIs with safe historical quota metadata.
+- [x] Isolated PostgreSQL lifecycle/replay/rollback/concurrency and RabbitMQ duplicate/reordered/redelivery verification.
+- [x] [API, rollout and operator guidance](quota-notifications.md), quota/copy/architecture and learning updates.
+
+See [ADR-0014](decisions/0014-storage-quota-notifications.md) and
+[executed verification](architecture.md#quota-notification-verification).
+This milestone stops here. Frontend, broader operational hardening, automatic
+notification reconciliation, retention/erasure, physical reclamation and plan
+policy remain separate. Existing usage is not retrospectively notified.

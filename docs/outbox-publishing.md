@@ -1,5 +1,12 @@
 # Outbox publishing development and recovery (Phase 1C)
 
+Current quota extension: `STORAGE_QUOTA_THRESHOLD_CROSSED` v1 routes through the
+existing permission queue/key and consumer, alongside permission activity.
+Its `STORAGE_QUOTA_EVENT` aggregate UUID equals event UUID and payload is the
+immutable `{quotaEventId}` pointer. No new topology or switch is added. Publisher
+exhaustion/rearm and replay preserve that UUID; quota notifications deduplicate
+per event/owner. See [quota rollout, delivery and recovery](quota-notifications.md).
+
 Sharing M6 separately consumes the dedicated permission route with manual ACK
 after notification commit. `SHARING_NOTIFICATIONS_CONSUMER_ENABLED` defaults false
 and is independent of this publisher and purge workers. See [recipient delivery,

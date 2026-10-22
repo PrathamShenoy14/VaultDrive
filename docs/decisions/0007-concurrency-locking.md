@@ -1,5 +1,13 @@
 # ADR-0007: Transaction-scoped hierarchy coordination
 
+V44 quota notifications insert only new immutable source/outbox rows after the
+existing quota accounting row update. OLD/NEW counters and limit are serialized
+by that same row lock; there is no threshold lock table or resource read after
+it. Limit-only operator updates acquire only quota coordination and must not
+then take resource locks. Counter repair retains exclusive hierarchy, quota row,
+fresh aggregate order. No broker or storage I/O enters these transactions.
+See [ADR-0014](0014-storage-quota-notifications.md).
+
 Copy M2 uses exclusive owner hierarchy before snapshot and each folder job
 mutation, with M1 file/allocation/operation/namespace locks before checkpoint
 writes. Explicit storage execution retains the existing shared M1 lock order

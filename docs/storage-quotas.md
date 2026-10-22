@@ -1,5 +1,14 @@
 # Storage quota operations
 
+The [MVP quota notification milestone](quota-notifications.md) adds atomic
+80/90/100% owner alerts using logical used plus reserved bytes. Crossing events
+commit with accounting, including Editor reservations and incremental copy work.
+Completion preserves the total; eligible cancellation/expiry/removal can rearm
+strictly below a boundary. Direct operator limit updates and explicit counter
+repairs also evaluate crossings/rearming. Existing usage is the rollout baseline,
+without retrospective alerts. Notification snapshots never replace fresh quota
+authorization or measure physical Garage usage. See [ADR-0014](decisions/0014-storage-quota-notifications.md).
+
 Copy M2 charges incrementally through the same M1 file reservation. Snapshot
 admission charges no bytes. Hidden READY members count as used; unfinished
 UNKNOWN/BLOCKED members stay reserved. Quota exhaustion rolls back only the next

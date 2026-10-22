@@ -12,10 +12,11 @@ import java.util.UUID;
 
 @Service
 public class SharingNotificationService {
-    public enum Type { GRANT_CREATED, GRANT_ROLE_CHANGED, GRANT_REVOKED }
+    public enum Type { GRANT_CREATED, GRANT_ROLE_CHANGED, GRANT_REVOKED, STORAGE_QUOTA_THRESHOLD_CROSSED }
+    public record QuotaMetadata(int threshold, long logicalUsageBytes, long limitBytes, Instant occurredAt) {}
     public record Notification(UUID id, UUID sourceEventId, Type eventType, Instant createdAt,
             Instant readAt, boolean actionable, PermissionActivityService.ResourceType resourceType,
-            UUID resourceId, String resourceName, ResourceRole newRole) {}
+            UUID resourceId, String resourceName, ResourceRole newRole, QuotaMetadata quota) {}
     public record Page(List<Notification> content, int page, int size, long totalElements, long totalPages) {}
     public record UnreadCount(long unreadCount) {}
 
@@ -43,9 +44,13 @@ public class SharingNotificationService {
                     CASE WHEN a.id IS NOT NULL THEN e.resource_type END,
                     CASE WHEN a.id IS NOT NULL THEN e.resource_id END,
                     CASE WHEN a.id IS NOT NULL THEN e.resource_name END,
-                    CASE WHEN a.id IS NOT NULL THEN e.new_role END, t.total
+                    CASE WHEN a.id IS NOT NULL THEN e.new_role END, t.total,
+                    q.threshold, q.logical_usage_bytes, q.limit_bytes, q.occurred_at
                 FROM totals t LEFT JOIN page n ON true
                 LEFT JOIN permission_activity_events e ON e.id = n.source_event_id
+                    AND n.event_type <> 'STORAGE_QUOTA_THRESHOLD_CROSSED'
+                LEFT JOIN storage_quota_events q ON q.id = n.source_event_id
+                    AND n.event_type = 'STORAGE_QUOTA_THRESHOLD_CROSSED' AND q.owner_id = :recipient
                 LEFT JOIN resource_grants g ON g.id = e.subject_id AND g.version = e.subject_version
                     AND g.grantee_user_id = :recipient AND g.role = e.new_role
                     AND e.event_type <> 'GRANT_REVOKED'
@@ -63,7 +68,9 @@ public class SharingNotificationService {
             content.add(new Notification((UUID) r[0], (UUID) r[1], Type.valueOf((String) r[2]),
                     ResourceAccessRepository.instant(r[3]), r[4] == null ? null : ResourceAccessRepository.instant(r[4]),
                     (Boolean) r[5], r[6] == null ? null : PermissionActivityService.ResourceType.valueOf((String) r[6]),
-                    (UUID) r[7], (String) r[8], r[9] == null ? null : ResourceRole.valueOf((String) r[9])));
+                    (UUID) r[7], (String) r[8], r[9] == null ? null : ResourceRole.valueOf((String) r[9]),
+                    r[11] == null ? null : new QuotaMetadata(((Number) r[11]).intValue(),
+                            ((Number) r[12]).longValue(), ((Number) r[13]).longValue(), ResourceAccessRepository.instant(r[14]))));
         }
         return new Page(List.copyOf(content), page, size, total, (total + size - 1) / size);
     }

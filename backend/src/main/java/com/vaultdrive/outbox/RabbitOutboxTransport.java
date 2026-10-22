@@ -51,7 +51,7 @@ public class RabbitOutboxTransport implements OutboxTransport {
                 queue = properties.queue();
                 routingKey = properties.routingKey();
             }
-            case "PERMISSION_ACTIVITY_RECORDED" -> {
+            case "PERMISSION_ACTIVITY_RECORDED", "STORAGE_QUOTA_THRESHOLD_CROSSED" -> {
                 queue = properties.permissionQueue();
                 routingKey = properties.permissionRoutingKey();
             }

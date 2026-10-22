@@ -32,7 +32,7 @@ The [consolidation audit](backend-consolidation.md) records removals, retained h
 
 ## Persistence and schema
 
-Flyway V1-V43 is append-only; Hibernate validates the schema. JPA manages users, folders, files, immutable outbox writes and short job/outbox entity transactions. Native EntityManager SQL implements PostgreSQL recursive authorization, scalar evidence reads, row locks, claims and conditional transitions. JdbcTemplate manages authentication sessions/revocations without a parallel JPA entity model. All use the configured datasource/transaction manager.
+Flyway V1-V44 is append-only; Hibernate validates the schema. JPA manages users, folders, files, immutable outbox writes and short job/outbox entity transactions. Native EntityManager SQL implements PostgreSQL recursive authorization, scalar evidence reads, row locks, claims and conditional transitions. JdbcTemplate manages authentication sessions/revocations without a parallel JPA entity model. All use the configured datasource/transaction manager.
 
 Services own transactions and `spring.jpa.open-in-view=false` remains required. SQL stays in its existing responsibility's transaction service or access repository. A blanket JPA/JDBC conversion would obscure locking and atomicity. Managed mutation targets are refreshed where required; status/version bulk CAS flushes/clears the context. Scalar worker reads avoid stale managed state; independent job/outbox transactions bound cache lifetime. Never save an older entity after native SQL changed that row.
 
@@ -170,6 +170,19 @@ report limit/used/reserved/available plus separately inventoried uncertain
 write-admitted allocations. Unknown physical reclamation never increases logical
 capacity by itself. [ADR-0011](decisions/0011-storage-quota-accounting.md) records
 the lock and backfill rules.
+
+V44 adds immutable logical quota crossing snapshots and atomic outbox pointers
+from that same locked accounting row. Every newly reached 80/90/100 boundary
+alerts only its owner, including Editor-caused reservations. Exact positive
+used-plus-reserved comparisons, strict-below rearming and limit-change handling
+derive state directly from counters/limit; READY and idempotent recovery preserve
+the total. Existing usage is the rollout baseline. The existing permission queue,
+listener, event/recipient-deduplicated notification table and JWT list/unread/read
+APIs carry the alerts; grant display/recipient isolation is preserved. No new
+queue, pipeline or external I/O in transactions is introduced. Alerts remain
+historical information and never authorize upload/copy. See
+[the threshold/API/operator contract](quota-notifications.md) and
+[ADR-0014](decisions/0014-storage-quota-notifications.md).
 
 Only accessible active READY files are usable. Rename/move update metadata without object copies. Trash retains bytes and releases names; restore keeps identity and resolves collisions while preserving extensions. Purge requests record intent/outbox atomically, return 202 and perform no storage I/O. Pending folder intent makes its subtree immutable.
 
@@ -461,6 +474,69 @@ or deferred. The dispatch-commit/crash gap can remain UNKNOWN forever; no negati
 probe permits redispatch. There is no automatic copy executor or uncertain-byte
 cleanup. See [the complete operational contract](folder-copy.md).
 
+## Quota notification verification
+
+Executed on 2026-10-22 against PostgreSQL 17.11 and live RabbitMQ 4.3.6;
+read-only VM inspection confirmed Garage image 2.3.0. Final focused selection:
+**149 passed, zero failures/errors/skips** across `QuotaEventTest`,
+`QuotaNotificationIntegrationTest`, `StorageUsageIntegrationTest`,
+`SharingNotificationIntegrationTest`, `RabbitSharingNotificationIntegrationTest`,
+`FolderCopyIntegrationTest`, `FileCopyIntegrationTest`, `PermissionEventTest`,
+`PermissionEventListenerTest` and `PermissionConsumerConfigurationTest`.
+
+The new coverage verifies exact/jumped/rounded/overflow-safe thresholds,
+strict-below rearming, zero limits, limit changes, cancellation/expiry/removal,
+completion/repair, Editor ownership, file/folder copy retries and recovery,
+quota/source/outbox rollback, uncommitted-source isolation, immutable history,
+event/recipient guards and authenticated numeric metadata/filter/unread/read APIs.
+Latch-held transactions observe actual PostgreSQL blocking for both reservation
+orders and both limit-edit/cancellation versus reservation orders. Live broker
+checks use the real publisher/shared route plus reversed/duplicate delivery and
+commit-before-ACK redelivery without resetting read state. Existing sharing
+checks continue to assert recipient isolation and current authorization redaction.
+
+Clean full backend suite: **1,515 tests, 1,495 passed, 20 skipped, zero
+failures/errors**. This includes 14 isolated live RabbitMQ checks, 27 enabled
+Garage multipart cases, six live copy cases and the continuous HTTP/outbox/
+broker/job/Garage purge harness. The harness required no initial due-time alignment
+and deleted only its seven owned objects and fresh schema/topology. Default
+contexts used `vaultdrive_test.quota_notify_full_8d187f2753824dc58b110380af785e1c`;
+explicitly isolated suites used their own fresh schemas. The final focused
+follow-up (`FolderCopyIntegrationTest`, `RabbitSharingNotificationIntegrationTest`)
+passed **41 tests, zero failures/errors/skips**, verifying broker fixture cleanup
+and folder-copy cancellation/discard rearming. The task-owned AMQP tunnel was
+closed afterward. Local documentation links and whitespace checks passed.
+
+| Separately gated suite | Skipped | Prerequisite deliberately not enabled |
+|---|---:|---|
+| AsyncPurgeProcessRecoveryTest | 1 | ASYNC_PROCESS_TEST and process-kill runbook |
+| GarageMultipartCapabilityTest | 18 | GARAGE_MULTIPART_TEST and M0 characterization |
+| GarageMultipartJournalRecoveryTest | 1 | Explicitly reviewed retained-run UUID |
+
+From `backend/`, after read-only VM attestation and the existing isolated AMQP
+tunnel, reproduce with the private environment:
+
+```powershell
+. .\.env.local.ps1
+$env:RABBITMQ_TEST_VHOST='vaultdrive_outbox_test'
+$env:ASYNC_E2E_TEST='true'
+$env:ASYNC_E2E_ALIGN_INITIAL_DUE='true'
+$env:GARAGE_MULTIPART_TRANSFER_TEST='true'
+$env:GARAGE_MULTIPART_COMPLETION_TEST='true'
+$env:GARAGE_MULTIPART_CANCELLATION_TEST='true'
+$env:GARAGE_MULTIPART_PURGE_TEST='true'
+$env:GARAGE_MULTIPART_VERSION='2.3.0'
+$env:GARAGE_COPY_TEST='true'
+$quotaSchema='quota_notify_full_'+[Guid]::NewGuid().ToString('N')
+.\mvnw.cmd -o clean test "-Dspring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=$quotaSchema" "-Dspring.flyway.schemas=$quotaSchema" "-Dspring.flyway.default-schema=$quotaSchema"
+```
+
+The three separately gated scenarios remain unverified. Performance, multi-node
+failure, browser/client integration, physical reclamation, retention/erasure and
+automatic notification reconciliation remain deferred. Processing defaults stay
+disabled; no shared metadata, old migration, VM or broker/storage configuration
+was changed. Quota notifications stop at this milestone.
+
 ## Remaining work
 
-Unknown multipart reclamation, broad historical repair, retention/erasure, zero-byte support, general rate limiting, JWT key evolution, quota notifications, dependency readiness probes, backups/disaster recovery, clients and deployment remain separate. Performance, multi-node failure and capacity targets are unmeasured. No shared checksum repair, old allocation sweep or VM change is part of consolidation. See the [roadmap](development-roadmap.md) and [risk register](backend-consolidation.md#deferred-decisions-and-risks).
+Unknown multipart reclamation, broad historical repair, retention/erasure, zero-byte support, general rate limiting, JWT key evolution, dependency readiness probes, backups/disaster recovery, clients and deployment remain separate. Performance, multi-node failure and capacity targets are unmeasured. No shared checksum repair, old allocation sweep or VM change is part of consolidation. See the [roadmap](development-roadmap.md) and [risk register](backend-consolidation.md#deferred-decisions-and-risks).

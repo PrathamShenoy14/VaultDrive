@@ -39,7 +39,8 @@ class SharingNotificationIntegrationTest extends SharingNotificationFixtures {
         var link = links.create(owner, file, null); links.revoke(owner, file, link.link().id());
         deliverAll(); deliverAll();
         assertThat(page(recipient).content()).hasSize(4).extracting(SharingNotificationService.Notification::eventType)
-                .contains(SharingNotificationService.Type.values());
+                .contains(SharingNotificationService.Type.GRANT_CREATED, SharingNotificationService.Type.GRANT_ROLE_CHANGED,
+                        SharingNotificationService.Type.GRANT_REVOKED);
         assertThat(page(owner).totalElements()).isZero(); assertThat(page(stranger).totalElements()).isZero();
         assertThat(notifications.unreadCount(recipient).unreadCount()).isEqualTo(4);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM background_jobs WHERE id IN (SELECT id FROM permission_activity_events WHERE owner_id = ?)",

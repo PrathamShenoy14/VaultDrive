@@ -26,7 +26,13 @@ public class PermissionEventListener implements ChannelAwareMessageListener {
     @Override
     public void onMessage(Message message, Channel channel) {
         NotificationDelivery.acceptAndAcknowledge(message, channel, initialBackoffMillis,
-                () -> ingestor.accept(PermissionEvent.parse(message, mapper)),
+                () -> {
+                    if ("STORAGE_QUOTA_THRESHOLD_CROSSED".equals(message.getMessageProperties().getType())) {
+                        ingestor.acceptQuota(QuotaEvent.parse(message, mapper));
+                    } else {
+                        ingestor.accept(PermissionEvent.parse(message, mapper));
+                    }
+                },
                 invalid -> ingestor.quarantine(NotificationDelivery.digest(message.getBody()), invalid), this::stopped);
     }
 

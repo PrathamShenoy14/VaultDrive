@@ -1,5 +1,13 @@
 # Sharing M6: in-app sharing notifications
 
+Current extension: [MVP quota notifications](quota-notifications.md) reuses this
+route, listener, bounded ACK/retry policy, table and authenticated APIs. The same
+consumer switch now enables grant and quota delivery. List filtering accepts
+`STORAGE_QUOTA_THRESHOLD_CROSSED`; all items add nullable `quota` metadata, null
+for grants. V44 replaces the permission-only FK with a conditional immutable-source
+guard. Grant recipients, current resource redaction and read-state behavior remain
+as below. The earlier M6-only shape/topology description is its historical boundary.
+
 Consolidation update: [the backend milestone](backend-consolidation.md) has retired synchronous upload. New uploads use direct multipart only. Earlier ownership and retirement statements below preserve the original sharing milestone boundary; retained historical storage/recovery evidence is unchanged.
 
 M6 implements the final milestone of the [approved sharing design](sharing-permissions-design.md).

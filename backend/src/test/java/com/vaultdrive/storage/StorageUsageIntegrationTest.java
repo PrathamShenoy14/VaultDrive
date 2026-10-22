@@ -136,6 +136,8 @@ class StorageUsageIntegrationTest {
         assertThat(s.ownerId()).isEqualTo(owner);
         assertThat(usage.get(owner).reservedBytes()).isEqualTo(4);
         assertThat(usage.get(editor).reservedBytes()).isZero();
+        assertThat(quotaThresholds(owner)).containsExactly(80);
+        assertThat(quotaThresholds(editor)).isEmpty();
         assertThatThrownBy(() -> reserve(owner, null, "extra", 2, "owner-key")).isInstanceOf(RuntimeException.class);
         var dispatch = sessions.claimInitiation(editor, s.id());
         assertThat(dispatch.permitted()).isTrue();
@@ -145,10 +147,13 @@ class StorageUsageIntegrationTest {
         assertThat(ownerUsage.uncertainStorageBytes()).isEqualTo(4);
         assertThat(ownerUsage.uncertainStorageAllocations()).isEqualTo(1);
         assertThat(usage.get(editor).uncertainStorageAllocations()).isZero();
+        cancellation.cancel(editor, s.id());
+        reserve(editor, folder, "delegated-again", 4, "editor-key-again");
+        assertThat(quotaThresholds(owner)).containsExactly(80,80);
     }
 
     @Test void completionConvertsOnceTrashRestoreAndRepairPreserveUsage() throws Exception {
-        limit(owner, 2);
+        limit(owner, 1);
         var s = reserve(owner, null, "ready", 1, "ready-key");
         var d = sessions.claimInitiation(owner, s.id());
         sessions.recordUploadId(owner, s.id(), 1, d.transfer().session().initiationId(), "fixture-" + s.id());
@@ -161,6 +166,7 @@ class StorageUsageIntegrationTest {
                 Map.of("vaultdrive-session", s.id().toString(), "vaultdrive-initiation", d.transfer().session().initiationId().toString())), Evidence.COMPLETE_HEAD);
         completion.finalizeReady(owner, s.id());
         completion.finalizeReady(owner, s.id());
+        assertThat(quotaThresholds(owner)).containsExactly(80,90,100);
         assertThat(usage.get(owner).usedBytes()).isEqualTo(1);
         assertThat(usage.get(owner).reservedBytes()).isZero();
         files.trashFile(owner, s.fileId());
@@ -174,6 +180,7 @@ class StorageUsageIntegrationTest {
         assertThat(repaired.derivedUsedBytes()).isEqualTo(1);
         assertThat(usage.get(owner).usedBytes()).isEqualTo(1);
         assertThat(usage.candidates(null, 1)).hasSize(1);
+        assertThat(quotaThresholds(owner)).containsExactly(80,80,90,90,100,100);
         assertThatThrownBy(() -> usage.candidates(null, 101)).isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -193,6 +200,9 @@ class StorageUsageIntegrationTest {
 
     private Session reserve(UUID actor, UUID folder, String name, long size, String key) {
         return sessions.reserve(actor, key, new Request(folder, name, size, "text/plain"));
+    }
+    private List<Integer> quotaThresholds(UUID id) {
+        return jdbc.queryForList("SELECT threshold FROM storage_quota_events WHERE owner_id=? ORDER BY threshold", Integer.class, id);
     }
     private void limit(UUID id, long amount) { jdbc.update("UPDATE storage_quotas SET limit_bytes=? WHERE owner_id=?", amount, id); }
     private UUID user(String label) { return users.saveAndFlush(new User(UUID.randomUUID() + "@example.com", "fixture", label)).getId(); }

@@ -1,5 +1,14 @@
 # ADR-0008: Transactional outbox and durable asynchronous jobs
 
+Current quota extension: [ADR-0014](0014-storage-quota-notifications.md) adds
+`STORAGE_QUOTA_THRESHOLD_CROSSED` v1, aggregate `STORAGE_QUOTA_EVENT` with the same
+UUID as the event and payload `quotaEventId`. The existing permission route,
+listener/ingestor, bounded ACK policy and notification table handle both kinds.
+Owner-only snapshots/outbox commit with locked quota accounting; delivery remains
+separate, event/recipient deduplicated and informational. No topology or worker
+extension is added. The deployment and explicit replay limits are documented in
+[quota operations](../quota-notifications.md).
+
 Current consolidation: [ADR-0010](0010-backend-consolidation.md) retires synchronous new-upload admission/PUT and foreground receipt creation. Historical phase descriptions below remain records of their original revisions; retained receipts, recovery and locking guarantees still apply. Current new uploads use direct multipart only.
 
 - Status: Accepted; broker/outbox/job/consumer/worker foundation, trusted-writer file byte purge and standalone metadata finalization, folder discovery/file byte execution implemented; folder metadata removal and durable finalization implemented

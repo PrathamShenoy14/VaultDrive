@@ -812,3 +812,22 @@ must travel from job admission through each later file reservation and publicati
 The maximum-size test caught full-snapshot validation repeated by every deferred
 member trigger. Validate each immutable mapping locally, then verify completeness
 once at admission commit. A bounded returned page alone does not bound commit work.
+
+## Quota crossing state can come from accounting itself
+
+Used plus reserved is the relevant logical charge: moving a completed upload from
+reserved to used must not create a second warning. The locked OLD/NEW quota row
+also answers whether each boundary was reached and whether falling usage or a
+larger limit rearmed it. A separate delivery-dependent latch would create another
+state that can drift. Numeric cross multiplication gives exact thresholds without
+rounding or BIGINT overflow; empty zero-limit accounts need an explicit policy.
+
+Appending immutable crossing snapshots and outbox pointers from the accounting
+trigger covers delegated admission, lifecycle, copies, repairs and limit edits in
+one transaction. Source/outbox failure rolls everything back. The existing
+consumer then persists owner notifications before ACK; database event/recipient
+uniqueness absorbs concurrent/reordered delivery and commit-before-ACK crashes.
+Historical warnings can arrive after cancellation or a limit increase, so their
+values and event timestamps must be labelled snapshots, never current authority.
+The existing notification table can serve both source kinds when the database
+validates their distinct recipient rules and both sources remain immutable.
