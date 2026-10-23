@@ -1,5 +1,18 @@
 # Development roadmap
 
+## MVP Zero-Byte File Support (implemented)
+
+- [x] Narrow authenticated owner/Editor creation, retained idempotency and independent file/storage identities.
+- [x] Real empty Garage objects, one durable PUT dispatch, positive receipt before READY and metadata-only receipt recovery.
+- [x] Zero logical charge with locked quota admission; unchanged positive-size multipart protocol.
+- [x] Normal downloads/MIME/Content-Length, sharing, metadata operations, Trash/restore and proof-backed deletion.
+- [x] Independent zero-byte file and bounded folder copies with original COPY evidence and deduplicated activity.
+- [x] Isolated PostgreSQL/API/races/recovery and relevant live Garage verification; executed totals are in architecture.
+- [x] [API](api-contract.md#zero-byte-file-creation-2026-10-23), [decision](decisions/0016-zero-byte-files.md), quotas, history and recovery documentation.
+
+Stop after zero-byte support. Frontend, HTTPS/CORS changes, uncertain physical
+reclamation, retention and unrelated infrastructure remain outside this milestone.
+
 ## MVP Operational Hardening (implemented)
 
 - [x] Fixed-memory per-process rate/concurrency admission for authentication,
@@ -13,7 +26,7 @@
 - [x] [Limits, alert conditions, deployment prerequisites, recovery and launch blockers](operational-hardening.md), [ADR-0015](decisions/0015-mvp-operational-hardening.md).
 
 Execution evidence is in [architecture](architecture.md#mvp-operational-hardening-verification).
-Stop here: no frontend, zero-byte support, physical uncertain-byte reclamation,
+At that milestone: no frontend, zero-byte support, physical uncertain-byte reclamation,
 retention redesign or actual shared-infrastructure deployment. Live browser/TLS/CORS,
 clock/edge assurance, backup restoration and capacity measurement remain launch gates.
 

@@ -1,5 +1,10 @@
 # Full backend code and architecture consolidation
 
+Current zero-byte extension: [ADR-0016](decisions/0016-zero-byte-files.md) permits
+only empty-body SERVER_PUT allocation/admission, one dispatch and positive
+verification receipts. Direct multipart remains the nonempty protocol. The broad
+synchronous upload retirement and historical inventory below describe consolidation.
+
 Current operational extension: [MVP hardening](operational-hardening.md) implements
 per-instance admission, dependency/worker readiness, bounded logical expiry and
 receipt-backed finalization, deployment safeguards and audited operator recovery.

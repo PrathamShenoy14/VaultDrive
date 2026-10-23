@@ -12,6 +12,9 @@ public interface ObjectStorageService {
     /** Exactly one SDK attempt; caller must hold a newly committed durable dispatch permit. */
     void copyObject(CopyStorage.Command command);
 
+    /** Zero bytes only; exactly one attempt after a newly committed empty-file dispatch. */
+    void putEmpty(StorageTarget target, UUID creationId, String contentType);
+
     StorageObject download(String storageKey);
 
     /** Purge uses the durable target; adapters must reject incompatible storage bindings. */

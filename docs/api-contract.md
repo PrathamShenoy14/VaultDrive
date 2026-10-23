@@ -1,5 +1,48 @@
 # MVP API contract consistency
 
+## Zero-byte file creation (2026-10-23)
+
+Authenticated POST `/api/v1/files/empty` requires `Idempotency-Key` (1..128
+printable ASCII characters, no spaces) and JSON `{folderId: UUID|null, name:
+string, contentType: string|null}`. There is no byte body, size selector or
+multipart session. Name uses existing trimmed, case-sensitive filename rules.
+MIME defaults to application/octet-stream; supplied values must be concrete,
+valid, at most 255 characters and contain no control characters. Owner or effective
+Editor on the active accessible destination can create; Viewer gets 403,
+strangers/missing/hidden/inaccessible destinations get 404. Null folder means
+the caller's root. The destination owner owns the file and quota charge.
+
+Returns 200 when READY, otherwise 202; both include no-store and Location
+`/api/v1/empty-file-creations/{id}`. Body: `{id, fileId, state, storageVerified}`.
+States: RESERVED (no write admitted), UNKNOWN (one dispatch, no positive receipt),
+STORAGE_COMPLETE (receipt retained, READY blocked), READY, FAILED, REMOVED.
+REMOVED means file metadata is absent, not physical reclamation. `storageVerified`
+reports the retained success receipt, not current object presence. Status contains
+no storage key, target, signed URL or access capability. GET the Location for
+status; POST its `/recover` suffix returns 200 with the same shape and performs
+positive-only recovery, never PUT. Creation replay can dispatch an unadmitted
+RESERVED intent; an admitted write is never repeated, even after lost responses.
+
+Idempotency is retained per owner/initiator/key. Same normalized folder/name/type
+returns the original identity; changed input or active-name collision returns
+409. Keys do not expire. The owner may poll/recover retained records after resource
+removal. An initiating Editor must still have Editor authority on the original
+accessible destination; other callers get 404. Replays do not grant file access.
+Invalid names/types/keys return 400, missing authentication 401, bounded process
+admission 429. Existing common error envelopes apply. Zero-byte admission uses
+the metadata lane and freshly checks the owner's locked quota row; exactly full
+or zero-limit accounts may add zero bytes, already-over-limit accounts get 409.
+
+READY requires a real unique-key zero-byte object and independently committed
+positive verification receipt. Existing file and public-link downloads return
+Content-Length: 0, declared/default MIME, normal attachment/security headers and
+an empty body. Rename/move/share/Trash/restore/permanent deletion retain their
+existing permissions and contracts. File and bounded folder copy accept empty
+sources through the normal independent COPY object/receipt path. Multipart
+admission still rejects zero. POST `/api/v1/files` remains retired.
+
+See [storage, races, uncertainty and purge guarantees](decisions/0016-zero-byte-files.md).
+
 ## Operational admission and health (2026-10-23)
 
 Authentication, multipart control (including creation/signing), authenticated

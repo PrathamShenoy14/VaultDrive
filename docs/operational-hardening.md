@@ -1,5 +1,32 @@
 # MVP operational hardening
 
+## Zero-byte creation recovery
+
+POST `/api/v1/files/empty` uses bounded metadata admission and the existing
+single-attempt SDK/storage deadlines. Save the returned Location and idempotency
+key. GET `/api/v1/empty-file-creations/{id}` inspects retained status; POST its
+`/recover` suffix can verify the original bound object or finalize an existing
+receipt. It never repeats PUT. Reusing the original creation request/key may
+dispatch only a still-RESERVED intent. An UNKNOWN result, timeout or lost response
+does not authorize another write with that key. A new key means a different file
+and can collide with the retained name.
+
+STORAGE_COMPLETE retains a positive receipt but cannot publish READY through
+Trash, hidden copy staging or purge barriers. Restore eligibility when permitted,
+then recover. An owner can recover Editor-created files; the original actor/name
+is preserved. Revoked Editors cannot inspect or recover the intent. Existing
+internal receipt finalization can finish eligible empty files without Garage I/O.
+An admitted UNKNOWN empty write retains the conservative SERVER_PUT folder-purge
+blocker; never mark it never-written or deleted because its logical length is
+zero. No autonomous unknown-write scanner or dispatch takeover is added.
+
+Empty objects use real unique Garage keys and normal downloads/copies/deletion.
+Keep exact binding, dispatch, receipt, allocation and deletion evidence. DELETE
+receipts establish the existing exact-key outcome, not block GC. Zero logical
+charge does not mean zero physical overhead or unlimited physical capacity. Existing
+admission, capacity monitoring and retention launch gates remain. See
+[ADR-0016](decisions/0016-zero-byte-files.md).
+
 This milestone bounds API and background work and makes failures visible. It does
 not establish production capacity, browser release, backup restoration, physical
 multipart reclamation or safe resolution of unknown storage effects.
@@ -301,7 +328,8 @@ credential/key rotation, trusted-writer retirement, edge abuse protection, capac
 measurement and an explicit physical-capacity/retention budget remain launch
 prerequisites. Malformed source-less quarantine, missing immutable identities or
 irreconcilable proof need incident-specific decisions. No readiness boolean closes
-these gates. Frontend and zero-byte uploads remain outside this milestone.
+these gates. Frontend remains outside this milestone; the later zero-byte extension
+is described above and does not close any deployment gate.
 
 ## Verification
 

@@ -1,5 +1,9 @@
 # ADR-0010: Consolidated backend and historical upload boundary
 
+Later [ADR-0016](0016-zero-byte-files.md) narrowly permits zero-byte SERVER_PUT
+admission and positive receipts. General stream uploads remain retired; the
+original consolidation decision below is preserved as history.
+
 - Status: Accepted and implemented
 - Date: 2026-10-20
 

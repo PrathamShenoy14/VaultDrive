@@ -17,7 +17,7 @@ public class FileStorageIdentityService {
         this.binding = binding;
     }
 
-    /** New allocations support direct multipart only. Historical identities remain immutable. */
+    /** Multipart allocations; narrow empty-file SERVER_PUT admission lives in EmptyFileTransactions. */
     @Transactional(propagation = Propagation.MANDATORY)
     public void reserveMultipart(StoredFile file) {
         StorageTarget target = binding.target(file.getStorageKey());

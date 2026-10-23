@@ -18,7 +18,7 @@ Client -- bearer/JSON control API --> Spring Boot --> PostgreSQL metadata/eviden
 |---|---|
 | Registration, login, refresh/logout, profile | `auth`, `security`, `user`; BCrypt, bearer JWTs, PostgreSQL families/revocation |
 | Metadata, Trash, restore, purge intent | `folder`, `file`, `hierarchy`; service transactions and PostgreSQL constraints |
-| New uploads | Multipart session/transfer/completion/cancellation services; direct multipart only |
+| New uploads | Multipart session/transfer/completion/cancellation services; direct multipart for positive sizes; guarded zero-byte SERVER_PUT creation |
 | File/folder copying | Owner-only M1 COPY protocol plus bounded M2 immutable subtree jobs, hidden staging and atomic publication |
 | Storage I/O/signing | `ObjectStorageService` / `S3ObjectStorageService`, immutable binding, SDK retries disabled |
 | Resource authority/reads | `ResourceAccessRepository`, `ResourceReadService`, PostgreSQL resolver snapshots |
@@ -32,7 +32,7 @@ The [consolidation audit](backend-consolidation.md) records removals, retained h
 
 ## Persistence and schema
 
-Flyway V1-V45 is append-only; Hibernate validates the schema. JPA manages users, folders, files, immutable outbox writes and short job/outbox entity transactions. Native EntityManager SQL implements PostgreSQL recursive authorization, scalar evidence reads, row locks, claims and conditional transitions. JdbcTemplate manages authentication sessions/revocations without a parallel JPA entity model. All use the configured datasource/transaction manager.
+Flyway V1-V46 is append-only; Hibernate validates the schema. JPA manages users, folders, files, immutable outbox writes and short job/outbox entity transactions. Native EntityManager SQL implements PostgreSQL recursive authorization, scalar evidence reads, row locks, claims and conditional transitions. JdbcTemplate manages authentication sessions/revocations without a parallel JPA entity model. All use the configured datasource/transaction manager.
 
 Services own transactions and `spring.jpa.open-in-view=false` remains required. SQL stays in its existing responsibility's transaction service or access repository. A blanket JPA/JDBC conversion would obscure locking and atomicity. Managed mutation targets are refreshed where required; status/version bulk CAS flushes/clears the context. Scalar worker reads avoid stale managed state; independent job/outbox transactions bound cache lifetime. Never save an older entity after native SQL changed that row.
 
@@ -121,15 +121,28 @@ accounting and external-I/O boundaries are unchanged. See the
 
 ## Direct multipart and retained historical uploads
 
-POST `/api/v1/upload-sessions` is the sole new-upload admission. It atomically reserves UPLOADING metadata, a DIRECT_MULTIPART allocation and an idempotent session with immutable owner/initiator, destination, size/type, geometry and expiry. Retired POST `/api/v1/files` returns 405 to authenticated callers; anonymous callers still require authentication. No synchronous PUT fallback exists.
+The zero-byte extension uses `EmptyFileController`, transaction-free
+`EmptyFileService` and short `EmptyFileTransactions` boundaries. V46 retains one
+owner/initiator/key intent and immutable actor snapshot, with a new independent
+file/allocation/key per creation. Its zero-only SERVER_PUT dispatch is granted
+once, exact-key HEAD positively verifies creation marker/length/type/ETag, and a
+genuine V25 receipt commits before existing fresh READY CAS and UPLOAD_COMPLETED
+history. Recovery never repeats PUT. Locked quota admission checks even zero
+length; used/reserved remain unchanged. Real objects keep downloads, file/folder
+CopyObject and exact-key purge compatible. Pending ancestry blocks publication;
+admitted unknown writes retain the conservative SERVER_PUT purge barrier. See
+[ADR-0016](decisions/0016-zero-byte-files.md) and
+[the endpoint/recovery contract](api-contract.md#zero-byte-file-creation-2026-10-23).
+
+POST `/api/v1/upload-sessions` is the nonempty-file admission. It atomically reserves UPLOADING metadata, a DIRECT_MULTIPART allocation and an idempotent session with immutable owner/initiator, destination, size/type, geometry and expiry. Retired POST `/api/v1/files` returns 405 to authenticated callers; anonymous callers still require authentication. No synchronous PUT fallback exists.
 
 Only a newly committed initiation permission permits CreateMultipartUpload. OPEN requires the retained exact upload ID. Per-part length/SHA-256 is immutable; only UploadPart is presigned, for bounded lifetimes/batches. Resume uses bounded authoritative ListParts pages. Fresh actor/ancestry authorization gates admissions and responses. Revocation cannot recall existing URLs.
 
 Completion freezes one authoritative manifest and dispatch identity, commits strict positive object evidence in a separate immutable receipt, then performs fresh READY CAS. Recovery uses that receipt or strict checksum/metadata evidence for the original dispatcher. Unknown Create/Complete/Abort never grants redispatch. Cancel/expiry records mutually exclusive abandonment and releases eligible names via FAILED; abort acknowledgement never proves physical reclamation.
 
-Historical SERVER_PUT allocations, receipts, migrations and targets remain. Read-only inventory, verified never-admitted expiry, receipt-only READY recovery, restricted receipt-backed FAILED cleanup and historical SUCCEEDED purge recovery remain explicit internal operations. Missing receipts/unknown bindings are not backfilled from current settings or negative observations. No new SERVER_PUT allocation, admission, PUT or success-receipt writer remains in production.
+Historical SERVER_PUT allocations, receipts, migrations and targets remain. Read-only inventory, verified never-admitted expiry, receipt-only READY recovery, restricted receipt-backed FAILED cleanup and historical SUCCEEDED purge recovery remain explicit internal operations. Missing receipts/unknown bindings are not backfilled from current settings or negative observations. ADR-0016 adds narrowly scoped zero-byte SERVER_PUT admission, one PUT dispatch and positively verified V25 receipts; general synchronous stream upload remains retired.
 
-The size policy remains positive files up to five GiB, fixed eight-MiB parts and bounded part count. Zero-byte uploads require a separate product decision. See [sessions](multipart-upload-sessions.md), [transfers](multipart-part-transfers.md), [completion](multipart-completion-recovery.md), [cancellation](multipart-cancellation-expiry.md) and [historical recovery](upload-success-recovery.md).
+The size policy remains positive files up to five GiB, fixed eight-MiB parts and bounded part count. Zero-byte creation uses the separate [ADR-0016 path](decisions/0016-zero-byte-files.md); multipart still rejects zero. See [sessions](multipart-upload-sessions.md), [transfers](multipart-part-transfers.md), [completion](multipart-completion-recovery.md), [cancellation](multipart-cancellation-expiry.md) and [historical recovery](upload-success-recovery.md).
 
 ## Trash, purge and asynchronous work
 
@@ -645,6 +658,49 @@ $hardeningSchema='hardening_verify_'+[Guid]::NewGuid().ToString('N')
 
 See [the operational limits, recovery commands and launch gates](operational-hardening.md).
 
+## Zero-byte file verification
+
+Executed on 2026-10-23 against isolated PostgreSQL 17.11 schemas and read-only
+attested Garage 2.3.0. The final focused selection passed **34 tests with no
+failures, errors or skips**: 23 empty-file PostgreSQL/API tests, eight live Garage
+copy/empty-object tests and three storage adapter copy regressions.
+
+The final full backend suite passed **1,579 tests: 1,559 passed, 20 skipped, zero
+failures or errors**, finishing at 13:24:17 UTC. Default contexts used only
+`vaultdrive_test.empty_release_9d2c0faf09d14e26a9e8c12bdddad762`; suites with their
+own isolation retained separate fresh schemas. Live Garage multipart/copy,
+isolated RabbitMQ and HTTP-to-Garage async end-to-end gates were enabled. The
+existing explicit initial-due alignment opt-in handled VM/JVM clock skew only
+inside that isolated end-to-end harness. No VM configuration, shared schema,
+existing shared storage allocation, migration checksum or credential was modified.
+
+The 20 skips were AsyncPurgeProcessRecoveryTest (one; requires the separate
+process-kill runbook), GarageMultipartCapabilityTest (18; separately gated M0
+characterization) and GarageMultipartJournalRecoveryTest (one; requires a reviewed
+retained journal UUID). These are not passing checks. No browser/TLS/CORS release,
+process-kill, multi-node, physical GC, capacity or performance result is claimed.
+
+Coverage includes owner/Editor attribution, Viewer denial/revocation, names,
+idempotency, synchronized concurrent creation and namespace collision, both
+hierarchy admission and READY-versus-Trash orders, quota zero/full/over-limit
+accounting and uncertain allocation counts. Tests also cover declared/default
+MIME and Content-Length: 0 on authenticated/public-link downloads, rename/move,
+grants, Trash/restore, independently copied file/folder objects, exact deletion
+receipts, frozen actor recovery, activity rollback, mismatched evidence, immutable
+dispatch/allocation, verified-never-admitted removal and unknown-writer purge
+blockers. PostgreSQL mocks only storage calls; the live selection checks real
+zero-byte PUT/HEAD/GET/CopyObject/DELETE and injects acknowledgement loss after a
+real successful PUT, then proves one PUT and positive-only recovery. That case
+does not claim a real network-drop or process-kill test.
+
+Reproduce with the ignored private environment, documented loopback AMQP tunnel
+and existing `vaultdrive_outbox_test` vhost. Enable the same Garage multipart,
+copy and isolated async end-to-end flags as the operational verification above;
+use a new `empty_release_<UUID>` schema for default test contexts. The new focused
+selection is `-Dtest=EmptyFileIntegrationTest,GarageFileCopyIntegrationTest,S3CopyStorageTest`
+with GARAGE_COPY_TEST=true and GARAGE_MULTIPART_VERSION=2.3.0. Applied historical
+migrations/shared allocations are not repaired or modified.
+
 ## Remaining work
 
-Unknown multipart reclamation, broad historical repair, retention/erasure, zero-byte support, JWT key evolution, restore-tested backups/disaster recovery, clients and actual deployment remain separate. Per-instance admission, dependency/processing readiness and bounded operator recovery are implemented; fleet admission/edge abuse protection, live browser release and production capacity remain launch gates. Performance, multi-node failure and capacity targets are unmeasured. No shared checksum repair, old allocation sweep or VM change is part of consolidation. See the [roadmap](development-roadmap.md) and [risk register](backend-consolidation.md#deferred-decisions-and-risks).
+Unknown multipart reclamation, broad historical repair, retention/erasure, JWT key evolution, restore-tested backups/disaster recovery, clients and actual deployment remain separate. Per-instance admission, dependency/processing readiness and bounded operator recovery are implemented; fleet admission/edge abuse protection, live browser release and production capacity remain launch gates. Performance, multi-node failure and capacity targets are unmeasured. No shared checksum repair, old allocation sweep or VM change is part of consolidation. See the [roadmap](development-roadmap.md) and [risk register](backend-consolidation.md#deferred-decisions-and-risks).

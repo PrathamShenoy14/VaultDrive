@@ -1,5 +1,15 @@
 # Storage quota operations
 
+Zero-byte creation and copy use the same file accounting trigger. V46 checks the
+locked owner quota row even for a zero-length insert; used/reserved totals stay
+unchanged. Zero-limit and exactly-full accounts may create empty files; an account
+already above its limit cannot admit another file, including an empty one. Editor
+creation checks the destination owner, never the Editor's quota. Replays add no
+charge or threshold events. Allocation length is durably known as zero; uncertain
+allocations can still count even when uncertainStorageBytes is zero. Real empty
+objects consume Garage overhead that these logical counters do not measure.
+See [the representation and recovery decision](decisions/0016-zero-byte-files.md).
+
 The [MVP quota notification milestone](quota-notifications.md) adds atomic
 80/90/100% owner alerts using logical used plus reserved bytes. Crossing events
 commit with accounting, including Editor reservations and incremental copy work.

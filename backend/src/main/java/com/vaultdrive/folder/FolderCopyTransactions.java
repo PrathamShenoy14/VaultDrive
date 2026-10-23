@@ -92,7 +92,7 @@ public class FolderCopyTransactions {
         if (snapshot.size()>MAX_MEMBERS || snapshot.stream().anyMatch(v->{
             Object[] r=(Object[])v;
             return ((Number)r[6]).intValue()>MAX_DEPTH || ("FILE".equals(r[0])
-                    && (((Number)r[4]).longValue()<1 || ((Number)r[4]).longValue()>com.vaultdrive.file.MultipartSessionService.MAX_SIZE));
+                    && (((Number)r[4]).longValue()<0 || ((Number)r[4]).longValue()>com.vaultdrive.file.MultipartSessionService.MAX_SIZE));
         })) throw conflict();
         UUID job=UUID.randomUUID(), root=UUID.randomUUID();
         em.createNativeQuery("INSERT INTO folder_copy_jobs(id,owner_id,actor_display_name,source_folder_id,destination_folder_id,folder_id,name,idempotency_key,member_count) "

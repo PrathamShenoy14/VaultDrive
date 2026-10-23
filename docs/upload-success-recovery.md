@@ -1,6 +1,6 @@
 # Upload success receipts and finalization recovery (Phase 2E.5B3)
 
-Consolidation update: [the backend audit](backend-consolidation.md) retires synchronous upload admission/PUT and foreground receipt creation. New uploads use direct multipart only. Earlier flow descriptions, commands and verification totals below are historical milestone evidence; retained historical readers/receipts/expiry/cleanup remain supported where stated in the audit.
+Consolidation update: [the backend audit](backend-consolidation.md) retires synchronous upload admission/PUT and foreground receipt creation. Nonempty uploads use direct multipart. [ADR-0016](decisions/0016-zero-byte-files.md) later adds zero-only SERVER_PUT creation with one dispatch and positively verified V25 receipts, reusing the existing metadata-only finalization and frozen creation actor. Earlier flow descriptions, commands and verification totals below are historical milestone evidence; retained historical readers/receipts/expiry/cleanup remain supported where stated in the audit.
 
 Follow-up: [B4B](known-success-upload-cleanup.md) now adds explicit cleanup only for
 matching receipt-backed FAILED uploads. UPLOADING recovery and its restore behavior

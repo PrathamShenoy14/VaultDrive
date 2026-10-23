@@ -100,6 +100,10 @@ public class ResourceActivityService {
                 FROM upload_sessions s JOIN multipart_completions c ON c.session_id = s.id WHERE s.file_id = :file
                 """).setParameter("file", file).getResultList();
         UUID actor = after.ownerId(); String actorName = null; // Historical SERVER_PUT uploader was the owner.
+        if (actors.isEmpty()) {
+            actors = em.createNativeQuery("SELECT initiator_id,actor_display_name FROM empty_file_creations WHERE file_id=:file")
+                    .setParameter("file",file).getResultList();
+        }
         if (!actors.isEmpty()) { Object[] a = (Object[]) actors.getFirst(); actor = (UUID) a[0]; actorName = (String) a[1]; }
         append(actor, actorName, actorName == null ? ActorAttribution.UPLOAD_INITIATOR : ActorAttribution.CALLER, EventType.UPLOAD_COMPLETED,
                 new Snapshot(file, after.ownerId(), after.type(), after.name(), after.parentId(), false, "UPLOADING"), after);

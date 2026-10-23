@@ -1,5 +1,12 @@
 # ADR-0007: Transaction-scoped hierarchy coordination
 
+V46 empty creation retains shared owner hierarchy, admission-only
+owner/initiator/idempotency advisory lock, destination namespace, then new file
+with quota accounting before new allocation/intent. Existing work locks hierarchy,
+fresh file, allocation, creation; receipt-only finalization reuses the original
+hierarchy/file/allocation order. Zero-length inserts also lock/check the quota
+row. No coordination spans Garage. See [ADR-0016](0016-zero-byte-files.md).
+
 Operational hardening retains all existing lock orders. Scheduled logical expiry
 and SUCCEEDED-file finalization reuse their original short resource transactions.
 V45 operator budget extension is job-only: lock exact FAILED job, freshly read
@@ -35,7 +42,7 @@ job fence. File removal never updates copy progress after that fence.
 Deterministic PostgreSQL tests cover source Trash versus dispatch and destination
 Trash versus READY in both orders, concurrent dispatch, idempotency and collisions.
 
-Current consolidation: [ADR-0010](0010-backend-consolidation.md) retires synchronous new-upload admission/PUT and foreground receipt creation. Historical phase descriptions below remain records of their original revisions; retained receipts, recovery and locking guarantees still apply. Current new uploads use direct multipart only.
+Current consolidation: [ADR-0010](0010-backend-consolidation.md) retires synchronous new-upload admission/PUT and foreground receipt creation. Historical phase descriptions below remain records of their original revisions; retained receipts, recovery and locking guarantees still apply. Current nonempty uploads use direct multipart; [ADR-0016](0016-zero-byte-files.md) adds narrow zero-byte SERVER_PUT creation.
 
 - Status: Accepted; folder operations and current file metadata mutation paths implemented
 - Date: 2026-10-09

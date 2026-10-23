@@ -1,5 +1,10 @@
 # Copy M2: bounded, resumable folder copy
 
+Zero-byte members are supported by the later [ADR-0016](decisions/0016-zero-byte-files.md)
+extension. Each receives an independent real COPY object and positive receipt;
+the existing frozen snapshot, incremental zero-charge quota check, hidden staging,
+whole-tree publication, replay and purge guarantees apply without virtual objects.
+
 The later [quota notification milestone](quota-notifications.md) observes each
 incremental M1 reservation through the same accounting transaction. Hidden READY
 transfer, checkpoint/publication recovery and idempotent replays do not duplicate

@@ -42,6 +42,7 @@ class GarageFileCopyIntegrationTest {
     @Autowired FolderCopyTransactions folderCopies;
     @Autowired FolderCopyService folderCopyService;
     @Autowired FileCopyService copies;
+    @Autowired EmptyFileService emptyFiles;
     @Autowired FileCopyTransactions transactions;
     @Autowired FileService files;
     @Autowired StoredFileRepository repository;
@@ -83,6 +84,14 @@ class GarageFileCopyIntegrationTest {
             fixture.event("COPY_DISPATCH",command.operationId()+" "+command.destination().key());
             return c.callRealMethod();
         }).when(storage).copyObject(any());
+        doAnswer(c->{
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            StorageTarget target=c.getArgument(0);UUID id=c.getArgument(1);
+            assertThatThrownBy(()->s3.headObject(head->head.bucket(target.bucket()).key(target.key())))
+                    .isInstanceOfSatisfying(S3Exception.class,e->assertThat(e.statusCode()).isEqualTo(404));
+            destinations.put(target.key(),id);fixture.event("EMPTY_PUT_DISPATCH",id+" "+target.key());
+            return c.callRealMethod();
+        }).when(storage).putEmpty(any(),any(),any());
         clearInvocations(s3,storage);
     }
 
@@ -106,6 +115,52 @@ class GarageFileCopyIntegrationTest {
         copies.recover(owner,ready.id()); verify(s3,times(1)).copyObject(any(CopyObjectRequest.class));
         filePurge(ready.fileId());assertThat(repository.existsById(ready.fileId())).isFalse();assertThat(usage.get(owner).usedBytes()).isZero();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM resource_activity_events WHERE resource_id=? AND event_type='COPIED'",Integer.class,ready.fileId())).isEqualTo(1);
+    }
+
+    @Test void realEmptyObjectDownloadCopiesAndIndependentReceiptBackedPurge() throws Exception {
+        UUID root=folders.createFolder(owner,null,"empty source");
+        var request=new EmptyFileTransactions.Request(root,"empty.txt","text/plain");
+        var empty=emptyFiles.create(owner,"empty-live",request);
+        assertThat(empty.state()).isEqualTo("READY");verifyEmpty(empty.fileId());
+        try(var stream=files.downloadFile(owner,empty.fileId()).inputStream()){assertThat(stream.readAllBytes()).isEmpty();}
+        assertThat(emptyFiles.create(owner,"empty-live",request)).isEqualTo(empty);
+        var copied=copies.copy(owner,empty.fileId(),"empty-copy",new Request(null,"empty copy.txt"));
+        assertThat(copied.state()).isEqualTo("READY");verifyEmpty(copied.fileId());
+        var job=folderCopies.admit(owner,root,"empty-folder",new FolderCopyTransactions.Request(null,"empty copied folder"));
+        assertThat(folderCopyService.execute(owner,job.id()).state()).isEqualTo("COMPLETED");
+        UUID member=jdbc.queryForObject("SELECT destination_id FROM folder_copy_members WHERE job_id=? AND kind='FILE'",UUID.class,job.id());
+        verifyEmpty(member);
+        assertThat(Set.of(empty.fileId(),copied.fileId(),member)).hasSize(3);
+        verify(s3,times(1)).putObject(any(PutObjectRequest.class),any(software.amazon.awssdk.core.sync.RequestBody.class));
+        verify(s3,times(2)).copyObject(any(CopyObjectRequest.class));
+        filePurge(empty.fileId());verifyEmpty(copied.fileId());verifyEmpty(member);
+        filePurge(copied.fileId());filePurge(member);
+        assertThat(emptyFiles.get(owner,empty.id()).state()).isEqualTo("REMOVED");
+        assertThat(jdbc.queryForObject("SELECT bytes_deleted_at IS NOT NULL AND metadata_finalized_at IS NOT NULL FROM file_purge_work WHERE file_id=?",Boolean.class,empty.fileId())).isTrue();
+        fixture.event("EMPTY_VERIFIED","PUT GET copy folder-copy independent DELETE and retained receipts");
+    }
+
+    @Test void realEmptyWriteWithLostAcknowledgementRecoversWithoutAnotherPut() throws Exception {
+        doAnswer(c->{
+            StorageTarget target=c.getArgument(0);UUID id=c.getArgument(1);
+            assertThatThrownBy(()->s3.headObject(head->head.bucket(target.bucket()).key(target.key())))
+                    .isInstanceOfSatisfying(S3Exception.class,e->assertThat(e.statusCode()).isEqualTo(404));
+            destinations.put(target.key(),id);fixture.event("EMPTY_PUT_ACK_LOSS",id+" "+target.key());
+            c.callRealMethod();throw new CopyStorage.Uncertain();
+        }).when(storage).putEmpty(any(),any(),any());
+        var empty=emptyFiles.create(owner,"empty-unknown",new EmptyFileTransactions.Request(null,"unknown.txt","text/plain"));
+        assertThat(empty.state()).isEqualTo("UNKNOWN");verifyEmpty(empty.fileId());
+        assertThat(emptyFiles.recover(owner,empty.id()).state()).isEqualTo("READY");
+        emptyFiles.recover(owner,empty.id());
+        verify(s3,times(1)).putObject(any(PutObjectRequest.class),any(software.amazon.awssdk.core.sync.RequestBody.class));
+        filePurge(empty.fileId());
+    }
+
+    private void verifyEmpty(UUID file) throws Exception {
+        String key=jdbc.queryForObject("SELECT storage_key FROM file_storage_objects WHERE file_id=?",String.class,file);
+        var result=s3.getObjectAsBytes(b->b.bucket(fixture.properties.bucket()).key(key));
+        assertThat(result.response().contentLength()).isZero();assertThat(result.response().contentType()).isEqualTo("text/plain");
+        assertThat(result.asByteArray()).isEmpty();safe.add(key);fixture.event("EMPTY_OBJECT_VERIFIED",key);
     }
 
     @Test void realSuccessfulCopyWithDroppedNetworkResponseRecoversFromPositiveHeadWithoutRedispatch() throws Exception {

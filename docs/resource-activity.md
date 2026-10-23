@@ -1,5 +1,14 @@
 # MVP general file and folder activity history
 
+Zero-byte creation records normal UPLOAD_COMPLETED only at the winning
+receipt-backed READY transition. V46 freezes the initiating owner/Editor's ID and
+display name in retained creation intent; owner takeover and existing internal
+receipt recovery preserve CALLER attribution. Admission, UNKNOWN/blocked outcomes,
+idempotency and recovery replays emit no event. Empty file and folder copies
+record the existing COPIED events and keep independent resource IDs. Ordinary
+metadata and proof-backed permanent-deletion history is unchanged. See
+[ADR-0016](decisions/0016-zero-byte-files.md).
+
 Copy M2 extends COPIED to folders: whole-tree publication commits one event per
 new folder, absent before side, active after side and null status, atomically with
 the COMPLETED decision/checkpoint. Hidden staging emits no FOLDER_CREATED event.

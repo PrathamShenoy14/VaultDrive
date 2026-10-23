@@ -1,6 +1,6 @@
 # ADR-0005: File upload and trash lifecycle
 
-Current consolidation: [ADR-0010](0010-backend-consolidation.md) retires synchronous new-upload admission/PUT and foreground receipt creation. Historical phase descriptions below remain records of their original revisions; retained receipts, recovery and locking guarantees still apply. Current new uploads use direct multipart only.
+Current consolidation: [ADR-0010](0010-backend-consolidation.md) retires synchronous new-upload admission/PUT and foreground receipt creation. Historical phase descriptions below remain records of their original revisions; retained receipts, recovery and locking guarantees still apply. Current nonempty uploads use direct multipart; [ADR-0016](0016-zero-byte-files.md) adds narrow zero-byte SERVER_PUT creation.
 
 - Status: Accepted and implemented
 - Date: 2026-10-09 (retrospective record)

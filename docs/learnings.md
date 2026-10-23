@@ -1,5 +1,25 @@
 # Implementation learnings
 
+## Empty bytes still need positive storage evidence
+
+Zero logical length does not establish that an allocated object exists, that a
+write finished or that a delete reclaimed storage. A real empty object keeps
+download, independent CopyObject and exact-key purge compatible. V46 narrows
+SERVER_PUT admission to an empty body, with retained request/actor identity and
+one durable dispatch permission. A matching backend marker, zero length, exact
+MIME and ETag establish positive completed-object evidence under the existing
+trusted-writer/nonreuse assumption; the receipt commits before READY. Recovery
+cannot repeat an uncertain PUT, even if a crash happened before the call.
+
+An accounting optimization skipped row coordination when both old/new charge
+were zero. Zero-byte inserts now lock and check the owner quota even though
+counters do not change. Full and zero-limit accounts may add zero bytes; an
+already-over-limit owner cannot admit another file. Editors charge that owner,
+and frozen actor snapshots survive owner-driven recovery without duplicate events.
+Unknown admitted empty writes keep the conservative SERVER_PUT folder-purge
+barrier; adding logical-discard authority would be a separate recovery decision.
+See [ADR-0016](decisions/0016-zero-byte-files.md).
+
 ## Admission, readiness and recovery have different authority
 
 A request token bounds arrival rate; a semaphore bounds admitted lifetime. A

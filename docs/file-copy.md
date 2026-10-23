@@ -27,7 +27,9 @@ trimmed, case-sensitive file validation (1..255 characters, no path separators o
 controls). The complete name is used; no source extension is implicitly appended.
 Active UPLOADING/READY destination-name collisions return 409 and overwrite nothing.
 The source's logical size and content type are copied; bytes remain behind
-ObjectStorageService. Copy supports existing positive files up to five GiB.
+ObjectStorageService. Copy supports zero-byte files and positive files up to five GiB.
+Empty sources have real independent objects; the same CopyObject dispatch,
+positive receipt, replay, quota and purge rules apply. See [ADR-0016](decisions/0016-zero-byte-files.md).
 The source must have its original retained binding matching this backend; unknown
 historical bindings or configuration drift return 409 and cannot be inferred from
 today's settings. Destination-folder inheritance applies normally to the new file.

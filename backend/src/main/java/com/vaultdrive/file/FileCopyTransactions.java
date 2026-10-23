@@ -93,7 +93,7 @@ public class FileCopyTransactions {
         Object[] src = (Object[]) em.createNativeQuery("SELECT size_bytes,content_type FROM files WHERE id=:id AND owner_id=:owner AND status='READY'")
                 .setParameter("id",source).setParameter("owner",actor).getSingleResult();
         long size = ((Number) src[0]).longValue();
-        if (size < 1 || size > MultipartSessionService.MAX_SIZE) { throw invalid(); }
+        if (size < 0 || size > MultipartSessionService.MAX_SIZE) { throw invalid(); }
         StorageTarget sourceTarget = target(source);
         if (!binding.matches(sourceTarget)) { throw conflict(); }
         hierarchy.acquireNamespaceExclusive(actor, request.destinationFolderId());

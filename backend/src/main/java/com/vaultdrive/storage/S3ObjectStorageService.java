@@ -69,6 +69,19 @@ public class S3ObjectStorageService implements ObjectStorageService {
         } catch (RuntimeException uncertain) { throw new CopyStorage.Uncertain(); }
     }
 
+    @Override
+    public void putEmpty(StorageTarget target, UUID creationId, String contentType) {
+        requireNoTransaction();
+        if (!binding.matches(target)) { throw new CopyStorage.Uncertain(); }
+        try {
+            s3Client.putObject(PutObjectRequest.builder().bucket(target.bucket()).key(target.key())
+                    .contentLength(0L).contentType(contentType)
+                    .metadata(Map.of("vaultdrive-empty",creationId.toString()))
+                    .overrideConfiguration(c -> c.apiCallTimeout(DELETE_TIMEOUT).apiCallAttemptTimeout(DELETE_ATTEMPT_TIMEOUT))
+                    .build(),software.amazon.awssdk.core.sync.RequestBody.empty());
+        } catch (RuntimeException unknown) { throw new CopyStorage.Uncertain(); }
+    }
+
     public S3ObjectStorageService(
             S3Client s3Client,
             S3StorageProperties properties,

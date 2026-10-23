@@ -12,7 +12,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** PostgreSQL-only recovery from retained historical SERVER_PUT receipts. */
+/** PostgreSQL-only recovery from genuine SERVER_PUT receipts, including guarded empty-file creation. */
 @Service
 public class UploadFinalizationTransactions {
     private final EntityManager em;
