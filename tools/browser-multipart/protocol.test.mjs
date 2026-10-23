@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AuthClient, HttpFailure, browserHeaders, expectations, listAll, missingParts, sha256, uploadPart } from './protocol.mjs';
+import { AuthClient, HttpFailure, browserHeaders, expectations, listAll, missingParts, sha256, uploadPart,
+  verifyPartEvidence } from './protocol.mjs';
 
 const bytes = new TextEncoder().encode('abc').buffer;
 const digest = 'ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=';
@@ -17,6 +18,21 @@ function storage() {
 const credentials = () => Response.json({ accessToken: 'access', expiresIn: 1800 }, { headers: { 'X-VaultDrive-CSRF': 'csrf' } });
 const locks = { request: async (_name, action) => action() };
 const auth = fetcher => new AuthClient({ fetcher, storage: storage(), locks });
+
+test('browser response evidence must match backend opaque ETag, checksum and size exactly', () => {
+  const part = { partNumber: 1, length: 3, sha256: digest };
+  const wire = { status: 200, etag: '"opaque"', checksum: digest };
+  const observed = { partNumber: 1, size: 3, sha256: digest, etag: '"opaque"' };
+  verifyPartEvidence(part, wire, [observed]);
+  for (const change of [{ etag: 'opaque' }, { sha256: 'different' }, { size: 4 }, { partNumber: 2 }]) {
+    assert.throws(() => verifyPartEvidence(part, wire, [{ ...observed, ...change }]));
+  }
+  assert.throws(() => verifyPartEvidence(part, wire, []));
+  assert.throws(() => verifyPartEvidence(part, wire, [observed, observed]));
+  assert.throws(() => verifyPartEvidence(part, { ...wire, status: 403 }, [observed]));
+  assert.throws(() => verifyPartEvidence(part, { ...wire, checksum: null }, [observed]));
+  assert.throws(() => verifyPartEvidence(part, { ...wire, etag: null }, [observed]));
+});
 
 test('canonical SHA-256 and server geometry use exact final-part lengths', async () => {
   assert.equal(await sha256(bytes), digest);

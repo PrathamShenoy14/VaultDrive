@@ -1,5 +1,17 @@
 # Development roadmap
 
+## Real-browser multipart interoperability recheck (2026-10-23; blocked)
+
+- [x] Inspect the harness, read-only Garage/network/time configuration and current CORS response.
+- [x] Strengthen exact browser/backend part-evidence comparison, explicit identical retries, native-expiry controls and proxy Retry-After/Date forwarding.
+- [x] Run Node and relevant backend checks; record [observed results, matrix and executable continuation](browser-multipart-verification-2026-10-23.md).
+- [ ] Provide a connected real browser, approved trusted HTTPS page/storage endpoints and working exact-origin bucket CORS.
+- [ ] Execute the full browser matrix, retain sanitized network/browser evidence and establish monitored clock bounds.
+
+No real-browser scenario passed during this recheck. No VM, CORS, DNS, certificate,
+port, firewall or shared-infrastructure setting changed. Browser release stays
+gated; Next.js and unrelated backend work are outside this milestone.
+
 ## MVP Zero-Byte File Support (implemented)
 
 - [x] Narrow authenticated owner/Editor creation, retained idempotency and independent file/storage identities.
@@ -246,6 +258,7 @@ Exit criteria: correctness tests remain green and measured contention improves f
   [implementation and runbook](browser-multipart-interoperability.md).
 - [ ] Live browser interoperability: approved HTTPS/origin/CORS configuration,
   actual browser execution of the full scenario matrix, and bounded clock skew.
+  The [2026-10-23 recheck](browser-multipart-verification-2026-10-23.md) remains blocked.
   Harness delivery does not establish browser release readiness.
 
 - [x] Implement direct signed multipart parts, durable resumable state, checksum verification, explicit completion/cancellation/expiry.

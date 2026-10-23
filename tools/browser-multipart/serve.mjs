@@ -56,7 +56,7 @@ export function handler(config) {
         port: config.upstream.port, path: request.url, method: request.method, headers }, incoming => {
         response.statusCode = incoming.statusCode;
         for (const name of ['content-type', 'content-length', 'content-disposition', 'set-cookie',
-          'x-vaultdrive-csrf', 'etag', 'location']) {
+          'x-vaultdrive-csrf', 'etag', 'location', 'retry-after', 'date']) {
           if (incoming.headers[name]) response.setHeader(name, incoming.headers[name]);
         }
         incoming.on('error', () => response.destroy());

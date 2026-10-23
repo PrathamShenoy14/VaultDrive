@@ -59,6 +59,8 @@ test('proxy forwards cookie/CSRF unchanged and preserves Secure HttpOnly cookie 
     assert.equal(req.headers['x-unrelated-secret'], undefined);
     res.setHeader('Set-Cookie', '__Host-vaultdrive-refresh=rotated; Path=/; Secure; HttpOnly; SameSite=Strict');
     res.setHeader('X-VaultDrive-CSRF', 'csrf');
+    res.setHeader('Retry-After', '1');
+    res.setHeader('Date', 'Fri, 23 Oct 2026 17:00:00 GMT');
     res.end('{}');
   });
   const upstreamPort = await listen(upstream);
@@ -72,6 +74,8 @@ test('proxy forwards cookie/CSRF unchanged and preserves Secure HttpOnly cookie 
     assert.equal(result.status, 200);
     assert.match(result.headers['set-cookie'][0], /Secure; HttpOnly; SameSite=Strict/);
     assert.equal(result.headers['x-vaultdrive-csrf'], 'csrf');
+    assert.equal(result.headers['retry-after'], '1');
+    assert.equal(result.headers.date, 'Fri, 23 Oct 2026 17:00:00 GMT');
     assert.equal(result.headers['access-control-allow-origin'], undefined);
     assert.equal((await request(port, '/api/v1/auth/refresh', { method: 'POST', headers: {
       origin: 'https://evil.example.test'
@@ -88,6 +92,26 @@ test('proxy returns 502 on uncertain upstream outcome without another dispatch',
   const port = await listen(server);
   try {
     assert.equal((await request(port, '/api/v1/upload-sessions/id/complete', { method: 'POST' })).status, 502);
+    assert.equal(count, 1);
+  } finally { await close(server); await close(upstream); }
+});
+
+test('received admission rejection preserves 429 and Retry-After without proxy retry', async () => {
+  let count = 0;
+  const upstream = http.createServer((_req, res) => {
+    count++;
+    res.writeHead(429, { 'Retry-After': '1', 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 429, error: 'TOO_MANY_REQUESTS', message: 'Request capacity exceeded' }));
+  });
+  const upstreamPort = await listen(upstream);
+  const server = http.createServer(handler({ ...config, upstream: new URL(`http://127.0.0.1:${upstreamPort}`) }));
+  const port = await listen(server);
+  try {
+    const result = await request(port, '/api/v1/upload-sessions', { method: 'POST' });
+    assert.equal(result.status, 429);
+    assert.equal(result.headers['retry-after'], '1');
+    assert.equal(result.headers['cache-control'], 'no-store');
+    assert.equal(JSON.parse(result.body).error, 'TOO_MANY_REQUESTS');
     assert.equal(count, 1);
   } finally { await close(server); await close(upstream); }
 });

@@ -9,8 +9,10 @@ No browser scenario or HTTPS/CORS/clock gate is closed by backend hardening.
 
 Implemented: a bounded, dependency-free browser harness, local HTTPS/API proxy,
 exact-origin Garage CORS template and executable protocol/transport checks.
-**Live browser interoperability remains unverified.** No browser surface was
-available in the task environment on 2026-10-19. Java/Node HTTP clients do not
+**Live browser interoperability remains blocked.** The 2026-10-23 recheck found
+no connected browser, HTTP-only Garage and a denied CORS preflight. See the
+[current evidence matrix and executable continuation procedure](browser-multipart-verification-2026-10-23.md).
+The earlier 2026-10-19 results below remain historical. Java/Node HTTP clients do not
 establish browser cookie, CORS, forbidden-header or HTTP/2 behavior.
 
 ## Boundary and acceptance criteria
@@ -113,11 +115,12 @@ Keep DevTools header details private while checking cookie flags/framing.
 | Authentication | Check missing client header -> 403. Log in with `X-VaultDrive-Client: 1`; bearer profile succeeds. Inspect Secure/HttpOnly/Strict/Path=/ cookie, no Domain, and CSRF response header privately. Cookie-only profile -> 401. |
 | Refresh and CSRF | Check missing/wrong CSRF -> 403, then valid refresh succeeds. Refresh sends cookie + CSRF and **no Authorization**. Three concurrent harness callers produce one network refresh and a usable profile; cookie rotation proves browser acceptance. Log out -> old JWT 401 and cookie cleared. |
 | Reserve/initiate | Use generated three-part fixture (8 MiB, 8 MiB, 37 bytes), fresh idempotency key and accessible folder. Reservation -> 201 RESERVED with correct initiator/owner/geometry; initiate -> 200 OPEN. A 202/transport failure requires read/recovery, never another uncertain Create. |
-| Direct signed PUT | Upload first missing part. Network request goes to Garage, with exact immutable checksum and browser-generated Host/length; no API bearer/cookie. Expect 200, readable nonempty ETag and matching checksum. Missing response headers fail the scenario. |
+| Direct signed PUT | Upload first missing part. Network request goes to Garage, with exact immutable checksum and browser-generated Host/length; no API bearer/cookie. Expect 200, readable nonempty ETag and matching checksum. The harness compares exact opaque ETag (including quotes), length and SHA-256 with backend ListParts. Missing/different evidence fails. |
+| Identical retry | After uploading part 1, Replay identical first part twice sends the same fresh URL and bytes twice. Both responses must be 200 and match the prior/backend ETag, size and digest. No control-plane retry is performed. |
 | Resume | List uses limit=1 through every marker. Reload page, refresh cookie once, retain session UUID, reselect exact original file (or regenerate fixture), list and resume. Already uploaded size/digest/ETag must match; only missing registered bytes are sent. Reload alone does not resend a control-plane mutation. |
 | URL refresh | Refresh first part URL; registration UUID, length and digest stay fixed. Upload/resume with fresh URLs succeeds. URLs are memory-only and absent from logs/export. |
 | Invalid capabilities | On an OPEN disposable session, check altered signature, changed/missing checksum header, changed same-length bytes and wrong body length: HTTP 400/403. The last two preserve the registered signed checksum. Network/CORS failure is FAIL/unknown, never evidence of signature enforcement. Subsequent valid upload succeeds. |
-| URL expiry | Retain a URL with Refresh first part URL; wait past its displayed deadline plus measured clock tolerance without refreshing/replacing it. Try retained URL -> 403. Refresh URL and upload succeeds. No test-only re-signing/clock override counts as browser expiry evidence. |
+| URL expiry | Refresh first part URL, then Validate retained URL before expiry: require 200 and exact backend evidence for that same URL. Keep the session OPEN; wait past its displayed deadline plus measured clock tolerance (at least the harness's five-second minimum) without replacing it. Try retained URL -> 400 or 403; inspect the provider expiry error privately to distinguish expiry from another rejection. Garage M0 observed 400. Refresh URL and validate again -> 200. No test-only re-signing/clock override counts as browser expiry evidence. |
 | Completion | Resume all parts, Complete once -> completion disposition READY. A 202/lost response is pending/unknown; read then explicitly Recover completion. The UI blocks a second same-tab dispatch; backend durable guards remain authoritative across reloads. |
 | Download | Download and compare -> authenticated attachment with exact original size and whole-file SHA-256. Bytes stream through the backend; browser receives no presigned GET. |
 | Cancellation | In a separate RESERVED session, Cancel once -> CANCELLED without Create. In a separate OPEN session (optionally with an uploaded part), Cancel once -> CANCELLED or explicitly pending. After acknowledgement, initiate/sign -> 409. Read cancellation retains intent; no assertion of reclaimed bytes. Never repeat uncertain Abort. |

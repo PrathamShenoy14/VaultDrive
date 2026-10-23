@@ -1,4 +1,5 @@
-import { AuthClient, HttpFailure, expectations, listAll, missingParts, sha256, uploadPart } from './protocol.mjs';
+import { AuthClient, HttpFailure, expectations, listAll, missingParts, sha256, uploadPart,
+  verifyPartEvidence } from './protocol.mjs';
 
 const $ = id => document.getElementById(id);
 const config = await (await fetch('/config', { cache: 'no-store' })).json();
@@ -63,14 +64,19 @@ async function transfer(firstOnly) {
   const expected = await plan();
   const observed = await listAll(client, id());
   const missing = missingParts(expected, observed);
+  const receipts = [];
   for (const part of firstOnly ? missing.slice(0, 1) : missing) {
     const [capability] = await sign([part]);
     const wire = await uploadPart(capability.upload, await bytesFor(part), config.garageOrigin);
     assert(wire.status === 200, 'UploadPart rejected');
     assert(wire.etag && wire.checksum === part.sha256, 'CORS exposure or checksum response mismatch');
-    record('UploadPart', 'PASS', `part=${part.partNumber}; ETag and SHA-256 readable`);
+    receipts.push({ part, wire });
   }
   const after = await listAll(client, id());
+  for (const { part, wire } of receipts) {
+    verifyPartEvidence(part, wire, after);
+    record('UploadPart', 'PASS', `part=${part.partNumber}; browser ETag/SHA-256/length match backend ListParts exactly`);
+  }
   const remaining = missingParts(expected, after);
   assert(firstOnly || remaining.length === 0, 'Resume incomplete');
   return `listed=${after.length}; missing=${remaining.length}`;
@@ -168,6 +174,21 @@ bind('initiate', async () => {
   assert(session.state === 'OPEN', 'Initiation pending; read retained state, never repeat dispatch');
 });
 bind('first', () => transfer(true));
+bind('replay', async () => {
+  const expected = await plan();
+  const observed = await listAll(client, id());
+  missingParts(expected, observed);
+  assert(observed.some(part => part.partNumber === 1), 'Upload part 1 before replay');
+  const [capability] = await sign([expected[0]]);
+  const bytes = await bytesFor(capability.part);
+  // Deliberate identical-byte retry only. Never retry a control-plane mutation.
+  const first = await uploadPart(capability.upload, bytes, config.garageOrigin);
+  verifyPartEvidence(capability.part, first, observed);
+  const second = await uploadPart(capability.upload, bytes, config.garageOrigin);
+  verifyPartEvidence(capability.part, second, await listAll(client, id()));
+  assert(first.etag === second.etag, 'Identical retry changed ETag');
+  return 'Same URL and exact bytes sent twice; both receipts match backend evidence';
+});
 bind('resume', () => transfer(false));
 bind('list', async () => {
   const observed = await listAll(client, id());
@@ -182,6 +203,15 @@ bind('refresh-url', async () => {
   retained = { ...after, sessionId: id() };
   return `Registration retained; URL deadline=${after.upload.expiresAt}`;
 });
+bind('retained-valid', async () => {
+  assert(retained && retained.sessionId === id(), 'Retain a URL with refresh first');
+  await read();
+  assert(session.state === 'OPEN' && Date.now() < Date.parse(retained.upload.expiresAt), 'OPEN and unexpired URL required');
+  const wire = await uploadPart(retained.upload, await bytesFor(retained.part), config.garageOrigin);
+  verifyPartEvidence(retained.part, wire, await listAll(client, id()));
+  retained.validated = true;
+  return 'Exact retained URL accepted before expiry; backend evidence matches';
+});
 bind('negative', async () => {
   const capability = await firstCapability();
   for (const tamper of ['signature', 'checksum', 'missing-checksum', 'body', 'length']) {
@@ -191,12 +221,13 @@ bind('negative', async () => {
   }
 });
 bind('expired-url', async () => {
-  assert(retained && retained.sessionId === id(), 'Retain a URL with refresh first');
+  assert(retained?.validated && retained.sessionId === id(), 'Validate the retained URL before expiry first');
   assert(Date.now() > Date.parse(retained.upload.expiresAt) + 5000, 'Wait until URL deadline plus clock tolerance');
   await read();
+  assert(session.state === 'OPEN' && Date.now() < Date.parse(session.expiresAt), 'Keep session OPEN and unexpired for URL expiry probe');
   const wire = await uploadPart(retained.upload, await bytesFor(retained.part), config.garageOrigin);
-  assert(wire.status === 403, 'Native expired URL must fail; do not override signing clocks');
-  return 'Retained native production signature rejected after expiry';
+  assert([400, 403].includes(wire.status), 'Native expired URL must fail; do not override signing clocks');
+  return `Retained native production signature rejected after expiry; HTTP ${wire.status}; inspect provider error privately`;
 });
 bind('complete', async () => {
   const result = await once('complete', () => client.api(path('/complete'), { method: 'POST' }));

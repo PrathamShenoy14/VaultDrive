@@ -1,5 +1,21 @@
 # Implementation learnings
 
+## Browser evidence needs both transport and authoritative part evidence
+
+A mocked fetch can establish that client code omits credentials and forbidden
+headers, but cannot establish browser CORS, TLS trust or actual request framing.
+Compare the exact browser-visible opaque ETag, checksum and size with the backend's
+own ListParts observation before declaring a transfer verified. Preserve quotes;
+ETag is not a whole-file hash. Completion still freezes its own authoritative
+manifest and accepts no browser-supplied replacement evidence.
+
+Native expiry needs a successful control using the same retained URL before its
+deadline, an OPEN unexpired session afterward and inspection of the actual provider
+error. Garage's earlier native-expiry result was 400, so assuming AWS-style 403 can
+misclassify the experiment. CORS/network failure establishes no storage rejection.
+Aligned time samples and NTP-enabled status do not establish a sustained skew bound.
+See the [blocked browser recheck and continuation procedure](browser-multipart-verification-2026-10-23.md).
+
 ## Empty bytes still need positive storage evidence
 
 Zero logical length does not establish that an allocated object exists, that a

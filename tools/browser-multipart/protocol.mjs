@@ -165,3 +165,14 @@ export function missingParts(expected, observed) {
   }
   return expected.filter(part => !seen.has(part.partNumber));
 }
+
+// Compare the browser's opaque response evidence with the backend's own ListParts
+// observation. Never strip ETag quotes or treat an ETag as a whole-file digest.
+export function verifyPartEvidence(part, wire, observed) {
+  const matches = observed.filter(value => value.partNumber === part.partNumber);
+  if (wire.status !== 200 || !wire.etag || wire.checksum !== part.sha256
+      || matches.length !== 1 || matches[0].etag !== wire.etag
+      || matches[0].sha256 !== part.sha256 || matches[0].size !== part.length) {
+    throw new Error('Browser/backend part evidence mismatch');
+  }
+}

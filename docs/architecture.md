@@ -138,6 +138,14 @@ POST `/api/v1/upload-sessions` is the nonempty-file admission. It atomically res
 
 Only a newly committed initiation permission permits CreateMultipartUpload. OPEN requires the retained exact upload ID. Per-part length/SHA-256 is immutable; only UploadPart is presigned, for bounded lifetimes/batches. Resume uses bounded authoritative ListParts pages. Fresh actor/ancestry authorization gates admissions and responses. Revocation cannot recall existing URLs.
 
+The [2026-10-23 browser recheck](browser-multipart-verification-2026-10-23.md)
+confirmed HTTP-only Garage and denied origin preflight, with no connected browser.
+The harness now compares browser part receipts exactly with backend ListParts and
+provides explicit identical retry and before/after native-expiry controls. Node
+and backend results remain separate evidence; live browser/TLS/CORS release and
+monitored clock bounds are still open. Downloads remain authenticated backend
+streams; no presigned GET or browser-to-Garage control-plane CORS is required.
+
 Completion freezes one authoritative manifest and dispatch identity, commits strict positive object evidence in a separate immutable receipt, then performs fresh READY CAS. Recovery uses that receipt or strict checksum/metadata evidence for the original dispatcher. Unknown Create/Complete/Abort never grants redispatch. Cancel/expiry records mutually exclusive abandonment and releases eligible names via FAILED; abort acknowledgement never proves physical reclamation.
 
 Historical SERVER_PUT allocations, receipts, migrations and targets remain. Read-only inventory, verified never-admitted expiry, receipt-only READY recovery, restricted receipt-backed FAILED cleanup and historical SUCCEEDED purge recovery remain explicit internal operations. Missing receipts/unknown bindings are not backfilled from current settings or negative observations. ADR-0016 adds narrowly scoped zero-byte SERVER_PUT admission, one PUT dispatch and positively verified V25 receipts; general synchronous stream upload remains retired.
