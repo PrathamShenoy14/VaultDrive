@@ -1,5 +1,12 @@
 # Durable background jobs (Phase 2A)
 
+Current operational extension: V45 and [ADR-0015](decisions/0015-mvp-operational-hardening.md)
+allow only an audited exact FAILED job to receive 1..10 additional failures, capped
+at 1,000. Attempts, failures, checkpoints and all original identities/receipts stay
+monotonic. No live lease is stolen or uncertain storage dispatch reassigned.
+Historical immutable-maximum/no-reset-tool statements below predate this bounded
+exception. See [operator procedure](operational-hardening.md#safe-operator-inspection-and-replay).
+
 Current API update: [MVP API contract consistency](api-contract.md) supersedes
 historical capability, folder/Trash pagination, deletion-polling and error-envelope
 descriptions below. Storage, authorization and worker protocols are unchanged.

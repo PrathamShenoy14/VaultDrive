@@ -1,6 +1,6 @@
 # VaultDrive architecture
 
-Last reconciled with the repository on 2026-10-22. This is the current implementation map. Earlier phase records and ADR extensions preserve history; their original boundaries are not the current inventory.
+Last reconciled with the repository on 2026-10-23. This is the current implementation map. Earlier phase records and ADR extensions preserve history; their original boundaries are not the current inventory.
 
 ## System and responsibility boundaries
 
@@ -32,7 +32,7 @@ The [consolidation audit](backend-consolidation.md) records removals, retained h
 
 ## Persistence and schema
 
-Flyway V1-V44 is append-only; Hibernate validates the schema. JPA manages users, folders, files, immutable outbox writes and short job/outbox entity transactions. Native EntityManager SQL implements PostgreSQL recursive authorization, scalar evidence reads, row locks, claims and conditional transitions. JdbcTemplate manages authentication sessions/revocations without a parallel JPA entity model. All use the configured datasource/transaction manager.
+Flyway V1-V45 is append-only; Hibernate validates the schema. JPA manages users, folders, files, immutable outbox writes and short job/outbox entity transactions. Native EntityManager SQL implements PostgreSQL recursive authorization, scalar evidence reads, row locks, claims and conditional transitions. JdbcTemplate manages authentication sessions/revocations without a parallel JPA entity model. All use the configured datasource/transaction manager.
 
 Services own transactions and `spring.jpa.open-in-view=false` remains required. SQL stays in its existing responsibility's transaction service or access repository. A blanket JPA/JDBC conversion would obscure locking and atomicity. Managed mutation targets are refreshed where required; status/version bulk CAS flushes/clears the context. Scalar worker reads avoid stale managed state; independent job/outbox transactions bound cache lifetime. Never save an older entity after native SQL changed that row.
 
@@ -193,6 +193,39 @@ Workers reserve bounded capacity before claims, renew live leases, check cancell
 READY multipart deletion requires original completion evidence/binding. Unfinished folder members use logical-discard receipts and retain possible storage effects. Folder FINALIZED does not assert reclamation of discarded effects. Garage deletion relies on trusted writers and permanent key nonreuse; leases cannot fence external effects.
 
 Publisher, purge consumer, permission consumer, worker and missing-job reconciler are independently disabled by default. Reconciliation inserts only aged-PUBLISHED, unquarantined matching intent/target/run work; it never resets jobs/proofs. See [ADR-0008](decisions/0008-transactional-outbox-rabbitmq.md), [file purge](file-purge.md), [folder purge](folder-purge-design.md), [M5](multipart-purge-compatibility.md) and [missing-job recovery](missing-job-reconciliation.md).
+
+## MVP operational hardening
+
+Four constant-memory process-wide token buckets/semaphores bound authentication,
+multipart control/signing, authenticated download lifetimes and metadata/search/
+copy work before bearer database checks. Rejection returns common 429/no-store/
+Retry-After: 1. A fixed async executor and cancellation-aware stream lease retain
+capacity until actual streaming exits and close callbacks that never start.
+Partial SDK streams abort instead of draining. Public links keep their separate
+synchronous admission. Fleet fairness/rate limiting requires the deployment edge.
+
+Independently opt-in logical multipart expiry and historical SUCCEEDED standalone
+purge finalization process one bounded keyset page per fixed-delay tick. They use
+existing durable protocols and lock order and perform no storage I/O. Restarts and
+duplicate sweeps retain decisions/receipts; expiry grants no Abort or reclamation.
+All seven processors and probes remain off locally. The deployment profile requires
+their explicit enablement, bounded servlet/database resources and validated settings
+before any runtime bean starts. Original publication/ingestion/worker fences remain.
+
+Public liveness stays process-only. Cached public readiness reports UP/DOWN without
+dependency details; sanitized local logs expose PostgreSQL/Garage/Rabbit health,
+both required consumers, worker/control-loop freshness, admission totals and capped
+stalled/exhausted/quarantined/pending-recovery observations. A stale probe fails
+closed. Logical-expiry storage uncertainty remains visible without physical proof.
+
+The nonweb operator profile disables migrations and every processor. Exact retained
+FAILED/PUBLISHED source replay uses normal strict ingestion and keeps the original
+event UUID, publication/quarantine history and notification read state. V45 retains
+incident audit and permits only an audited 1..10-failure extension of an exact
+exhausted job (total cap 1,000), preserving counters/checkpoints/receipts. It changes
+no resource-lock order or uncertain storage dispatch authority. See
+[ADR-0015](decisions/0015-mvp-operational-hardening.md),
+[deployment/recovery/monitoring and launch gates](operational-hardening.md).
 
 ## Test evidence
 
@@ -537,6 +570,81 @@ automatic notification reconciliation remain deferred. Processing defaults stay
 disabled; no shared metadata, old migration, VM or broker/storage configuration
 was changed. Quota notifications stop at this milestone.
 
+### MVP operational hardening verification
+
+Executed on 2026-10-23 against PostgreSQL 17.11, read-only attested Garage 2.3.0
+and RabbitMQ 4.3.6. The VM was initially unavailable; verification resumed after
+the user started it. No VM, bucket, broker policy, shared metadata, migration
+checksum or credential was changed. An initial default-schema check encountered
+the already documented V26 checksum drift; subsequent runs used fresh schemas,
+without repairing shared history.
+
+Expanded lifecycle/worker/recovery/Garage/RabbitMQ selection: **229 passed**.
+Correction selection: **63 passed**. Final policy/operator/audit/readiness selection,
+including live dependencies: **23 passed**. All had zero failures/errors/skips.
+The first full run caught an overly restrictive reconciler filter: unknown source
+types must remain visible as blocked. The final query excludes only the known
+permission/quota notification routes, with a new parameterized regression.
+
+Final full backend suite: **1,554 tests, 1,534 passed, 20 skipped, zero failures
+or errors**, completed at 11:21:28 UTC. Default contexts used only
+`vaultdrive_test.hardening_release_41b1239513aa4649a0172f0e33138bb7`; suites with
+their own UUID schemas retained that isolation. This includes all **36** new
+operational cases, **15** isolated RabbitMQ/readiness cases, **27** enabled Garage
+multipart cases, all **six** live copy cases and continuous HTTP/outbox/broker/job/
+Garage purge verification. Both continuous intents reported initialDueAligned=false.
+
+Coverage includes concurrent admission, monotonic token refill, synchronous errors,
+queued/running cancellation, completed streams and unchecked close failure;
+expiry/finalization restart and existing expiry/decision races; required-processor
+startup guards before runtime initialization; dependency/consumer/worker/stale
+readiness; retained business recovery alerts that keep client recovery reachable;
+stalled recipient ingestion observations; strict duplicate replay/read-state
+preservation; audited budget rollback, monotonic counters/checkpoints, competing
+operators and old-token rejection. A live readiness case stops only its own
+consumer and probes an unreachable local broker port; no shared broker is stopped.
+
+Packaging initially lacked cached Maven jar-plugin POM/dependencies. Resolving
+those standard Maven Central artifacts required no repository dependency change;
+`mvnw.cmd -DskipTests package` then passed. The actual executable jar's nonweb
+operator inspection passed against a fresh empty verification schema with all
+ordinary processing/probe environment switches set true. The operator profile
+kept them disabled, returned zero bounded work counts and exited successfully.
+
+| Separately gated suite | Skipped | Prerequisite deliberately not enabled |
+|---|---:|---|
+| AsyncPurgeProcessRecoveryTest | 1 | ASYNC_PROCESS_TEST and separate process-loss/kill runbook |
+| GarageMultipartCapabilityTest | 18 | GARAGE_MULTIPART_TEST and M0 characterization |
+| GarageMultipartJournalRecoveryTest | 1 | GARAGE_MULTIPART_REVIEWED_RUN and reviewed retained UUID |
+
+No forced process kill, multi-node failure, live browser/TLS/CORS release,
+physical reclamation, backup restoration or production-capacity result is claimed.
+New operational PostgreSQL fixtures stay in private schemas; existing live suites
+dispose only their owned objects/topology and retain uncertainty journals under
+their established protocols. The task-owned loopback AMQP tunnel was closed after
+verification. All 252 checked local documentation file links and the whitespace/
+staged-diff checks passed. No production deployment was performed.
+
+From `backend/`, with the private environment and documented isolated AMQP tunnel:
+
+```powershell
+. .\.env.local.ps1
+$env:RABBITMQ_TEST_VHOST='vaultdrive_outbox_test'
+$env:ASYNC_E2E_TEST='true'
+$env:ASYNC_E2E_ALIGN_INITIAL_DUE='true'
+$env:GARAGE_MULTIPART_TRANSFER_TEST='true'
+$env:GARAGE_MULTIPART_COMPLETION_TEST='true'
+$env:GARAGE_MULTIPART_CANCELLATION_TEST='true'
+$env:GARAGE_MULTIPART_PURGE_TEST='true'
+$env:GARAGE_MULTIPART_VERSION='2.3.0'
+$env:GARAGE_COPY_TEST='true'
+$hardeningSchema='hardening_verify_'+[Guid]::NewGuid().ToString('N')
+.\mvnw.cmd -o test "-Dspring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=$hardeningSchema" "-Dspring.flyway.schemas=$hardeningSchema" "-Dspring.flyway.default-schema=$hardeningSchema"
+.\mvnw.cmd -DskipTests package
+```
+
+See [the operational limits, recovery commands and launch gates](operational-hardening.md).
+
 ## Remaining work
 
-Unknown multipart reclamation, broad historical repair, retention/erasure, zero-byte support, general rate limiting, JWT key evolution, dependency readiness probes, backups/disaster recovery, clients and deployment remain separate. Performance, multi-node failure and capacity targets are unmeasured. No shared checksum repair, old allocation sweep or VM change is part of consolidation. See the [roadmap](development-roadmap.md) and [risk register](backend-consolidation.md#deferred-decisions-and-risks).
+Unknown multipart reclamation, broad historical repair, retention/erasure, zero-byte support, JWT key evolution, restore-tested backups/disaster recovery, clients and actual deployment remain separate. Per-instance admission, dependency/processing readiness and bounded operator recovery are implemented; fleet admission/edge abuse protection, live browser release and production capacity remain launch gates. Performance, multi-node failure and capacity targets are unmeasured. No shared checksum repair, old allocation sweep or VM change is part of consolidation. See the [roadmap](development-roadmap.md) and [risk register](backend-consolidation.md#deferred-decisions-and-risks).

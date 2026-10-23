@@ -85,8 +85,9 @@ public class OutboxPublisherConfiguration {
         }
 
         @Bean
-        Poller outboxPoller(OutboxPublisher publisher, OutboxPublisherProperties properties) {
-            return new Poller(publisher, properties);
+        Poller outboxPoller(OutboxPublisher publisher, OutboxPublisherProperties properties,
+                org.springframework.beans.factory.ObjectProvider<com.vaultdrive.operations.ProcessingSignals> signals) {
+            return new Poller(publisher, properties, signals.getIfAvailable(com.vaultdrive.operations.ProcessingSignals::new));
         }
     }
 
@@ -94,10 +95,15 @@ public class OutboxPublisherConfiguration {
         private static final Logger log = LoggerFactory.getLogger(Poller.class);
         private final OutboxPublisher publisher;
         private final OutboxPublisherProperties properties;
+        private final com.vaultdrive.operations.ProcessingSignals signals;
 
         Poller(OutboxPublisher publisher, OutboxPublisherProperties properties) {
+            this(publisher, properties, new com.vaultdrive.operations.ProcessingSignals());
+        }
+        Poller(OutboxPublisher publisher, OutboxPublisherProperties properties, com.vaultdrive.operations.ProcessingSignals signals) {
             this.publisher = publisher;
             this.properties = properties;
+            this.signals = signals;
         }
 
         @Scheduled(fixedDelayString = "${vaultdrive.outbox.publisher.poll-delay:5s}")
@@ -108,6 +114,7 @@ public class OutboxPublisherConfiguration {
                         break;
                     }
                 }
+                signals.success("publisher");
             } catch (RuntimeException exception) {
                 // Neither connection URLs nor exception messages/stack traces
                 // are logged; a committed claim remains recoverable.

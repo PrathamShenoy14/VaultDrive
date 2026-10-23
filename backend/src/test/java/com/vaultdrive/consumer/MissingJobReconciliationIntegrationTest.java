@@ -338,8 +338,11 @@ class MissingJobReconciliationIntegrationTest {
         assertThat(repository.count()).isZero();
     }
 
-    @Test void permissionActivityIsExcludedFromPurgeRecoveryBeforePagination() {
+    @ParameterizedTest
+    @ValueSource(strings = {"PERMISSION_ACTIVITY_RECORDED", "STORAGE_QUOTA_THRESHOLD_CROSSED"})
+    void notificationRoutesAreExcludedFromPurgeRecoveryBeforePagination(String type) {
         var event = remember(outbox.saveAndFlush(OutboxEvent.permissionActivityRecorded(UUID.randomUUID(), java.time.Instant.now())));
+        if (!type.equals("PERMISSION_ACTIVITY_RECORDED")) update(event, "outbox_events", "event_type='" + type + "'");
         publish(event);
         assertThat(recovery.scan(null, 1)).isEmpty();
         assertThat(recovery.ingest(event.getId())).isEqualTo(MissingJobReconciliationTransactions.Outcome.SKIPPED);

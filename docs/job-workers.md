@@ -1,5 +1,11 @@
 # Durable job worker foundation (Phase 2C)
 
+Operational extension: [MVP hardening](operational-hardening.md) requires worker
+and control-loop freshness in deployment readiness, adds independent database-only
+SUCCEEDED-file finalization and logical multipart expiry pollers, and provides
+audited bounded FAILED-job budget extension. Worker capacity, lease fencing,
+checkpoints, cancellation and receipt/storage safeguards below remain unchanged.
+
 The opt-in worker schedules existing PostgreSQL jobs and dispatches registered
 `JobHandler` implementations. Phase 2D.1 now registers a real
 [file byte-purge handler](file-purge.md), with immutable targets and the accepted

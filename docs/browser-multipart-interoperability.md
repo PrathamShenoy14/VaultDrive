@@ -1,5 +1,12 @@
 # Browser multipart interoperability
 
+Operational extension: [MVP hardening](operational-hardening.md) now provides an
+independently opt-in bounded expiry scheduler and admission/429/retry contract.
+The harness's original no-scheduler boundary below remains historical. For a
+separate reviewed operational check, expiry may use the scheduler instead of
+explicit internal pages; it remains database-only and never dispatches Abort.
+No browser scenario or HTTPS/CORS/clock gate is closed by backend hardening.
+
 Implemented: a bounded, dependency-free browser harness, local HTTPS/API proxy,
 exact-origin Garage CORS template and executable protocol/transport checks.
 **Live browser interoperability remains unverified.** No browser surface was

@@ -31,12 +31,14 @@ public class FilePurgeRecoveryService {
                 LEFT JOIN file_purge_work w ON w.file_id = t.file_id
                 WHERE j.job_type = 'FILE_PURGE' AND j.aggregate_type = 'FILE' AND j.status = 'SUCCEEDED'
                     AND w.metadata_finalized_at IS NULL
-                """ + cursor + " ORDER BY j.id LIMIT :limit").setParameter("limit", limit);
+                """ + cursor + " ORDER BY j.id LIMIT :limit").setParameter("limit", limit)
+                .setHint("jakarta.persistence.query.timeout", 5000);
         if (afterJobId != null) { query.setParameter("after", afterJobId); }
         @SuppressWarnings("unchecked")
         List<UUID> ids = query.getResultList();
         int finalized = 0;
         for (UUID id : ids) {
+            if (Thread.currentThread().isInterrupted()) break;
             try {
                 if (progress.recoverSucceeded(id)) { finalized++; }
             } catch (IllegalStateException blocked) {

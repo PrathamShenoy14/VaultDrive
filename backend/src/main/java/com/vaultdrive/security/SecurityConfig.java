@@ -15,6 +15,7 @@ import org.springframework.security.oauth2.server.resource.web.authentication.Be
 
 @Configuration
 @EnableWebSecurity
+@org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication(type = org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type.SERVLET)
 public class SecurityConfig {
 
     /** Link secrets never become authentication and JWTs confer no authority on this surface. */
@@ -34,7 +35,7 @@ public class SecurityConfig {
     @Bean
     @Order(2)
     public SecurityFilterChain securityFilterChain(
-            HttpSecurity http
+            HttpSecurity http, com.vaultdrive.operations.RequestAdmission admission
     ) throws Exception {
 
         http
@@ -42,6 +43,7 @@ public class SecurityConfig {
                 // Other APIs remain bearer-only.
                 .csrf(csrf -> csrf.disable())
                 .addFilterBefore(new AuthTransportFilter(), BearerTokenAuthenticationFilter.class)
+                .addFilterBefore(new com.vaultdrive.operations.AdmissionFilter(admission), AuthTransportFilter.class)
 
                 // Do not maintain authentication using HTTP sessions.
                 .sessionManagement(session ->
@@ -66,7 +68,7 @@ public class SecurityConfig {
 
                         .requestMatchers(
                                 HttpMethod.GET,
-                                "/api/v1/health"
+                                "/api/v1/health", "/api/v1/health/ready"
                         ).permitAll()
 
                         .anyRequest().authenticated()

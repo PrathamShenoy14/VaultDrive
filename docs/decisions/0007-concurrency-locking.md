@@ -1,5 +1,12 @@
 # ADR-0007: Transaction-scoped hierarchy coordination
 
+Operational hardening retains all existing lock orders. Scheduled logical expiry
+and SUCCEEDED-file finalization reuse their original short resource transactions.
+V45 operator budget extension is job-only: lock exact FAILED job, freshly read
+counters, insert new incident audit, update that job; acquire no later resource
+lock and perform no external I/O. Readiness commits its observation transaction
+before Garage/Rabbit checks. See [ADR-0015](0015-mvp-operational-hardening.md).
+
 V44 quota notifications insert only new immutable source/outbox rows after the
 existing quota accounting row update. OLD/NEW counters and limit are serialized
 by that same row lock; there is no threshold lock table or resource read after

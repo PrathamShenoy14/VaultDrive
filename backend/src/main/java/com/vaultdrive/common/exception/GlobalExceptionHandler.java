@@ -31,6 +31,12 @@ import java.util.stream.Collectors;
 public class GlobalExceptionHandler {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    @ExceptionHandler(org.springframework.core.task.TaskRejectedException.class)
+    public ResponseEntity<ApiError> handleStreamingCapacity(org.springframework.core.task.TaskRejectedException ex) {
+        return ResponseEntity.status(429).header("Retry-After", "1").header("Cache-Control", "no-store")
+                .body(new ApiError(429, "TOO_MANY_REQUESTS", "Request capacity exceeded"));
+    }
+
     @ExceptionHandler({org.springframework.web.servlet.resource.NoResourceFoundException.class,
             org.springframework.web.servlet.NoHandlerFoundException.class})
     public ResponseEntity<ApiError> handleUnknownRoute(Exception ex) {

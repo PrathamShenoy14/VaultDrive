@@ -1,5 +1,12 @@
 # MVP storage quota notifications
 
+Operational extension: [MVP hardening](operational-hardening.md) supplies required
+consumer readiness and bounded audited local replay of the original retained event
+after publication loss/quarantine/code correction. It preserves owner/event
+deduplication and read state. There is still no autonomous notification scanner;
+logical expiry/accounting never establishes physical reclamation. Historical
+statements below about absent replay tooling predate this extension.
+
 V44 adds owner-only in-app alerts for **80%, 90% and 100%** logical charge.
 Charge is `used_bytes + reserved_bytes`, including hidden copy members, Trash
 and pending purge. Uncertain allocations and physical Garage blocks are separate.

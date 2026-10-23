@@ -29,7 +29,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
 import java.util.UUID;
@@ -72,7 +71,7 @@ public class FileController {
     @GetMapping("/{fileId}/download")
     public ResponseEntity<StreamingResponseBody> downloadFile(
             @AuthenticationPrincipal Jwt jwt,
-            @PathVariable UUID fileId
+            @PathVariable UUID fileId, jakarta.servlet.http.HttpServletRequest request
     ) {
         UUID ownerId =
                 UUID.fromString(jwt.getSubject());
@@ -83,14 +82,7 @@ public class FileController {
                         fileId
                 );
 
-        StreamingResponseBody responseBody =
-                outputStream -> {
-                    try (InputStream inputStream =
-                                 download.inputStream()) {
-
-                        inputStream.transferTo(outputStream);
-                    }
-                };
+        StreamingResponseBody responseBody = com.vaultdrive.operations.AdmissionLease.streaming(request, download.inputStream());
 
         ContentDisposition contentDisposition =
                 ContentDisposition

@@ -39,6 +39,13 @@ public final class JobWorker implements AutoCloseable {
     private final AtomicBoolean polling = new AtomicBoolean();
     private final LongSupplier nanoTime;
     private int nextType;
+    private volatile long lastPoll;
+
+    public boolean operational(java.time.Duration maximumAge) {
+        return started.get() && accepting.get() && poller.isAlive() && monitor.isAlive()
+                && lastPoll != 0 && nanoTime.getAsLong() - lastPoll <= maximumAge.toNanos()
+                && active.values().stream().allMatch(task -> task.context.isActive());
+    }
 
     public JobWorker(BackgroundJobService jobs, List<JobHandler> handlers, JobWorkerProperties properties) {
         this(jobs, handlers, properties, System::nanoTime);
@@ -105,6 +112,7 @@ public final class JobWorker implements AutoCloseable {
                     if (!handedOff) { slots.release(); }
                 }
             }
+            lastPoll = nanoTime.getAsLong();
         } catch (RuntimeException exception) {
             log.warn("Job worker polling paused: DATABASE_OR_DISPATCH_FAILURE");
         } finally {

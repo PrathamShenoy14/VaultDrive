@@ -1,5 +1,38 @@
 # MVP API contract consistency
 
+## Operational admission and health (2026-10-23)
+
+Authentication, multipart control (including creation/signing), authenticated
+downloads and metadata/search/copy each have independent bounded per-process rate
+and concurrency admission. Rejections occur before business work and can precede
+authentication/authorization errors. They return 429, `Cache-Control: no-store`,
+`Retry-After: 1` and
+`{"status":429,"error":"TOO_MANY_REQUESTS","message":"Request capacity exceeded"}`.
+Public links retain their separate limits and message with the same envelope and
+headers. The retry hint is a minimum delay, not guaranteed admission. A received
+429 is safe to retry after backoff; reuse original idempotency keys. Lost responses,
+202/503 and refresh rotation retain their protocol-specific uncertainty rules;
+never automatically repeat uncertain Create/Complete/Abort/Copy or refresh.
+
+Download capacity covers storage opening through actual stream exit, including
+client errors. Cancellation/timeout closes queued/running storage streams; a
+running callback retains its slot until it returns. Already admitted downloads may
+finish after revocation. The bounded async stream timeout is five minutes.
+Limits/defaults and edge prerequisites are in [the operational policy](operational-hardening.md#admission-and-retry-contract).
+
+Public GET `/api/v1/health` remains process liveness with 200 UP. New public GET
+`/api/v1/health/ready` returns no-store and
+`{"status":"UP"|"DOWN","service":"vaultdrive-api"}`, status 200 or 503.
+It reads only a cached dependency/processing snapshot; disabled/uninitialized/stale
+probes fail closed. No dependency names, resource details or counts are public.
+Readiness does not establish physical reclamation or browser release.
+
+There is no HTTP administrator endpoint. Bounded local operator replay/budget
+extension preserves retained identities and does not authorize new storage calls.
+Deletion polling may move from FAILED back to PROCESSING after an audited job
+budget extension; original operation UUID and completion-evidence precedence remain.
+See [operator procedures](operational-hardening.md#safe-operator-inspection-and-replay).
+
 ## Storage quota notifications (2026-10-22)
 
 The existing authenticated `/api/v1/notifications` list, `/unread-count` and
@@ -392,7 +425,7 @@ methods, avoiding an existence/token oracle.
 | 409 | CONFLICT; namespace, optimistic write or retained multipart decision conflict |
 | 412 / 428 | PRECONDITION_FAILED / PRECONDITION_REQUIRED; stale/missing grant If-Match |
 | 415 | UNSUPPORTED_MEDIA_TYPE |
-| 429 | TOO_MANY_REQUESTS; bounded public-link admission; Retry-After: 1 |
+| 429 | TOO_MANY_REQUESTS; bounded authentication/multipart/download/metadata or public-link admission; Retry-After: 1 |
 | 500 | INTERNAL_SERVER_ERROR; sanitized unexpected/database failure |
 | 502 / 503 | BAD_GATEWAY / SERVICE_UNAVAILABLE; authenticated/public download open failure / unavailable dependency or bounded database timeout |
 

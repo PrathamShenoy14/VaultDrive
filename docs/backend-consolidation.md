@@ -1,5 +1,12 @@
 # Full backend code and architecture consolidation
 
+Current operational extension: [MVP hardening](operational-hardening.md) implements
+per-instance admission, dependency/worker readiness, bounded logical expiry and
+receipt-backed finalization, deployment safeguards and audited operator recovery.
+V45 adds the audit/guard extension; this historical consolidation inventory and its
+deferred general-admission/readiness statements describe the earlier milestone.
+Physical reclamation, browser, retention, backups and actual deployment remain gated.
+
 Current API update: [MVP API contract consistency](api-contract.md) supersedes
 historical capability, folder/Trash pagination, deletion-polling and error-envelope
 descriptions below. Storage, authorization and worker protocols are unchanged.

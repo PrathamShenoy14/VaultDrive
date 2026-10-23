@@ -1,5 +1,22 @@
 # Development roadmap
 
+## MVP Operational Hardening (implemented)
+
+- [x] Fixed-memory per-process rate/concurrency admission for authentication,
+  multipart control/signing, authenticated streams and metadata/search/copy.
+- [x] Common 429/retry guidance and permit/stream release on completion/error/cancellation.
+- [x] Independent bounded logical multipart expiry and retained SUCCEEDED-file finalization pollers.
+- [x] Explicit deployment profile requiring all necessary processors, bounded resources and early startup validation; local autonomous defaults remain disabled.
+- [x] Cached PostgreSQL/Garage/RabbitMQ/consumer/worker readiness, capped durable-work signals and admission monitoring.
+- [x] Nonweb bounded operator inspection/replay and V45 audited finite exhausted-job budget extensions without resetting evidence/counters.
+- [x] Isolated PostgreSQL/API/concurrency, worker restart, RabbitMQ and Garage regressions; see executed results below.
+- [x] [Limits, alert conditions, deployment prerequisites, recovery and launch blockers](operational-hardening.md), [ADR-0015](decisions/0015-mvp-operational-hardening.md).
+
+Execution evidence is in [architecture](architecture.md#mvp-operational-hardening-verification).
+Stop here: no frontend, zero-byte support, physical uncertain-byte reclamation,
+retention redesign or actual shared-infrastructure deployment. Live browser/TLS/CORS,
+clock/edge assurance, backup restoration and capacity measurement remain launch gates.
+
 This roadmap separates repository evidence from future intent. Ordering can change after measurement or design review; unchecked items are not implemented.
 
 ## Full backend code and architecture consolidation (completed)

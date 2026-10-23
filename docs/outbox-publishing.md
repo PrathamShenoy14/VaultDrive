@@ -1,5 +1,12 @@
 # Outbox publishing development and recovery (Phase 1C)
 
+Operational extension: [MVP hardening](operational-hardening.md) adds readiness and
+audited local strict ingestion of original retained FAILED/PUBLISHED events.
+This is the supplied recovery tool for corrected quarantine/broker-loss/exhaustion;
+it does not claim a broker confirm or reset publication counters. Prefer that
+documented procedure over the historical illustrative counter-reset SQL below.
+No automatic replay, uncertain storage dispatch or payload repair is introduced.
+
 Current quota extension: `STORAGE_QUOTA_THRESHOLD_CROSSED` v1 routes through the
 existing permission queue/key and consumer, alongside permission activity.
 Its `STORAGE_QUOTA_EVENT` aggregate UUID equals event UUID and payload is the

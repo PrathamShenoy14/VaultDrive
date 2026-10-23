@@ -18,8 +18,9 @@ public class MissingJobReconciliationConfiguration {
     @ConditionalOnProperty(name = "vaultdrive.jobs.reconciliation.enabled", havingValue = "true")
     static class RuntimeConfiguration {
         @Bean(initMethod = "start", destroyMethod = "close")
-        Poller missingJobPoller(MissingJobReconciler reconciler, MissingJobReconciliationProperties properties) {
-            return new Poller(reconciler, properties);
+        Poller missingJobPoller(MissingJobReconciler reconciler, MissingJobReconciliationProperties properties,
+                org.springframework.beans.factory.ObjectProvider<com.vaultdrive.operations.ProcessingSignals> signals) {
+            return new Poller(reconciler, properties, signals.getIfAvailable(com.vaultdrive.operations.ProcessingSignals::new));
         }
     }
 
@@ -27,6 +28,7 @@ public class MissingJobReconciliationConfiguration {
         private static final Logger log = LoggerFactory.getLogger(Poller.class);
         private final MissingJobReconciler reconciler;
         private final MissingJobReconciliationProperties properties;
+        private final com.vaultdrive.operations.ProcessingSignals signals;
         private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(task -> {
             Thread thread = new Thread(task, "missing-job-reconciliation");
             thread.setDaemon(true);
@@ -35,8 +37,13 @@ public class MissingJobReconciliationConfiguration {
         private MissingJobReconciliationTransactions.Cursor cursor;
 
         Poller(MissingJobReconciler reconciler, MissingJobReconciliationProperties properties) {
+            this(reconciler, properties, new com.vaultdrive.operations.ProcessingSignals());
+        }
+        Poller(MissingJobReconciler reconciler, MissingJobReconciliationProperties properties,
+                com.vaultdrive.operations.ProcessingSignals signals) {
             this.reconciler = reconciler;
             this.properties = properties;
+            this.signals = signals;
         }
 
         public void start() {
@@ -48,6 +55,7 @@ public class MissingJobReconciliationConfiguration {
             try {
                 var page = reconciler.reconcilePage(cursor);
                 cursor = page.nextCursor();
+                if (!page.scanFailed() && page.failed() == 0) signals.success("reconciliation");
                 log.info("Missing-job reconciliation scanned={} created={} alreadyPresent={} skipped={} failed={} scanFailed={}",
                         page.scanned(), page.created(), page.alreadyPresent(), page.skipped(), page.failed(), page.scanFailed());
             } catch (RuntimeException failure) {

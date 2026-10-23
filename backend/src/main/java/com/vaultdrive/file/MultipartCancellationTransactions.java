@@ -56,6 +56,8 @@ public class MultipartCancellationTransactions {
     }
 
     public Expiry expire(Candidate c) {
+        em.createNativeQuery("SET LOCAL statement_timeout = '5s'").executeUpdate();
+        em.createNativeQuery("SET LOCAL lock_timeout = '2s'").executeUpdate();
         Session s = sessions.lockForEvidence(c.owner(), c.id());
         if (s.decisionId() != null) { return new Expiry(s.id(), "SKIPPED", "DECISION_EXISTS"); }
         if (!(Boolean) em.createNativeQuery("SELECT expires_at <= clock_timestamp() FROM upload_sessions WHERE id = :id")

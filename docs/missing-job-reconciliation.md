@@ -103,6 +103,12 @@ text, raw payload, key, endpoint, owner, token or credential enters these logs.
 
 ## Operator recovery
 
+The [operational hardening runbook](operational-hardening.md) now requires this
+poller in the deployment profile, observes its freshness/backlog and supplies
+audited exact-source replay for reviewed quarantine or exhausted publication.
+The scanner's conservative age/intent/quarantine gates below remain unchanged;
+it still never rearms terminal work or performs storage I/O.
+
 Keep workers disabled while investigating the missing-job gap. Privately inspect
 the intended database, outbox publication age, same-UUID job and quarantine. Enable
 only MISSING_JOB_RECONCILIATION_ENABLED in private configuration after reviewing

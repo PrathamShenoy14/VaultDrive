@@ -1,5 +1,30 @@
 # Implementation learnings
 
+## Admission, readiness and recovery have different authority
+
+A request token bounds arrival rate; a semaphore bounds admitted lifetime. A
+download needs both, and async cancellation is not proof that its executing thread
+has stopped. Hold capacity until actual callback exit, close queued input streams,
+abort partial SDK responses rather than draining them, and bound the executor.
+Constant-memory process limits avoid attacker-created key maps but cannot provide
+tenant fairness or fleet-wide abuse protection without the deployment edge.
+
+Readiness can observe a dependency or stalled worker without acquiring business
+authority. Cache bounded probes, expire stale observations, keep dependency details
+private, and commit database observations before external I/O. A successful logical
+expiry poll says nothing about Garage reclamation. Early configuration validation
+must run before init methods start workers; checking after singleton creation is
+too late to prevent consumption against an inconsistent deployment.
+
+Operator recovery must preserve the same durable identities as normal retry.
+Replaying the retained source through strict ingestion preserves recipient/job
+deduplication and read state without fabricating a broker acknowledgement. An
+exhausted job can receive a new finite, audited failure tranche while attempts,
+failures and useful checkpoints stay monotonic. Database guards and concurrent
+operator tests make that exception explicit; resetting counters would hide the
+incident. Neither replay nor a larger budget grants new Create/Complete/Abort/Copy
+permission or repairs missing storage evidence.
+
 This is a living explanation of lessons demonstrated by committed VaultDrive code. It is not a claim that every production concern is solved.
 
 ## Copy can safely finish later without repeating its write

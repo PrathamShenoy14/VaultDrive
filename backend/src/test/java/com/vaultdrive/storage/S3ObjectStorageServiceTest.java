@@ -26,6 +26,28 @@ class S3ObjectStorageServiceTest {
 
     @BeforeEach void setup() { storage = new S3ObjectStorageService(client, properties, binding, org.mockito.Mockito.mock(software.amazon.awssdk.services.s3.presigner.S3Presigner.class)); }
 
+    @Test void availabilityUsesOnlyBoundedHeadBucketOutsideTransactions() {
+        storage.checkAvailability();
+        var capture=org.mockito.ArgumentCaptor.forClass(software.amazon.awssdk.services.s3.model.HeadBucketRequest.class);
+        verify(client).headBucket(capture.capture());
+        assertThat(capture.getValue().bucket()).isEqualTo("fixture-bucket");
+        assertThat(capture.getValue().overrideConfiguration().orElseThrow().apiCallTimeout()).contains(S3ObjectStorageService.DELETE_TIMEOUT);
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        try{assertThatThrownBy(storage::checkAvailability).isInstanceOf(IllegalStateException.class);}
+        finally{TransactionSynchronizationManager.setActualTransactionActive(false);}
+        verifyNoMoreInteractions(client);
+    }
+    @Test void interruptedDownloadAbortsButCompletedDownloadClosesNormally() throws Exception {
+        for(boolean complete:new boolean[]{false,true}){
+            @SuppressWarnings("unchecked") software.amazon.awssdk.core.ResponseInputStream<software.amazon.awssdk.services.s3.model.GetObjectResponse> stream=mock(software.amazon.awssdk.core.ResponseInputStream.class);
+            when(stream.read(any(byte[].class),anyInt(),anyInt())).thenReturn(-1);
+            when(client.getObject(any(software.amazon.awssdk.services.s3.model.GetObjectRequest.class))).thenReturn(stream);
+            try(var input=storage.download("fixture").inputStream()){if(complete)assertThat(input.read(new byte[1])).isEqualTo(-1);}
+            if(complete){verify(stream).close();verify(stream,never()).abort();}
+            else{verify(stream).abort();verify(stream,never()).close();}
+        }
+    }
+
     @Test void deleteUsesExactTargetWithBoundedRequestTimeouts() {
         StorageTarget target = binding.target("fixture-key");
         storage.delete(target);

@@ -8,7 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 
-/** Explicit bounded operations only. No retries, absence probes, object deletion or scheduler. */
+/** Bounded operations. Expiry is database-only; storage control dispatch is never retried. */
 @Service
 @Transactional(propagation = Propagation.NEVER)
 public class MultipartCancellationService {
@@ -61,9 +61,11 @@ public class MultipartCancellationService {
         List<Candidate> page = transactions.candidates(after, limit);
         var results = new ArrayList<Expiry>();
         for (Candidate c : page) {
+            if (Thread.currentThread().isInterrupted()) break;
             try { results.add(transactions.expire(c)); }
             catch (RuntimeException unavailable) { results.add(new Expiry(c.id(), "BLOCKED", "DATABASE_UNAVAILABLE")); }
         }
-        return new ExpiryPage(List.copyOf(results), page.size() == limit ? page.getLast().id() : null);
+        return new ExpiryPage(List.copyOf(results), results.size() < page.size()
+                ? (results.isEmpty() ? after : results.getLast().id()) : page.size() == limit ? page.getLast().id() : null);
     }
 }

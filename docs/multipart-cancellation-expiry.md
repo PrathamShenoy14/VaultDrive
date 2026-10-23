@@ -1,5 +1,10 @@
 # Multipart cancellation and expiry — M4
 
+Current operational extension: [MVP hardening](operational-hardening.md) adds an
+independently opt-in, fixed-delay bounded logical expiry poller using this existing
+durable protocol. It never dispatches Abort or establishes physical reclamation.
+The original no-scheduler/no-switch statements below describe M4's earlier scope.
+
 Current authorization extension: [Sharing M3](sharing-m3.md) adds owner/initiator
 separation and delegated Editor sessions, superseding owner-only authorization
 statements in this historical milestone record. Storage/lifecycle guarantees remain.

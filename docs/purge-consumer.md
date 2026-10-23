@@ -1,5 +1,11 @@
 # Purge notification consumer (Phase 2B)
 
+Operational extension: [MVP hardening](operational-hardening.md) adds stopped/absent
+consumer readiness and an isolated local bounded replay tool using original retained
+sources and this strict ingestion protocol. The historical no-replay-tool statement
+below predates it. Explicit restart after correction remains required; ACK policy,
+quarantine retention and duplicate job identity remain unchanged.
+
 The consumer transfers existing v1 purge notifications into durable PostgreSQL
 jobs. It never claims or executes a job, changes file/folder metadata, or calls
 Garage. PostgreSQL is authoritative; a RabbitMQ ACK means the notification has

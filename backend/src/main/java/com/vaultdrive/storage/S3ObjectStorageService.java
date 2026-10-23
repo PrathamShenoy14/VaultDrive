@@ -30,6 +30,12 @@ public class S3ObjectStorageService implements ObjectStorageService {
     public static final Duration DELETE_TIMEOUT = Duration.ofSeconds(10);
     public static final Duration DELETE_ATTEMPT_TIMEOUT = Duration.ofSeconds(5);
 
+    @Override public void checkAvailability() {
+        requireNoTransaction();
+        s3Client.headBucket(HeadBucketRequest.builder().bucket(properties.bucket())
+                .overrideConfiguration(c -> c.apiCallTimeout(DELETE_TIMEOUT).apiCallAttemptTimeout(DELETE_ATTEMPT_TIMEOUT)).build());
+    }
+
     @Override
     public CopyStorage.ObjectInfo inspectCopyObject(StorageTarget target) {
         requireNoTransaction();
@@ -185,17 +191,34 @@ public class S3ObjectStorageService implements ObjectStorageService {
 
     @Override
     public StorageObject download(String storageKey) {
+        requireNoTransaction();
 
         GetObjectRequest request =
                 GetObjectRequest.builder()
                         .bucket(properties.bucket())
                         .key(storageKey)
+                        .overrideConfiguration(c -> c.apiCallTimeout(DELETE_TIMEOUT).apiCallAttemptTimeout(DELETE_ATTEMPT_TIMEOUT))
                         .build();
 
         ResponseInputStream<GetObjectResponse> responseStream =
                 s3Client.getObject(request);
 
-        return new StorageObject(responseStream);
+        // Closing a partial Apache SDK response may otherwise drain the remaining object.
+        // Cancellation must abort that transfer, while EOF permits ordinary connection reuse.
+        return new StorageObject(new java.io.FilterInputStream(responseStream) {
+            private final java.util.concurrent.atomic.AtomicBoolean closed = new java.util.concurrent.atomic.AtomicBoolean();
+            private volatile boolean eof;
+            @Override public int read() throws java.io.IOException {
+                int n = super.read(); if (n == -1) eof = true; return n;
+            }
+            @Override public int read(byte[] bytes, int offset, int length) throws java.io.IOException {
+                int n = super.read(bytes, offset, length); if (n == -1) eof = true; return n;
+            }
+            @Override public void close() throws java.io.IOException {
+                if (!closed.compareAndSet(false, true)) return;
+                if (eof) responseStream.close(); else responseStream.abort();
+            }
+        });
     }
 
     @Override

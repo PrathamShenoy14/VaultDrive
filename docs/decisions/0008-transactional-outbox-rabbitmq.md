@@ -1,5 +1,12 @@
 # ADR-0008: Transactional outbox and durable asynchronous jobs
 
+Current operational extension: [ADR-0015](0015-mvp-operational-hardening.md) adds
+explicit deployment/readiness, bounded database-only expiry/finalization and
+operator replay. V45 allows audited bounded FAILED-job maximum increases while
+keeping every attempt/failure/checkpoint monotonic; the original V18 immutable
+maximum is superseded only by that exception. No existing dispatch, receipt,
+consumer ACK or storage-uncertainty guarantee is relaxed.
+
 Current quota extension: [ADR-0014](0014-storage-quota-notifications.md) adds
 `STORAGE_QUOTA_THRESHOLD_CROSSED` v1, aggregate `STORAGE_QUOTA_EVENT` with the same
 UUID as the event and payload `quotaEventId`. The existing permission route,

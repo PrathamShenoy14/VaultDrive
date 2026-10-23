@@ -13,6 +13,11 @@ $env:PURGE_CONSUMER_ENABLED="false"
 $env:SHARING_NOTIFICATIONS_CONSUMER_ENABLED="false"
 $env:JOB_WORKER_ENABLED="false"
 $env:MISSING_JOB_RECONCILIATION_ENABLED="false"
+$env:MULTIPART_EXPIRY_ENABLED="false"
+$env:PURGE_FINALIZATION_ENABLED="false"
+$env:OPERATIONS_PROBES_ENABLED="false"
+# Deployment enables every processor explicitly; see docs/operational-hardening.md.
+# Admission limits use vaultdrive.admission.<lane>.{concurrency,burst,per-second}.
 # Conservative published-event age before missing-job recovery (minimum 1m).
 $env:MISSING_JOB_RECONCILIATION_DELAY="5m"
 # Enable live tests only after isolated test-vhost setup is explicitly approved.

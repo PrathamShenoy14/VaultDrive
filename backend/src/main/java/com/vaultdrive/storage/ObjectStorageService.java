@@ -4,6 +4,8 @@ import java.time.Instant;
 import java.util.UUID;
 
 public interface ObjectStorageService {
+    /** Read-only, bounded bucket access check; never interprets absence as cleanup authority. */
+    void checkAvailability();
 
     CopyStorage.ObjectInfo inspectCopyObject(StorageTarget target);
 
