@@ -87,7 +87,8 @@ cannot authorize profile or any ordinary API. Logout without a valid JWT returns
 401; it is deliberately not a refresh-only logout endpoint. Malformed duplicate
 refresh cookies return 401. Invalid credential errors retain the existing generic
 login response. Session failures use a generic ApiError; missing/malformed CSRF
-admission and forbidden query strings have empty 403/400 responses. Auth-state
+admission and forbidden query strings return the common `{status,error,message}`
+JSON envelope with 403/400, respectively. Auth-state
 transaction/database failures return 503; JWT admission failures return 401.
 Failures issue no replacement or clearing cookie. There is no global-logout API.
 Connection loss during commit can leave an uncertain outcome: a 503 does not

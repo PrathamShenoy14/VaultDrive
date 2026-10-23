@@ -1,5 +1,19 @@
 # Implementation learnings
 
+## An API freeze needs transport and lifecycle evidence
+
+The MVP review exports registered MVC routes and reachable record DTOs, then
+checks representative HTTP bodies against those schemas and detects artifact
+drift. Return types alone cannot establish response status, nullable semantics,
+CSRF/refresh sequencing, owner/initiator authority or safe storage retries; those
+decisions are reviewed metadata and workflow prose backed by integration tests.
+Session decisions, operation progress and logical deletion are distinct state
+machines. Mapping every 200 to completed or every 202 to safely retryable would
+break their recovery guarantees. The same-origin API proxy and Garage PUT CORS
+also solve different browser constraints. A generated contract and passing
+backend tests leave real-browser HTTPS/CORS/clock and physical-reclamation gates
+open. See the [freeze](api-contract-freeze.md) and [frontend guide](frontend-integration.md).
+
 ## Browser evidence needs both transport and authoritative part evidence
 
 A mocked fetch can establish that client code omits credentials and forbidden

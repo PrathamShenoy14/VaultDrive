@@ -2,6 +2,22 @@
 
 Last reconciled with the repository on 2026-10-23. This is the current implementation map. Earlier phase records and ADR extensions preserve history; their original boundaries are not the current inventory.
 
+## MVP API freeze and frontend handoff
+
+The [freeze record](api-contract-freeze.md) covers 73 HTTP operations on 63 paths
+and 61 record schemas. [OpenAPI 3.1 JSON](openapi.json) and the [inventory](api-endpoint-inventory.md)
+are generated in tests from the running MVC registry/DTOs plus reviewed
+security/status/state metadata. Normal tests detect artifact drift; representative
+HTTP bodies are checked against those schemas. No runtime documentation dependency
+or public docs endpoint is added. Unsupported response media has a sanitized 406.
+
+The [Next.js guide](frontend-integration.md) specifies same-origin HTTPS proxying,
+credential/CSRF rotation, redacted navigation, transfer/copy/deletion states and
+explicit recovery. No new endpoint is required for those bounded MVP flows.
+Public-link downloads retain octet-stream MIME, including empty files. Contract
+readiness does not close the [real-browser gate](browser-multipart-verification-2026-10-23.md)
+or operational launch gates. No frontend or infrastructure is implemented.
+
 ## System and responsibility boundaries
 
 VaultDrive is a Java 21 / Spring Boot 4.1.1 backend. PostgreSQL owns searchable metadata, authorization, authentication sessions, lifecycle intent, outbox/jobs and durable evidence. Garage 2.3.0 owns object bytes through `ObjectStorageService`. RabbitMQ carries at-least-once notifications for committed PostgreSQL work. Neither external system shares a metadata transaction.

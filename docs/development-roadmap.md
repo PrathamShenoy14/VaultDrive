@@ -1,5 +1,17 @@
 # Development roadmap
 
+## MVP Backend API Contract Freeze and Frontend Readiness Review
+
+- [x] Review controllers/DTOs, security/filter/advice, services/migrations and representative integration tests against contracts/ADRs.
+- [x] Inventory 73 operations on 63 paths; export 61 schemas in [OpenAPI 3.1](openapi.json) with artifact drift verification.
+- [x] Document same-origin transport, all MVP workflows, errors/pagination/preconditions/idempotency and distinct recovery states in [frontend guidance](frontend-integration.md).
+- [x] Correct unsupported Accept to sanitized 406; reconcile stale auth-error and public-link MIME documentation.
+- [x] Record deliberate deferrals, compatibility policy and [freeze verification](api-contract-freeze.md).
+- [ ] Close real-browser HTTPS/CORS/native-expiry/recovery/clock gate through its separately approved procedure; **unchanged and unresolved**.
+
+Stop at this backend handoff. Next.js implementation, deployment, reclamation,
+retention/erasure and capacity evidence remain separate work.
+
 ## Real-browser multipart interoperability recheck (2026-10-23; blocked)
 
 - [x] Inspect the harness, read-only Garage/network/time configuration and current CORS response.

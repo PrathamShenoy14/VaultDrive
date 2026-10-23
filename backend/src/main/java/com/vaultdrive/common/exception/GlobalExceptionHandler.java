@@ -96,6 +96,12 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(415).body(new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Unsupported media type"));
     }
 
+    @ExceptionHandler(org.springframework.web.HttpMediaTypeNotAcceptableException.class)
+    public ResponseEntity<ApiError> handleAccept(org.springframework.web.HttpMediaTypeNotAcceptableException ex) {
+        return ResponseEntity.status(406).contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .body(new ApiError(406, "NOT_ACCEPTABLE", "Requested response media type is not supported"));
+    }
+
     @ExceptionHandler(OptimisticLockingFailureException.class)
     public ResponseEntity<ApiError> handleOptimisticLockingFailure(
             OptimisticLockingFailureException exception

@@ -1,5 +1,17 @@
 # MVP API contract consistency
 
+## Backend API freeze and frontend handoff (2026-10-23)
+
+The [freeze record](api-contract-freeze.md), [complete endpoint inventory](api-endpoint-inventory.md),
+[generated OpenAPI 3.1 artifact](openapi.json) and [frontend integration guide](frontend-integration.md)
+are the current MVP handoff. They supersede historical milestone exclusions and
+message-only/empty-error descriptions in older feature records. The export covers
+actual Spring MVC routes and Java record DTOs; representative PostgreSQL/HTTP
+checks validate response schemas and contract drift. No public documentation
+endpoint or new runtime dependency is added. Browser deployment requires the
+same-origin HTTPS API proxy; Garage direct-upload CORS is separate. The
+[real-browser gate](browser-multipart-verification-2026-10-23.md) remains open.
+
 ## Zero-byte file creation (2026-10-23)
 
 Authenticated POST `/api/v1/files/empty` requires `Idempotency-Key` (1..128
@@ -35,8 +47,9 @@ or zero-limit accounts may add zero bytes, already-over-limit accounts get 409.
 
 READY requires a real unique-key zero-byte object and independently committed
 positive verification receipt. Existing file and public-link downloads return
-Content-Length: 0, declared/default MIME, normal attachment/security headers and
-an empty body. Rename/move/share/Trash/restore/permanent deletion retain their
+Content-Length: 0, normal attachment/security headers and an empty body.
+Authenticated downloads use declared/default MIME; public-link downloads always
+use application/octet-stream. Rename/move/share/Trash/restore/permanent deletion retain their
 existing permissions and contracts. File and bounded folder copy accept empty
 sources through the normal independent COPY object/receipt path. Multipart
 admission still rejects zero. POST `/api/v1/files` remains retired.
@@ -465,6 +478,7 @@ methods, avoiding an existence/token oracle.
 | 403 | FORBIDDEN; visible resource but insufficient privilege, or invalid CSRF admission |
 | 404 | NOT_FOUND; missing, stranger, lifecycle/ancestry-hidden target; all invalid public links |
 | 405 | METHOD_NOT_ALLOWED; unsupported authenticated method (Allow retained) |
+| 406 | NOT_ACCEPTABLE; unsupported requested response media type, sanitized JSON envelope |
 | 409 | CONFLICT; namespace, optimistic write or retained multipart decision conflict |
 | 412 / 428 | PRECONDITION_FAILED / PRECONDITION_REQUIRED; stale/missing grant If-Match |
 | 415 | UNSUPPORTED_MEDIA_TYPE |

@@ -1,5 +1,10 @@
 # Browser multipart interoperability
 
+The [API freeze](api-contract-freeze.md) and [Next.js integration guide](frontend-integration.md)
+now provide the complete backend handoff and [OpenAPI artifact](openapi.json).
+They preserve this document's same-origin API versus Garage PUT CORS distinction.
+The real-browser HTTPS/CORS/clock gate below remains blocked.
+
 Operational extension: [MVP hardening](operational-hardening.md) now provides an
 independently opt-in bounded expiry scheduler and admission/429/retry contract.
 The harness's original no-scheduler boundary below remains historical. For a
@@ -126,7 +131,7 @@ Keep DevTools header details private while checking cookie flags/framing.
 | Cancellation | In a separate RESERVED session, Cancel once -> CANCELLED without Create. In a separate OPEN session (optionally with an uploaded part), Cancel once -> CANCELLED or explicitly pending. After acknowledgement, initiate/sign -> 409. Read cancellation retains intent; no assertion of reclaimed bytes. Never repeat uncertain Abort. |
 | Session expiry | Reserve a separate session and keep it past its immutable 24-hour PostgreSQL deadline (refresh login separately). Check expired session: read succeeds, new RESERVED initiation/sign/list -> 409. An already OPEN initiate replay can return its retained snapshot without new dispatch. No browser/admin expiry endpoint or shorter production TTL is added. |
 | Expiry processing | After the deadline, a trusted internal caller may explicitly invoke existing `MultipartCancellationService.expire(after, limit)` in bounded pages; it records EXPIRED abandonment/name release without Garage I/O. Then browser read/cancellation can observe it. This is a separate operational check; do not change timestamps or add a scheduler/API for the harness. |
-| Editor upload | Owner supplies an editable shared folder. Editor reserves there; result says delegated=true, initiator is Editor and owner is destination owner. Complete and compare download as Editor, then download as owner using the file UUID from session read/API. No root fallback. |
+| Editor upload | Owner supplies an editable shared folder. Editor reserves there; the harness displays delegated=true by comparing ownerId with the current user (there is no delegated API field). initiatorUserId is Editor and ownerId is destination owner. Complete and compare download as Editor, then download as owner using the file UUID from session read/API. No root fallback. |
 | Revocation | On a separate Editor session, refresh first part URL while OPEN; optionally complete/download before revocation to prove a formerly READY download becomes denied. Then owner revokes its only effective grant using a separate profile. Keep the destination folder field and retained capability. Check revoked admissions -> uniform 404 for read/sign/list/initiate/complete/cancel, new reservation into that folder and authenticated download. Existing presigned part URLs can still be used until expiry; revocation cannot recall them. Owner retains session recovery/cancellation authority. |
 
 Refresh uses one tab-local promise plus origin-wide Web Locks. The CSRF secret is

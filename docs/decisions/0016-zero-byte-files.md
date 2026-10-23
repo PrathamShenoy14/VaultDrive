@@ -59,8 +59,9 @@ COPY and folder-copy member constraints accept zero; all original source checks,
 independent destination allocations, positive COPY receipts, hidden staging and
 atomic publication remain. Copies record COPIED once and copy no grants or links.
 Rename, move, grants, links, Trash and restore reuse existing authorization.
-Downloads GET the real object with Content-Length: 0 and the declared concrete
-MIME (default application/octet-stream).
+Downloads GET the real object with Content-Length: 0. Authenticated downloads use
+the declared concrete MIME (default application/octet-stream); public-link
+downloads retain their fixed application/octet-stream attachment policy.
 
 READY empty deletion reuses exact bound SERVER_PUT DELETE and retained byte and
 metadata receipts; it does not skip storage because logical length is zero.

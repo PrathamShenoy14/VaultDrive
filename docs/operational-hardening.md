@@ -1,5 +1,16 @@
 # MVP operational hardening
 
+## API freeze integration boundary
+
+The [freeze](api-contract-freeze.md) and [frontend guide](frontend-integration.md)
+require a same-origin trusted HTTPS `/api/v1/**` proxy preserving auth/CSRF,
+idempotency/precondition and status/retry/download headers, without mutation
+retries or personalized caching. The backend has no credentialed cross-origin API
+policy; Garage PUT CORS remains separate. OpenAPI is a committed [test-generated
+artifact](openapi.json), not a public HTTP surface. 406 uses the common sanitized
+error envelope and authorizes no storage retry. The [real-browser gate](browser-multipart-verification-2026-10-23.md),
+physical-capacity/retention and other launch requirements below remain open.
+
 ## Zero-byte creation recovery
 
 POST `/api/v1/files/empty` uses bounded metadata admission and the existing
@@ -120,7 +131,7 @@ Before deployment:
 
 1. Retire old API/worker/permission consumer binaries and external uncoordinated
    writers. Back up PostgreSQL and Garage using an approved, restore-tested plan.
-   Migrate V1..V45 without rewriting applied migrations; preserve all original
+   Migrate V1..V46 without rewriting applied migrations; preserve all original
    bindings, allocations, manifests, receipts, outbox, job and quarantine evidence.
    PostgreSQL needs `pg_trgm` in public and sufficient migration privileges.
 2. Provision/verify the already agreed durable direct exchange, both quorum queues
