@@ -103,7 +103,7 @@ describe("M2 read-only BFF boundary (isolated backend)", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
   it.each([
-    `folders/${uuid}/grants`,
+    `folders/${uuid}/notifications`,
     `files/${uuid}/unsupported`,
     `trash/folders/${uuid}/unsupported`,
     "files/not-a-uuid",

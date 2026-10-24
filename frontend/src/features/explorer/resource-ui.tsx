@@ -29,6 +29,7 @@ import { formatBytes } from "@/features/shell/storage";
 import { getMetadata } from "./api";
 import { downloadHref } from "@/features/transfers/download";
 import { useManagement } from "@/features/management/provider";
+import { useSharing } from "@/features/sharing/provider";
 import { actions, labels } from "@/features/management/model";
 import {
   canOpen,
@@ -102,6 +103,7 @@ export function EntryMenu({
   onDetails: () => void;
 }) {
   const management = useManagement();
+  const sharing = useSharing();
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
@@ -153,9 +155,16 @@ export function EntryMenu({
                   Download
                 </DropdownMenuItem>
               )}
-            {entry.resource.allowedCapabilities.includes("MANAGE_GRANTS") && (
-              <DropdownMenuItem disabled>
-                Manage sharing · later milestone
+            {sharing && canRead(entry) && (
+              <DropdownMenuItem
+                onClick={() => {
+                  setOpen(false);
+                  sharing.open(entry);
+                }}
+              >
+                {entry.resource.allowedCapabilities.includes("MANAGE_GRANTS")
+                  ? "Share"
+                  : "Access details"}
               </DropdownMenuItem>
             )}
           </>
@@ -291,9 +300,11 @@ function Metadata({ entry }: { entry: ExplorerEntry }) {
 export function DetailsPanel({
   entry,
   close,
+  revision = 0,
 }: {
   entry: ExplorerEntry | null;
   close: () => void;
+  revision?: number;
 }) {
   const returnFocus = useRef<HTMLElement | null>(null);
   useEffect(() => {
@@ -316,7 +327,7 @@ export function DetailsPanel({
         </SheetDescription>
         {entry && (
           <Metadata
-            key={`${entry.resourceType}:${entry.resource.id}`}
+            key={`${entry.resourceType}:${entry.resource.id}:${revision}`}
             entry={entry}
           />
         )}

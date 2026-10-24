@@ -2,7 +2,7 @@
 
 Last reconciled with the repository on 2026-10-24. This is the current implementation map. Earlier phase records and ADR extensions preserve history; their original boundaries are not the current inventory.
 
-## Frontend M1–M4: authentication, explorer, transfers and management
+## Frontend M1–M5: authentication, explorer, transfers, management and sharing
 
 `frontend/` is an independently buildable Next.js App Router/strict TypeScript app
 with Tailwind, shadcn Base UI, Lucide and next-themes. Server Components guard
@@ -17,8 +17,11 @@ completion/cancellation/empty recovery. File menus and selection offer streaming
 authenticated downloads. M4 adds folder creation, rename/move, Trash/restore,
 permanent-deletion status and owner-only file/bounded-folder copy through the BFF.
 A workspace operation journal retains keys/IDs, uncertainty and explicit continuation/
-recovery controls; see [M4 management](frontend-m4-management.md). Preview and
-sharing management remain deferred. [M3's state/transport/verification contract](frontend-m3-transfers.md)
+recovery controls; see [M4 management](frontend-m4-management.md). M5 adds owner-only
+registered-email direct grants, read-only inherited grants and effective-role displays,
+plus expiring/revocable file Viewer links. The public share page strips fragment
+secrets and uses isolated header-based metadata and native streamed download adapters;
+see [M5 sharing](frontend-m5-sharing.md). Preview and activity/notifications remain deferred. [M3's state/transport/verification contract](frontend-m3-transfers.md)
 describes two file tasks, one sliced 8 MiB part per file, at most 50 panel entries,
 metadata-only tab recovery and the unresolved browser HTTPS/CORS/clock gates.
 
@@ -68,7 +71,7 @@ credential/CSRF rotation, redacted navigation, transfer/copy/deletion states and
 explicit recovery. No new endpoint is required for those bounded MVP flows.
 Public-link downloads retain octet-stream MIME, including empty files. Contract
 readiness does not close the [real-browser gate](browser-multipart-verification-2026-10-23.md)
-or operational launch gates. Frontend M1–M4 is implemented as described above;
+or operational launch gates. Frontend M1–M5 is implemented as described above;
 deployment and infrastructure remain outside that milestone.
 
 ## System and responsibility boundaries

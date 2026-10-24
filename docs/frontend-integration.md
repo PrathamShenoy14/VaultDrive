@@ -31,8 +31,10 @@ ancestry. [Frontend M3](frontend-m3-transfers.md) adds bounded direct browser pa
 upload/empty recovery controls and native authenticated streaming downloads to the
 same BFF. No multipart bytes traverse the BFF. [Frontend M4](frontend-m4-management.md)
 adds capability-aware folder creation, rename/move, Trash/restore, asynchronous
-deletion tracking and owner-only copy with retained recovery evidence. Preview
-and sharing management remain closed. The backend freeze and release gates are unchanged.
+deletion tracking and owner-only copy with retained recovery evidence.
+[Frontend M5](frontend-m5-sharing.md) adds registered-email grants, inherited-access
+displays and file Viewer links with fragment-to-header redemption. Preview and
+activity/notifications remain outside this slice. The backend freeze and release gates are unchanged.
 
 Spring Security has **no cross-origin API CORS policy**. A browser at a different
 scheme/host/port cannot use a direct credentialed API integration. Do not solve
@@ -283,8 +285,8 @@ File-only share links: POST `/files/{id}/share-links` `{expiresAt:null|instant}`
 read the returned **secret once**. GET lists links without secrets; DELETE revokes.
 Default expiry 24 hours, explicit future expiry at most seven days. Public GET
 `/public/share-links/{linkId}` and `/public/share-links/{linkId}/download` require exactly one
-`X-VaultDrive-Share-Token`; never put the secret in a query string. A future
-frontend may use a fragment then remove it before issuing header-based requests;
+`X-VaultDrive-Share-Token`; never put the secret in a query string. The M5
+frontend uses a fragment and removes it before issuing header-based requests;
 there is no backend share-page URL. Public metadata is `{name,contentType,sizeBytes}`;
 public downloads always octet-stream attachments. Invalid/revoked/expired/hidden
 links, malformed IDs and unsupported public methods/routes all return uniform

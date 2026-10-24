@@ -4,6 +4,8 @@ import { ApiError } from "@/lib/api/transport";
 import { readQueryKeys, validReadQuery } from "@/features/explorer/read-policy";
 import { transferPolicy } from "@/features/transfers/policy";
 import { managementPolicy } from "@/features/management/policy";
+import { sharingPolicy } from "@/features/sharing/policy";
+import { publicLink } from "@/features/sharing/server/public-link";
 import { applyIssued, backend, ensureFresh, unauthorized } from "./backend";
 import {
   captureCookies,
@@ -91,7 +93,9 @@ async function boundedBody(request: Request): Promise<string | undefined> {
 export async function bff(request: Request, path: string): Promise<Response> {
   let result: Response;
   try {
-    result = await handle(request, path);
+    result = path.startsWith("public/share-links")
+      ? await publicLink(request, path)
+      : await handle(request, path);
   } catch (error) {
     result = errorResponse(error);
   }
@@ -121,6 +125,10 @@ export async function bff(request: Request, path: string): Promise<Response> {
       { status, headers },
     );
   }
+  if (sharingPolicy(path)) {
+    result.headers.set("Referrer-Policy", "no-referrer");
+    result.headers.set("X-Content-Type-Options", "nosniff");
+  }
   return noStore(result);
 }
 function errorResponse(error: unknown) {
@@ -133,11 +141,13 @@ function errorResponse(error: unknown) {
 }
 async function handle(request: Request, path: string) {
   const management = managementPolicy(path);
+  const sharing = sharingPolicy(path);
   const transfer = transferPolicy(path);
   const readKeys = readQueryKeys(path);
   const methods = [
     ...new Set([
       ...(management?.methods ?? []),
+      ...(sharing?.methods ?? []),
       ...(transfer?.methods ?? []),
       ...(allowed.has(path) ? [allowed.get(path)!] : []),
       ...(readKeys ? ["GET"] : []),
@@ -151,10 +161,11 @@ async function handle(request: Request, path: string) {
   }
   const method = request.method;
   const mutation = method !== "GET";
-  const control = management?.methods.includes(method)
+  const mutationPolicy = sharing ?? management;
+  const control = mutationPolicy?.methods.includes(method)
     ? {
-        ...management,
-        json: management.json && method !== "DELETE",
+        ...mutationPolicy,
+        json: mutationPolicy.json && method !== "DELETE",
         query: [] as string[],
         download: false,
       }
@@ -164,6 +175,16 @@ async function handle(request: Request, path: string) {
     return failure(400, "BAD_REQUEST", "Query parameters are not supported");
   if (mutation && !sameOriginMutation(request))
     return failure(403, "FORBIDDEN", "Permission denied");
+  if (sharing?.precondition && method === "PATCH") {
+    const version = request.headers.get("If-Match");
+    if (!version)
+      return failure(428, "PRECONDITION_REQUIRED", "Grant version required");
+    if (
+      !/^"[0-9]+"$/.test(version) ||
+      BigInt(version.slice(1, -1)) > 9223372036854775807n
+    )
+      return failure(400, "BAD_REQUEST", "Invalid grant version");
+  }
   if (
     transfer?.download &&
     (["cross-site", "same-site"].includes(
@@ -277,6 +298,9 @@ async function handle(request: Request, path: string) {
             ...(control?.json ? { "Content-Type": "application/json" } : {}),
             ...(control?.key
               ? { "Idempotency-Key": request.headers.get("Idempotency-Key")! }
+              : {}),
+            ...(sharing?.precondition && method === "PATCH"
+              ? { "If-Match": request.headers.get("If-Match")! }
               : {}),
             ...(logout
               ? {

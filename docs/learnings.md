@@ -1,5 +1,25 @@
 # Implementation learnings
 
+## Sharing displays must preserve the source of authority
+
+Direct grants and effective access answer different questions. A direct Viewer
+can still be an effective Editor through an ancestor; removing one grant need
+not remove access. M5 keeps inherited rows read-only at descendants and resolves
+recipient effective roles only from owner-visible grants. Collaborators receive
+fresh metadata roles without fetching or inferring the private recipient list.
+A stale role label never authorizes a mutation. Exact lossless int64 If-Match
+versions prevent silently overwriting concurrent grant updates.
+
+A share-link ID is not its bearer secret. Only the creation response has the
+secret, so a lost create response cannot be recovered by listing or automatic
+replay. Fragment transport keeps it out of HTTP URLs; the public page removes
+the fragment before header-based reads. Native download transport must stream
+without turning large files into browser Blobs and must remain separate from
+JWT/session authentication. Explicit revocation, expiry and current ancestry
+still govern every new read, while admitted streams may finish.
+
+See [M5 sharing contracts and security](frontend-m5-sharing.md).
+
 ## Management operations require retained evidence, not optimistic completion
 
 A successful HTTP exchange does not give every workflow the same meaning. M4

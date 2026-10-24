@@ -18,6 +18,7 @@ import { DetailsPanel, ReadError } from "./resource-ui";
 import { SearchFilters } from "./search-filters";
 import { UploadZone } from "@/features/transfers/upload-zone";
 import { DownloadAction } from "@/features/transfers/download";
+import { SharingAction } from "@/features/sharing/provider";
 import {
   ManagementActions,
   useManagement,
@@ -42,9 +43,18 @@ export function Explorer({
     const changed = () => setRevision((value) => value + 1);
     window.addEventListener("vaultdrive:transfers-changed", changed);
     window.addEventListener("vaultdrive:management-changed", changed);
+    window.addEventListener("vaultdrive:sharing-changed", changed);
+    const visible = () => {
+      if (document.visibilityState !== "hidden") changed();
+    };
+    window.addEventListener("focus", visible);
+    document.addEventListener("visibilitychange", visible);
     return () => {
       window.removeEventListener("vaultdrive:transfers-changed", changed);
       window.removeEventListener("vaultdrive:management-changed", changed);
+      window.removeEventListener("vaultdrive:sharing-changed", changed);
+      window.removeEventListener("focus", visible);
+      document.removeEventListener("visibilitychange", visible);
     };
   }, []);
   const refresh = () => {
@@ -186,6 +196,7 @@ function Scope({
   const [details, setDetails] = useState<ExplorerEntry | null>(null);
   const toolbar = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
+  const folderLoaded = !!metadata;
   const router = useRouter();
   useEffect(() => {
     if (!folder) return;
@@ -203,8 +214,8 @@ function Scope({
     return () => controller.abort();
   }, [folder, revision]);
   useEffect(() => {
-    if (metadata) heading.current?.focus();
-  }, [metadata]);
+    if (folderLoaded) heading.current?.focus();
+  }, [folderLoaded]);
   if (error) return <ReadError error={error} retry={refresh} />;
   if (folder && !metadata)
     return (
@@ -264,6 +275,9 @@ function Scope({
                   ? "Editor"
                   : "Viewer"}
             </span>
+            <SharingAction
+              entry={{ resourceType: "FOLDER", resource: metadata }}
+            />
           </div>
         </>
       )}
@@ -316,6 +330,7 @@ function Scope({
             <DownloadAction id={single.resource.id} />
           )}
         {single && <ManagementActions entry={single} />}
+        {single && <SharingAction entry={single} />}
         <Button
           variant="ghost"
           size="icon-sm"
@@ -380,7 +395,11 @@ function Scope({
           />
         </>
       )}
-      <DetailsPanel entry={details} close={() => setDetails(null)} />
+      <DetailsPanel
+        entry={details}
+        close={() => setDetails(null)}
+        revision={revision}
+      />
     </>
   );
   const canUpload =
