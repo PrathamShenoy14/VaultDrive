@@ -1,6 +1,12 @@
-# VaultDrive frontend M1–M3
+# VaultDrive frontend M1–M4
 
-Next.js App Router, real backend authentication and a responsive Drive-inspired file explorer. M2 adds navigation, selection, metadata, search, Shared and Trash; M3 adds direct multipart uploads, empty files, recovery/transfer management and streaming authenticated downloads. The frozen [OpenAPI contract](../docs/openapi.json) and backend remain authoritative. No backend runtime, migration or infrastructure changes are included.
+Next.js App Router, real backend authentication and a responsive Drive-inspired file explorer. M2 adds navigation, selection, metadata, search, Shared and Trash; M3 adds transfers; M4 adds folder creation, rename, move, Trash/restore, permanent-deletion tracking and owner-only file/folder copy. The frozen [OpenAPI contract](../docs/openapi.json) and backend remain authoritative. No backend runtime, migration or infrastructure changes are included.
+
+## File and folder management
+
+Create folders in My Drive or a folder with `CREATE_FOLDER`. Row/grid/context menus and single-selection toolbars share capability-aware Rename, Move, Copy, Trash, Restore and Delete permanently actions. Base UI dialogs validate Java-compatible names and file extensions, guard repeated submissions and restore keyboard focus. The paginated destination picker browses owned folders, excludes the selected source subtree and requires explicit destination selection. The backend rechecks every permission, cycle, collision, quota and lifecycle condition.
+
+Management operations retains copy keys, normalized original requests, IDs and uncertain mutation evidence in user-scoped sessionStorage. Copy continuation and recovery are explicit; folder copy advances at most four backend steps per click with the frozen 1,000-member/depth-64 limits. Status-only polling backs off from two to 30 seconds, stops after ten reads, and cleans up on workspace exit. Accepted deletion is distinct from logical completion and physical cleanup. Reload dispatches no mutation; Check status or Replay original admission recovers the existing operation. Lost ordinary mutation/deletion responses are never automatically replayed. See [M4 behavior, contracts, recovery, verification and limitations](../docs/frontend-m4-management.md).
 
 ## Uploads, downloads and transfer management
 
@@ -67,13 +73,13 @@ Server Components own protected profile/quota reads; Client Components handle fo
 
 ## Explorer behavior and contracts
 
-Folder/file feeds request **50 entries each**, with independent totals and explicit Load more controls. No global combined total is invented. The displayed order is the backend's fixed name order (Trash: deletion date descending); sorting controls deliberately expose no unsupported options and never submit `sort`. New pages are deduplicated by resource type plus UUID because concurrent offset snapshots can shift. Refresh restarts the scope and rereads server quota. M3 admission, completion, cancellation and quota conflicts trigger refresh too.
+Folder/file feeds request **50 entries each**, with independent totals and explicit Load more controls. No global combined total is invented. The displayed order is the backend's fixed name order (Trash: deletion date descending); sorting controls deliberately expose no unsupported options and never submit `sort`. New pages are deduplicated by resource type plus UUID because concurrent offset snapshots can shift. Refresh rereads loaded pages and server quota, preserving URL state and eligible selection. M3 transfers and M4 mutations invalidate current feeds; other locations reread on navigation.
 
 Click a checkbox or row to select; Ctrl/Command click toggles and Shift click selects a range within a feed. Ctrl/Command+A within a resource group selects its loaded items; Escape clears selection. Arrow Up/Down, Home/End move row focus, Space toggles, Enter opens folders or metadata, and Shift+F10/right click opens the same Base UI action menu as the visible actions button. Folder names also provide an explicit open control for touch/keyboard users. List/grid switching preserves selection. Details use a fresh metadata GET and Base UI's focus-managed sheet; unavailable/revoked metadata renders an error rather than a stale snapshot.
 
 Search debounces at 400 ms and supports `resourceType`, `scope`, `mimeType`, `minSizeBytes`, `maxSizeBytes`, `createdFrom`, `createdTo`, `modifiedFrom`, `modifiedTo`. Filters combine with AND; MIME/size with FOLDER is rejected by the backend. Inclusive dates use ISO 8601 instants with timezone. Clear search returns to My Drive; Reset filters keeps the query. Searches have independent bounded incremental pages, empty states, explicit retry and timeout handling. Scope changes abort old reads and discard their results.
 
-Shared reads display actual Viewer/Editor roles and use `LIST_CHILDREN`/`READ_METADATA` snapshots for available read actions. Backend authorization remains authoritative. Breadcrumb traversal reads only returned parent IDs, stops at null or inaccessible ancestors, and is cycle/depth bounded. Shared is an entry-point link, never an inferred owner's root. Search folders open Shared or My Drive according to current metadata/capabilities; file results open metadata, not an inferred private location. Trash displays only its common-entry DTO, without active metadata calls or private-parent inference. Restore/permanent deletion are visibly deferred to M4; other future actions are disabled and restricted by returned capabilities.
+Shared reads display actual Viewer/Editor roles and use returned capabilities for read and management actions. Backend authorization remains authoritative. Breadcrumb traversal reads only returned parent IDs, stops at null or inaccessible ancestors, and is cycle/depth bounded. Shared is an entry-point link, never an inferred owner's root. Search folders open Shared or My Drive according to current metadata/capabilities; file results open metadata, not an inferred private location. Trash displays only its common-entry DTO, without active metadata calls or private-parent inference. Restore/permanent deletion require their returned capabilities; pending purge entries expose neither action.
 
 Loading skeletons, per-feed empty/error states, no-store transport, explicit retries and authorization failures are covered by mocked tests. The client read deadline is 15 seconds, the server backend deadline 10 seconds. No automatic retry loop or cross-session cache is introduced. Server-held credentials and the existing single-process refresh coordinator are unchanged.
 
@@ -83,7 +89,7 @@ See [ADR-0017](../docs/decisions/0017-frontend-bff-sessions.md). The browser get
 
 Login sends exactly `X-VaultDrive-Client: 1` to Spring. Backend login/refresh returns a JWT and CSRF header; the BFF consumes them and returns **204**, deliberately differing from the backend's 200 token response. Registration and profile/quota JSON remain backend responses. The browser helper's types model this separate BFF boundary explicitly; generated types describe the backend.
 
-Every BFF mutation requires the exact configured Origin and `X-VaultDrive-Client: 1`, rejects cross-site/same-site Fetch Metadata, and requires documented bounded JSON/no-body requests. Backend cookie mutations use exactly its stored CSRF header. Refresh omits Authorization and queries; logout includes the latest bearer, refresh cookie and CSRF. Cookie headers use `Headers.getSetCookie()` and individual append operations, including multiple cookies with comma-containing Expires attributes. No comma splitting or attribute weakening occurs. Ordinary backend requests are bearer-only. Responses/fetches are no-store, personalized pages are dynamic, and login/logout use full navigations to discard the Router Cache. M3 adds only upload-session control/status/parts, empty-file admission/status/recovery and authenticated file download routes to the M1/M2 allowlist. Preview, namespace/file mutations and sharing management remain closed. Streaming downloads release the session lock after upstream headers.
+Every BFF mutation requires the exact configured Origin and `X-VaultDrive-Client: 1`, rejects cross-site/same-site Fetch Metadata, and requires documented bounded JSON/no-body requests. Backend cookie mutations use exactly its stored CSRF header. Refresh omits Authorization and queries; logout includes the latest bearer, refresh cookie and CSRF. Cookie headers use `Headers.getSetCookie()` and individual append operations, including multiple cookies with comma-containing Expires attributes. No comma splitting or attribute weakening occurs. Ordinary backend requests are bearer-only. Responses/fetches are no-store, personalized pages are dynamic, and login/logout use full navigations to discard the Router Cache. M3 adds transfer routes; M4 adds the frozen namespace, copy and deletion-operation routes. Preview and sharing management remain closed. Streaming downloads release the session lock after upstream headers.
 
 The backend's `expiresIn` controls access expiry (normally 1800 seconds). A 15-second early-refresh margin reduces clock-boundary failures; it does not establish monitored clock correctness. The browser's opaque session has at most seven days, and server expiry can only decrease with the backend's remaining cookie lifetime. Rotation never extends the family. An async per-session lock covers refresh, protected reads and logout across all tabs/requests in the one supported Node process. Waiting callers reread the session and use its latest credentials; duplicate refresh POSTs do not rotate an already-fresh token. Logout is serialized with them. No mutation is automatically retried. A backend 401 for an unexpired bearer destroys local state rather than trying to refresh a revoked family.
 
@@ -130,6 +136,36 @@ Relevant backend checks (from `backend/`, private environment loaded in the same
 The M2 selection also includes `SearchIntegrationTest`, `TrashControllerTest` and `ApiContractConcurrencyIntegrationTest`. Supply fresh default-context datasource/Flyway schemas, as in the verification record below; suites with their own UUID schemas retain that isolation. No backend production code changed, so full storage/purge/broker regression is outside this frontend slice.
 
 The M2 Chrome scenario uses existing backend APIs **only for disposable fixture setup**: registered users, 50+ root folders, nested/shared folders, direct Viewer/Editor grants, real zero-byte files and trashed entries. Zero-byte fixture creation requires reachable Garage. No fixture mutation API is added to the BFF or product UI. Fixture schemas/accounts/objects are retained; no shared user data, infrastructure policy, restore or permanent deletion is changed. Test traces remain disabled.
+
+## Executed M4 verification — 2026-10-24
+
+Final checks passed on the existing Node 24.22 runtime: API generated-type drift, TypeScript, ESLint (zero warnings), Prettier, **263 Vitest tests** and the production build. The focused backend selection passed **369 tests** and the separate real Garage copy suite passed **8 tests**, with zero failures/errors/skips. No full unrelated broker/storage regression was claimed.
+
+Chrome passed **6 M4 scenarios** across desktop, phone and tablet: **3 real HTTPS browser/BFF/backend workflows** and **3 mocked management workflows**. Actual browser forms registered/signed in, the BFF cookie remained Secure/HttpOnly/Strict, and real UI actions created/renamed/moved/trashed/restored folders, published independent file/folder copies and tracked accepted deletion. The zero-byte Garage fixture used an authenticated BFF HTTP client. Light/dark screenshots, keyboard focus return and destructive-dialog axe checks passed. Mocked admission-loss/UNKNOWN/recovery scenarios prove UI behavior only. Autonomous purge workers were disabled; physical cleanup and browser-to-Garage multipart were not verified.
+
+Use the existing trusted local certificate files without altering trust or bypassing TLS:
+
+```powershell
+npm exec next -- dev --experimental-https --experimental-https-key certificates/localhost-key.pem --experimental-https-cert certificates/localhost.pem
+# In a second shell, with the same supported Node runtime:
+$env:NODE_USE_SYSTEM_CA = '1'
+$env:E2E_BASE_URL = 'https://localhost:3000'
+npm run test:e2e -- m4.spec.ts
+```
+
+The real backend used fresh `frontend_m4_live_verified_20261024` in `vaultdrive_test`, with all normal processors/probes off. Synthetic accounts, schemas and retained asynchronous evidence remain; no shared user resources were touched. Package current backend sources before starting its JAR: an older local JAR initially returned 405 for the frozen empty-file fixture endpoint. An initial Garage invocation failed the version-attestation precondition; the corrected run below passed all eight checks. Earlier browser iterations caught restore-location/focus issues, a development hot reload during a status assertion and a device-default theme assumption; final reruns passed. Initial Node 20/sandbox worker startup failures were resolved using existing Node 24 and approved local worker execution.
+
+Backend reproduction from `backend/`, loading the existing private environment in each shell:
+
+```powershell
+. .\.env.local.ps1
+.\mvnw.cmd -o '-Dtest=FolderNameValidatorTest,FileNameExtensionResolverTest,FolderServiceTest,FileMetadataServiceTest,FolderControllerTest,FileControllerTest,TrashControllerTest,FileCopyIntegrationTest,FolderCopyIntegrationTest,ApiContractFreezeIntegrationTest,SharingIntegrationTest,ApiContractConcurrencyIntegrationTest,FolderPurgeMetadataIntegrationTest,FilePurgeIntegrationTest' '-Dspring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=frontend_m4_verification_20261024' '-Dspring.flyway.schemas=frontend_m4_verification_20261024' '-Dspring.flyway.default-schema=frontend_m4_verification_20261024' test
+$env:GARAGE_COPY_TEST = 'true'
+$env:GARAGE_MULTIPART_VERSION = '2.3.0'
+.\mvnw.cmd -o '-Dtest=GarageFileCopyIntegrationTest' test
+```
+
+Tests with independent UUID schemas retain their existing isolation. Repeated runs should choose a fresh default schema. The original multipart HTTPS/CORS/clock matrix, cross-device operation discovery, uncertain storage repair and physical retention/erasure remain open. See [the M4 contract](../docs/frontend-m4-management.md) for exact routes and recovery behavior. Stop after M4; M5–M7 are outside this change.
 
 ## Executed M3 verification — 2026-10-24
 

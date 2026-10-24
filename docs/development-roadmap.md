@@ -1,5 +1,20 @@
 # Development roadmap
 
+## Frontend M4 - File and Folder Management
+
+- [x] Capability-aware create, rename, move, Trash/restore and permanent-delete confirmations.
+- [x] Owned paginated destination navigation, Java-compatible name/extension validation and server-confirmed feedback.
+- [x] Owner-only file and bounded folder copy, original-key replay, explicit continuation/recovery/cancel/discard.
+- [x] Retained operation/request evidence, accurate deletion/copy states and bounded status-only polling.
+- [x] Loaded-page/selection preservation, source/destination rereads, quota refresh, mobile and keyboard integration.
+- [x] Frozen BFF origin/session/CSRF boundary with no backend runtime, migration or infrastructure changes.
+- [x] Focused/full frontend, PostgreSQL/Garage and Chrome verification; see [M4 record](frontend-m4-management.md).
+- [ ] Existing browser-to-Garage multipart HTTPS/CORS/clock matrix remains unresolved.
+
+Stop after M4. Sharing/collaboration (M5), notifications/activity (M6), preview and
+integration polish (M7) are not implemented by this milestone. No physical-erasure
+claim follows accepted or logically completed deletion.
+
 ## Frontend M3 — Uploads, Downloads, and Transfer Management
 
 - [x] File picker/drop into owned root or freshly upload-capable folders; direct immutable checksum/length-bound parts.
@@ -13,8 +28,8 @@
 - [x] [State transitions, recovery UX, transfer limits and reproducible continuation](frontend-m3-transfers.md).
 - [ ] Trusted HTTPS direct-browser Garage multipart/CORS/native-expiry/fault/revocation/clock matrix remains blocked/open.
 
-Stop after M3. Preview, namespace/file mutations, sharing management and
-notifications remain outside the slice. No backend frozen contract or shared
+M3 stopped before namespace/file mutations; M4 above now adds management. Preview,
+sharing management and notifications remain outside the M3 slice. No backend frozen contract or shared
 infrastructure changes are included. Local HTTP session bootstrap and mocked
 Chrome uploads do not close the existing browser release gate.
 
@@ -31,8 +46,8 @@ Chrome uploads do not close the existing browser release gate.
 - [x] Component/BFF tests, live backend contract checks and Chrome integration scenarios; see [frontend verification](../frontend/README.md#verification).
 - [x] Frontend, architecture and learning documentation.
 
-M2 stopped before transfers; M3 above adds uploads and downloads. Preview,
-namespace/file mutations, sharing management, activity and notifications remain later milestones. The backend
+M2 stopped before transfers; M3 adds uploads/downloads and M4 adds management.
+Preview, sharing management, activity and notifications remain later milestones. The backend
 fixed ordering is the only supported sorting; no backend API/schema change or
 additional frontend dependencies are introduced. HTTPS/browser release gates
 and single-process session limits remain open.

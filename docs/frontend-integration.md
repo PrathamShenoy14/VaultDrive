@@ -29,7 +29,9 @@ It forwards only documented per-route query names, preserves fixed backend
 orders, requests independent 50-entry pages and never reconstructs private
 ancestry. [Frontend M3](frontend-m3-transfers.md) adds bounded direct browser parts,
 upload/empty recovery controls and native authenticated streaming downloads to the
-same BFF. No multipart bytes traverse the BFF. Preview, namespace/file mutations
+same BFF. No multipart bytes traverse the BFF. [Frontend M4](frontend-m4-management.md)
+adds capability-aware folder creation, rename/move, Trash/restore, asynchronous
+deletion tracking and owner-only copy with retained recovery evidence. Preview
 and sharing management remain closed. The backend freeze and release gates are unchanged.
 
 Spring Security has **no cross-origin API CORS policy**. A browser at a different

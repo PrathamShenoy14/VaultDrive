@@ -3,6 +3,7 @@ import { env } from "@/lib/env";
 import { ApiError } from "@/lib/api/transport";
 import { readQueryKeys, validReadQuery } from "@/features/explorer/read-policy";
 import { transferPolicy } from "@/features/transfers/policy";
+import { managementPolicy } from "@/features/management/policy";
 import { applyIssued, backend, ensureFresh, unauthorized } from "./backend";
 import {
   captureCookies,
@@ -131,20 +132,37 @@ function errorResponse(error: unknown) {
     : failure(502, "BAD_GATEWAY", "Unable to complete the request.");
 }
 async function handle(request: Request, path: string) {
+  const management = managementPolicy(path);
   const transfer = transferPolicy(path);
   const readKeys = readQueryKeys(path);
-  const method =
-    allowed.get(path) ?? transfer?.methods[0] ?? (readKeys ? "GET" : undefined);
-  if (!method) return failure(404, "NOT_FOUND", "Resource unavailable");
-  if (request.method !== method) {
+  const methods = [
+    ...new Set([
+      ...(management?.methods ?? []),
+      ...(transfer?.methods ?? []),
+      ...(allowed.has(path) ? [allowed.get(path)!] : []),
+      ...(readKeys ? ["GET"] : []),
+    ]),
+  ];
+  if (!methods.length) return failure(404, "NOT_FOUND", "Resource unavailable");
+  if (!methods.includes(request.method)) {
     const response = failure(405, "METHOD_NOT_ALLOWED", "Method not allowed");
-    response.headers.set("Allow", method);
+    response.headers.set("Allow", methods.join(", "));
     return response;
   }
+  const method = request.method;
+  const mutation = method !== "GET";
+  const control = management?.methods.includes(method)
+    ? {
+        ...management,
+        json: management.json && method !== "DELETE",
+        query: [] as string[],
+        download: false,
+      }
+    : transfer;
   const url = new URL(request.url);
-  if (!validReadQuery(url.searchParams, transfer?.query ?? readKeys ?? []))
+  if (!validReadQuery(url.searchParams, control?.query ?? readKeys ?? []))
     return failure(400, "BAD_REQUEST", "Query parameters are not supported");
-  if (method === "POST" && !sameOriginMutation(request))
+  if (mutation && !sameOriginMutation(request))
     return failure(403, "FORBIDDEN", "Permission denied");
   if (
     transfer?.download &&
@@ -156,9 +174,9 @@ async function handle(request: Request, path: string) {
   )
     return failure(403, "FORBIDDEN", "Permission denied");
   let transferBody: string | undefined;
-  if (transfer && method === "POST") {
+  if (control && mutation) {
     if (
-      transfer.json &&
+      control.json &&
       request.headers
         .get("Content-Type")
         ?.split(";", 1)[0]
@@ -171,10 +189,10 @@ async function handle(request: Request, path: string) {
     transferBody = await boundedBody(request);
     if (transferBody === undefined)
       return failure(413, "CONTENT_TOO_LARGE", "Request is too large");
-    if (!transfer.json && transferBody !== "")
+    if (!control.json && transferBody !== "")
       return failure(400, "BAD_REQUEST", "This operation accepts no body");
     if (
-      transfer.key &&
+      control.key &&
       !/^[!-~]{1,128}$/.test(request.headers.get("Idempotency-Key") ?? "")
     )
       return failure(400, "BAD_REQUEST", "An idempotency key is required");
@@ -256,8 +274,8 @@ async function handle(request: Request, path: string) {
             ...(transfer?.download
               ? { Accept: "*/*", "Accept-Encoding": "identity" }
               : {}),
-            ...(transfer?.json ? { "Content-Type": "application/json" } : {}),
-            ...(transfer?.key
+            ...(control?.json ? { "Content-Type": "application/json" } : {}),
+            ...(control?.key
               ? { "Idempotency-Key": request.headers.get("Idempotency-Key")! }
               : {}),
             ...(logout
@@ -269,7 +287,7 @@ async function handle(request: Request, path: string) {
           },
         },
         transfer?.download,
-        transfer ? 25000 : 10000,
+        control ? 25000 : 10000,
       );
       captureCookies(session, response.headers);
       // An unexpired JWT rejected by the backend is revoked/invalid; do not refresh it.

@@ -1,5 +1,26 @@
 # Implementation learnings
 
+## Management operations require retained evidence, not optimistic completion
+
+A successful HTTP exchange does not give every workflow the same meaning. M4
+uses authoritative copy states and deletion LOGICALLY_COMPLETED, while explicitly
+preserving the difference from physical reclamation. Folder copy progresses only
+through caller-driven bounded steps. Admission keys and immutable requests recover
+lost copy responses; a new key would start a different operation. Ordinary mutations
+have no universal idempotency, so a lost rename/move/Trash/delete response remains
+uncertain instead of entering a retry loop. Copy cancellation and partial-tree
+discard are separate decisions, and disposal has its own operation ID.
+
+A stale ACTIVE/RESERVED status after a lost control response cannot erase retained
+uncertainty. Positive-evidence recovery resolves it. A known rejected request does
+not erase an earlier uncertain dispatch either. Reload retains only metadata/IDs,
+never credentials or storage capabilities, and dispatches nothing automatically.
+Explorer refresh can reread loaded pages and reconcile selected identities without
+resetting URL navigation. Folder restore's folderId identifies the restored object;
+its nullable parentFolderId identifies the actual destination, including root.
+
+See [M4 contracts, verification and remaining limits](frontend-m4-management.md).
+
 ## Transfer progress is separate from storage publication
 
 XHR bytes sent can reach 100% while Complete is still UNKNOWN or publication is

@@ -1,5 +1,8 @@
 # Frontend M3 transfers
 
+M4 now adds namespace/file management and copy/deletion operation UX; see
+[the M4 contract](frontend-m4-management.md). The M3 boundary below is historical.
+
 M3 adds file selection/drop, a workspace upload queue, direct multipart parts,
 empty-file creation and authenticated native downloads. Backend contracts,
 migrations, storage evidence, ownership, quota and lock order are unchanged.

@@ -36,6 +36,7 @@ export function ResourceFeed({
   selection,
   setSelection,
   details,
+  revision = 0,
 }: {
   feed: Feed;
   title: string;
@@ -44,6 +45,7 @@ export function ResourceFeed({
   selection: Selection;
   setSelection: React.Dispatch<React.SetStateAction<Selection>>;
   details: (entry: ExplorerEntry) => void;
+  revision?: number;
 }) {
   const router = useRouter();
   const [page, setPage] = useState<Page<ExplorerEntry>>();
@@ -55,23 +57,54 @@ export function ResourceFeed({
   const active = useRef<AbortController | null>(null);
   const busy = useRef(false);
   const rows = useRef<HTMLDivElement>(null);
-  async function load(next: number) {
+  const loadedPage = useRef(0);
+  const knownEntries = useRef<ExplorerEntry[]>([]);
+  async function load(next: number, replace = false) {
     if (busy.current) return;
     busy.current = true;
     const controller = new AbortController();
     active.current = controller;
     try {
-      const value = await getPage(feed, next, controller.signal);
+      let value = await getPage(feed, replace ? 0 : next, controller.signal);
+      const refreshed = [...value.content];
+      if (replace) {
+        for (
+          let index = 1;
+          index <= next && index < value.totalPages;
+          index++
+        ) {
+          value = await getPage(feed, index, controller.signal);
+          refreshed.push(...value.content);
+        }
+      }
       if (!controller.signal.aborted) {
+        loadedPage.current = value.page;
+        setError(undefined);
         setPage(value);
-        setEntries((previous) => [
+        const nextEntries = [
           ...new Map(
-            [...previous, ...value.content].map((entry) => [
-              entryKey(entry),
-              entry,
-            ]),
+            [
+              ...(replace ? [] : knownEntries.current),
+              ...(replace ? refreshed : value.content),
+            ].map((entry) => [entryKey(entry), entry]),
           ).values(),
-        ]);
+        ];
+        if (replace) {
+          const previousKeys = new Set(knownEntries.current.map(entryKey));
+          const current = new Map(
+            nextEntries.map((entry) => [entryKey(entry), entry]),
+          );
+          setSelection((selection) => ({
+            keys: new Set(
+              [...selection.keys].filter(
+                (key) => !previousKeys.has(key) || current.has(key),
+              ),
+            ),
+            entries: new Map([...selection.entries, ...current]),
+          }));
+        }
+        knownEntries.current = nextEntries;
+        setEntries(nextEntries);
       }
     } catch (error) {
       if (!controller.signal.aborted) {
@@ -94,15 +127,14 @@ export function ResourceFeed({
   }
   useEffect(() => {
     // Initial state is already loading. All load() setters follow awaited network I/O.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load(0);
+    void load(loadedPage.current, true);
     return () => {
       active.current?.abort();
       busy.current = false;
     };
-    // Feed identity is stable for this mounted scope. Navigation/refresh remounts it.
+    // Feed identity is stable for this mounted scope. Refresh retains loaded pages and selection.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [revision]);
   function requestPage(next: number) {
     if (busy.current) return;
     setLoading(true);
@@ -394,7 +426,7 @@ export function ResourceFeed({
               : feed.kind === "shared"
                 ? "Resources shared directly with you will appear here."
                 : feed.kind.startsWith("trash")
-                  ? "Trashed items will appear here. Restore and permanent deletion arrive in M4."
+                  ? "Trashed items will appear here. Pending purge entries have no mutation actions."
                   : "This location is empty. Upload files into My Drive or a folder where you have upload access."}
           </p>
         </div>

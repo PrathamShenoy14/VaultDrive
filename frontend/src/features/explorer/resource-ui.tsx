@@ -28,6 +28,8 @@ import { errorMessage, ApiError } from "@/lib/api/transport";
 import { formatBytes } from "@/features/shell/storage";
 import { getMetadata } from "./api";
 import { downloadHref } from "@/features/transfers/download";
+import { useManagement } from "@/features/management/provider";
+import { actions, labels } from "@/features/management/model";
 import {
   canOpen,
   canRead,
@@ -99,6 +101,7 @@ export function EntryMenu({
   onOpen: () => void;
   onDetails: () => void;
 }) {
+  const management = useManagement();
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
@@ -122,14 +125,19 @@ export function EntryMenu({
         >
           View details
         </DropdownMenuItem>
-        {entry.resourceType === "TRASH" ? (
-          <>
-            <DropdownMenuItem disabled>Restore · M4</DropdownMenuItem>
-            <DropdownMenuItem disabled>
-              Delete permanently · M4
+        {management &&
+          actions(entry).map((action) => (
+            <DropdownMenuItem
+              key={action}
+              onClick={() => {
+                setOpen(false);
+                management.open({ action, entry });
+              }}
+            >
+              {labels[action]}
             </DropdownMenuItem>
-          </>
-        ) : (
+          ))}
+        {entry.resourceType !== "TRASH" && (
           <>
             {entry.resourceType === "FILE" &&
               entry.resource.allowedCapabilities.includes("DOWNLOAD") && (
@@ -145,14 +153,6 @@ export function EntryMenu({
                   Download
                 </DropdownMenuItem>
               )}
-            {entry.resource.allowedCapabilities.includes("RENAME") && (
-              <DropdownMenuItem disabled>
-                Rename · later milestone
-              </DropdownMenuItem>
-            )}
-            {entry.resource.allowedCapabilities.includes("TRASH") && (
-              <DropdownMenuItem disabled>Move to Trash · M4</DropdownMenuItem>
-            )}
             {entry.resource.allowedCapabilities.includes("MANAGE_GRANTS") && (
               <DropdownMenuItem disabled>
                 Manage sharing · later milestone
@@ -282,8 +282,8 @@ function Metadata({ entry }: { entry: ExplorerEntry }) {
       </dl>
       <p className="text-xs text-muted-foreground">
         {current.resourceType === "TRASH"
-          ? "Trash entries cannot be opened. Restore and permanent deletion arrive in M4."
-          : "Metadata reflects current backend access. Preview and file operations arrive in later milestones."}
+          ? "Trash entries cannot be opened. Available restore and deletion actions depend on current lifecycle state."
+          : "Metadata reflects current backend access. Mutation permissions are rechecked by the server."}
       </p>
     </>
   );

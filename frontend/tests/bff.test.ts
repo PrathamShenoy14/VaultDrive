@@ -104,16 +104,16 @@ describe("M2 read-only BFF boundary (isolated backend)", () => {
   });
   it.each([
     `folders/${uuid}/grants`,
-    `files/${uuid}/copy`,
-    `trash/folders/${uuid}/restore`,
+    `files/${uuid}/unsupported`,
+    `trash/folders/${uuid}/unsupported`,
     "files/not-a-uuid",
     "folders/../users/me",
   ])("keeps later-milestone or malformed path closed: %s", async (path) => {
     expect((await bff(request(path), path)).status).toBe(404);
     expect(fetch).not.toHaveBeenCalled();
   });
-  it.each(["POST", "PATCH", "DELETE"])(
-    "does not expose resource mutations via %s",
+  it.each(["PATCH", "DELETE"])(
+    "does not expose unsupported root mutation via %s",
     async (method) => {
       expect(
         (await bff(request("folders", undefined, { method }), "folders"))

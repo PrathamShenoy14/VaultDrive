@@ -260,7 +260,7 @@ describe("M2 explorer with mocked HTTP responses", () => {
     await user.keyboard("{Escape}");
     await waitFor(() => expect(name).toHaveFocus());
   });
-  it("offers an accessible download menu and defers mutations", async () => {
+  it("offers an accessible download menu without a mounted mutation provider", async () => {
     const user = userEvent.setup();
     backend();
     render(<Explorer mode="drive" />);
@@ -273,8 +273,8 @@ describe("M2 explorer with mocked HTTP responses", () => {
       }),
     ).toHaveAttribute("href", `/api/v1/files/${fileId}/download`);
     expect(
-      screen.getByRole("menuitem", { name: "Rename · later milestone" }),
-    ).toHaveAttribute("aria-disabled", "true");
+      screen.queryByRole("menuitem", { name: "Rename" }),
+    ).not.toBeInTheDocument();
     await user.keyboard("{Escape}");
     fireEvent.contextMenu(screen.getByLabelText("Notes.txt, text/plain"));
     expect(
@@ -410,8 +410,8 @@ describe("M2 explorer with mocked HTTP responses", () => {
       screen.getByRole("button", { name: "Actions for Deleted folder" }),
     );
     expect(
-      await screen.findByRole("menuitem", { name: "Restore · M4" }),
-    ).toHaveAttribute("aria-disabled", "true");
+      screen.queryByRole("menuitem", { name: "Restore" }),
+    ).not.toBeInTheDocument();
   });
   it("sends search filters losslessly, handles no matches and timeouts", async () => {
     const fetcher = backend();

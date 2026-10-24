@@ -18,6 +18,10 @@ import { DetailsPanel, ReadError } from "./resource-ui";
 import { SearchFilters } from "./search-filters";
 import { UploadZone } from "@/features/transfers/upload-zone";
 import { DownloadAction } from "@/features/transfers/download";
+import {
+  ManagementActions,
+  useManagement,
+} from "@/features/management/provider";
 
 export type ExplorerMode = "drive" | "shared" | "trash" | "search";
 export function Explorer({
@@ -37,8 +41,11 @@ export function Explorer({
   useEffect(() => {
     const changed = () => setRevision((value) => value + 1);
     window.addEventListener("vaultdrive:transfers-changed", changed);
-    return () =>
+    window.addEventListener("vaultdrive:management-changed", changed);
+    return () => {
       window.removeEventListener("vaultdrive:transfers-changed", changed);
+      window.removeEventListener("vaultdrive:management-changed", changed);
+    };
   }, []);
   const refresh = () => {
     setRevision((value) => value + 1);
@@ -137,17 +144,19 @@ export function Explorer({
       </div>
       {mode === "trash" && (
         <p className="rounded-xl bg-muted/50 p-4 text-sm text-muted-foreground">
-          Restore and permanent deletion arrive in M4. Pending entries may have
-          no available actions.
+          Restore available items or request permanent deletion. Pending purge
+          entries have no mutation actions. Logical deletion and physical
+          cleanup are separate.
         </p>
       )}
       <Scope
-        key={`${mode}:${folder ?? ""}:${query ?? ""}:${revision}`}
+        key={`${mode}:${folder ?? ""}:${query ?? ""}`}
         mode={mode}
         folder={folder}
         query={query}
         grid={grid}
         refresh={refresh}
+        revision={revision}
       />
     </div>
   );
@@ -158,13 +167,16 @@ function Scope({
   query,
   grid,
   refresh,
+  revision,
 }: {
   mode: ExplorerMode;
   folder?: string;
   query?: string;
   grid: boolean;
   refresh: () => void;
+  revision: number;
 }) {
+  const management = useManagement();
   const [metadata, setMetadata] = useState<FolderResource>();
   const [error, setError] = useState<unknown>();
   const [selection, setSelection] = useState<Selection>({
@@ -180,13 +192,16 @@ function Scope({
     const controller = new AbortController();
     getMetadata("FOLDER", folder, controller.signal)
       .then((value) => {
-        if (!controller.signal.aborted) setMetadata(value);
+        if (!controller.signal.aborted) {
+          setMetadata(value);
+          setError(undefined);
+        }
       })
       .catch((error) => {
         if (!controller.signal.aborted) setError(error);
       });
     return () => controller.abort();
-  }, [folder]);
+  }, [folder, revision]);
   useEffect(() => {
     if (metadata) heading.current?.focus();
   }, [metadata]);
@@ -212,9 +227,22 @@ function Scope({
     selection,
     setSelection,
     details: setDetails,
+    revision,
   };
   const content = (
     <>
+      {management &&
+        ((mode === "drive" && !folder) ||
+          metadata?.allowedCapabilities.includes("CREATE_FOLDER")) && (
+          <Button
+            className="mb-4"
+            onClick={() =>
+              management.open({ action: "create", parentId: folder ?? null })
+            }
+          >
+            Create folder
+          </Button>
+        )}
       {metadata && (
         <>
           <Breadcrumbs
@@ -287,6 +315,7 @@ function Scope({
           single.resource.allowedCapabilities.includes("DOWNLOAD") && (
             <DownloadAction id={single.resource.id} />
           )}
+        {single && <ManagementActions entry={single} />}
         <Button
           variant="ghost"
           size="icon-sm"
