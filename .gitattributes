@@ -5,6 +5,9 @@
 *.sh text eol=lf
 mvnw text eol=lf
 
+# Keep frontend formatting and generated type drift checks reproducible on Windows.
+/frontend/** text=auto eol=lf
+
 # Windows scripts
 *.bat text eol=crlf
 *.cmd text eol=crlf

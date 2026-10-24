@@ -906,3 +906,13 @@ Historical warnings can arrive after cancellation or a limit increase, so their
 values and event timestamps must be labelled snapshots, never current authority.
 The existing notification table can serve both source kinds when the database
 validates their distinct recipient rules and both sources remain immutable.
+
+## Frontend M1: credentials, rotation and exact quota values (2026-10-24)
+
+- A BFF can keep bearer/CSRF credentials out of browser JavaScript while preserving the backend's cookie contract. Its opaque cookie adds its own CSRF boundary: exact configured HTTPS Origin plus custom-header admission, not trust in request Host/forwarded headers.
+- A tab-local refresh promise is insufficient. All callers sharing a backend family need the same coordinator, including server renders and logout. M1 uses one server process and per-session serialization, fresh state after waiting, and no rotation during RSC rendering. Serverless/replica support requires shared durable state and distributed coordination, not just sticky sessions.
+- Retrying an uncertain rotation can revoke the family. Lost/incomplete responses discard local credentials; known 429 admission is preserved for explicit later retry. Restart requires login rather than reconstructing potentially stale credentials from browser refresh cookies.
+- Set-Cookie cannot be split on commas because Expires includes one. Capture and append each value; retain HttpOnly/Secure/Strict/Path attributes. Browser response JSON must never accidentally serialize the backend token DTO.
+- Java long quota values can exceed JavaScript's exact integer range. Generate int64-aware types, parse losslessly at the boundary and use bigint for quota arithmetic/formatting; converting an already-rounded number afterward cannot repair it.
+- Browser layout/accessibility testing and real backend HTTP integration are distinct from trusted-HTTPS browser login. Localhost session bootstrap verifies the shell against real accounts but does not close TLS/CORS/native-expiry/clock gates. See [frontend verification](../frontend/README.md#verification).
+- Client-handled authentication forms still need an explicit POST method. Without it, native submission when JavaScript is unavailable can put passwords in GET query strings. The Chrome no-script regression verifies that credentials stay in the request body.

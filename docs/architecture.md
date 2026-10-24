@@ -1,6 +1,31 @@
 # VaultDrive architecture
 
-Last reconciled with the repository on 2026-10-23. This is the current implementation map. Earlier phase records and ADR extensions preserve history; their original boundaries are not the current inventory.
+Last reconciled with the repository on 2026-10-24. This is the current implementation map. Earlier phase records and ADR extensions preserve history; their original boundaries are not the current inventory.
+
+## Frontend M1: foundation, authentication and app shell
+
+`frontend/` is an independently buildable Next.js App Router/strict TypeScript app
+with Tailwind, shadcn Base UI, Lucide and next-themes. Server Components guard
+`/drive`, `/shared`, `/activity` and `/trash`; client forms implement real
+registration/login/logout, and `/session/restore` uses the sole Route Handler
+refresh coordinator. Profile and logical quota come from the backend. File/search/
+sharing/activity/Trash features are explicit placeholders, without fabricated feeds.
+
+The same-origin allowlisted BFF holds JWT/CSRF/current refresh state server-side,
+uses a Secure/HttpOnly/Strict opaque host cookie and forwards individual backend
+Set-Cookie/error/Retry-After headers. Per-session serialization prevents rotation
+races across tabs **within one supported long-lived Node process**. No RSC or
+middleware refresh path exists. Expiry never extends the backend seven-day family;
+uncertain refresh requires login. Restart loses local sessions and fails closed.
+Horizontal/serverless deployment needs a shared durable session coordinator first.
+See [ADR-0017](decisions/0017-frontend-bff-sessions.md) and the
+[frontend guide](../frontend/README.md) for routes, security, generation, commands
+and verification limits. OpenAPI-derived int64 types and lossless JSON parsing
+preserve quota precision. Authenticated pages/responses/fetches are not cached.
+
+No backend API, migration, storage protocol or shared infrastructure is changed.
+Local HTTP integration and Chrome layout checks do not establish trusted-HTTPS
+browser authentication or close the existing browser multipart/CORS/clock gate.
 
 ## MVP API freeze and frontend handoff
 
@@ -16,7 +41,8 @@ credential/CSRF rotation, redacted navigation, transfer/copy/deletion states and
 explicit recovery. No new endpoint is required for those bounded MVP flows.
 Public-link downloads retain octet-stream MIME, including empty files. Contract
 readiness does not close the [real-browser gate](browser-multipart-verification-2026-10-23.md)
-or operational launch gates. No frontend or infrastructure is implemented.
+or operational launch gates. Frontend M1 is implemented as described above;
+deployment and infrastructure remain outside that milestone.
 
 ## System and responsibility boundaries
 

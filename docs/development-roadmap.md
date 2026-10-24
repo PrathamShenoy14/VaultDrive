@@ -1,5 +1,21 @@
 # Development roadmap
 
+## Frontend M1 — Next.js foundation, authentication and app shell
+
+- [x] Independently buildable App Router frontend, strict TypeScript, Tailwind, shadcn Base UI, Lucide and light/dark themes.
+- [x] Reproducible OpenAPI types with drift checking and exact int64 quota handling.
+- [x] Real registration/login/logout/profile/quota integration through an allowlisted same-origin BFF.
+- [x] Server route guards, reload restoration and one serialized server refresh path across tabs; fixed absolute session expiry and fail-closed uncertain rotation.
+- [x] Responsive sidebar/header, account dialog/menu, storage, breadcrumb foundation, skeletons and error/retry states.
+- [x] Isolated auth/transport/UI/race tests, backend contract/session verification and local Chrome layout/accessibility/HTTP integration checks; see [verification boundaries](../frontend/README.md#verification).
+- [x] Document [single-process BFF decision](decisions/0017-frontend-bff-sessions.md), environment, commands, architecture and limitations.
+- [ ] Trusted HTTPS real-browser authentication and the existing multipart/CORS/clock release matrix remain unverified/open.
+- [ ] Shared durable frontend session coordination before serverless/multi-replica deployment.
+
+Stop after M1. File browsing, uploads, file management, sharing, search and
+notifications remain later frontend milestones. No backend API or infrastructure
+change is included; [the frontend README](../frontend/README.md) records limits.
+
 ## MVP Backend API Contract Freeze and Frontend Readiness Review
 
 - [x] Review controllers/DTOs, security/filter/advice, services/migrations and representative integration tests against contracts/ADRs.
@@ -9,8 +25,8 @@
 - [x] Record deliberate deferrals, compatibility policy and [freeze verification](api-contract-freeze.md).
 - [ ] Close real-browser HTTPS/CORS/native-expiry/recovery/clock gate through its separately approved procedure; **unchanged and unresolved**.
 
-Stop at this backend handoff. Next.js implementation, deployment, reclamation,
-retention/erasure and capacity evidence remain separate work.
+That milestone stopped at the backend handoff. Frontend M1 is recorded above;
+deployment, reclamation, retention/erasure and capacity evidence remain separate work.
 
 ## Real-browser multipart interoperability recheck (2026-10-23; blocked)
 

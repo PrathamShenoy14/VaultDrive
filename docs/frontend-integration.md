@@ -16,7 +16,12 @@ Cookie, Set-Cookie, X-VaultDrive-CSRF, X-VaultDrive-Client, Idempotency-Key,
 If-Match, ETag, Location, Retry-After, Date and download headers. Disable response
 caching and automatic mutation retries in the proxy. Apply the same no-cache rule
 to Next.js server fetches and personalized route caches. Keep credentials out of
-logs, URLs, analytics and error reports. No frontend is implemented by this guide.
+logs, URLs, analytics and error reports. This remains the backend integration
+contract. [Frontend M1](../frontend/README.md) implements a server-held BFF variant:
+browser login/refresh return 204 without readable JWT/CSRF credentials, while the
+Next.js server follows the backend contract below. See
+[ADR-0017](decisions/0017-frontend-bff-sessions.md) for the explicit single-process
+boundary, cookie handling, serialized rotation and fail-closed restart behavior.
 
 Spring Security has **no cross-origin API CORS policy**. A browser at a different
 scheme/host/port cannot use a direct credentialed API integration. Do not solve
