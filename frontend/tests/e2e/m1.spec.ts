@@ -111,7 +111,7 @@ test("real backend registration/login/profile/quota, shell navigation and commit
   const unknown = await request.get("/api/v1/files", {
     headers: { Cookie: session },
   });
-  expect(unknown.status()).toBe(404);
+  expect(unknown.status()).toBe(200);
   const csrfDenied = await request.post("/api/v1/auth/logout", {
     headers: {
       Cookie: session,
@@ -126,7 +126,7 @@ test("real backend registration/login/profile/quota, shell navigation and commit
   ).toBeVisible();
   await expect(
     page.getByRole("textbox", { name: /Search in VaultDrive/ }),
-  ).toBeDisabled();
+  ).toBeEnabled();
   const mobile = page.getByRole("button", { name: "Open navigation" });
   if (await mobile.isVisible()) {
     await mobile.click();
@@ -160,7 +160,7 @@ test("real backend registration/login/profile/quota, shell navigation and commit
     .filter({ visible: true })
     .click();
   await expect(
-    page.getByRole("heading", { name: "Shared", exact: true }),
+    page.getByRole("heading", { name: "Shared with me", exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: /Account menu for/ }).click();
   await page.getByRole("menuitem", { name: "Your account" }).click();

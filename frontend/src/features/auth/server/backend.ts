@@ -20,11 +20,14 @@ export async function backend(path: string, init: RequestInit = {}) {
         ...Object.fromEntries(new Headers(init.headers)),
       },
     });
-  } catch {
+  } catch (error) {
+    const timeout = error instanceof Error && error.name === "TimeoutError";
     throw new ApiError({
       status: 502,
-      error: "BAD_GATEWAY",
-      message: "The backend is unreachable. Please try again later.",
+      error: timeout ? "UPSTREAM_TIMEOUT" : "BAD_GATEWAY",
+      message: timeout
+        ? "The backend request timed out. Please try again."
+        : "The backend is unreachable. Please try again later.",
     });
   }
 }

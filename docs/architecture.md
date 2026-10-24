@@ -2,14 +2,33 @@
 
 Last reconciled with the repository on 2026-10-24. This is the current implementation map. Earlier phase records and ADR extensions preserve history; their original boundaries are not the current inventory.
 
-## Frontend M1: foundation, authentication and app shell
+## Frontend M1–M2: authentication, shell and read-only explorer
 
 `frontend/` is an independently buildable Next.js App Router/strict TypeScript app
 with Tailwind, shadcn Base UI, Lucide and next-themes. Server Components guard
-`/drive`, `/shared`, `/activity` and `/trash`; client forms implement real
+`/drive`, `/shared`, `/search`, `/activity` and `/trash`; client forms implement real
 registration/login/logout, and `/session/restore` uses the sole Route Handler
-refresh coordinator. Profile and logical quota come from the backend. File/search/
-sharing/activity/Trash features are explicit placeholders, without fabricated feeds.
+refresh coordinator. Profile and logical quota come from the backend. M2 adds
+root/child file and folder feeds, capability-aware Shared entry points and traversal,
+filename/filter search, fresh metadata details, and read-only common-entry Trash.
+Only activity remains a placeholder. Mutations, preview, downloads and sharing
+management remain deferred.
+
+Explorer URL parameters preserve folder/search/filter/view state across reload and
+history navigation. Each file/folder/Trash feed requests 50 entries independently
+and loads further pages only on user action. Server fixed orders are displayed;
+no arbitrary sort parameter or misleading sorting of a loaded subset is offered.
+Breadcrumbs read only returned accessible parent IDs, stop at null/denial, and
+use Shared entry points without asserting a collaborator's root. Traversal is
+cycle/depth bounded. Roles/capabilities are backend snapshots, never client grants.
+
+The M2 BFF adds only documented metadata/list/search GETs and per-route query
+allowlists, rejects duplicates/oversized queries, and preserves lossless int64
+strings/counters. Client feeds abort on scope changes; stale completions cannot
+replace a new scope. Navigation/refresh discards selection and feed state; list/grid
+switching preserves both. Explicit refresh rereads resources and server quota.
+Simple local feed state and native selection controls need no Query/Table dependency;
+there is no cross-session client resource cache or automatic request retry.
 
 The same-origin allowlisted BFF holds JWT/CSRF/current refresh state server-side,
 uses a Secure/HttpOnly/Strict opaque host cookie and forwards individual backend
@@ -41,7 +60,7 @@ credential/CSRF rotation, redacted navigation, transfer/copy/deletion states and
 explicit recovery. No new endpoint is required for those bounded MVP flows.
 Public-link downloads retain octet-stream MIME, including empty files. Contract
 readiness does not close the [real-browser gate](browser-multipart-verification-2026-10-23.md)
-or operational launch gates. Frontend M1 is implemented as described above;
+or operational launch gates. Frontend M1–M2 is implemented as described above;
 deployment and infrastructure remain outside that milestone.
 
 ## System and responsibility boundaries

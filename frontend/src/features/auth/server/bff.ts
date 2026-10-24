@@ -1,6 +1,7 @@
 import "server-only";
 import { env } from "@/lib/env";
 import { ApiError } from "@/lib/api/transport";
+import { readQueryKeys, validReadQuery } from "@/features/explorer/read-policy";
 import { applyIssued, backend, ensureFresh, unauthorized } from "./backend";
 import {
   captureCookies,
@@ -100,14 +101,16 @@ function errorResponse(error: unknown) {
     : failure(502, "BAD_GATEWAY", "Unable to complete the request.");
 }
 async function handle(request: Request, path: string) {
-  const method = allowed.get(path);
+  const readKeys = readQueryKeys(path);
+  const method = allowed.get(path) ?? (readKeys ? "GET" : undefined);
   if (!method) return failure(404, "NOT_FOUND", "Resource unavailable");
   if (request.method !== method) {
     const response = failure(405, "METHOD_NOT_ALLOWED", "Method not allowed");
     response.headers.set("Allow", method);
     return response;
   }
-  if (new URL(request.url).search)
+  const url = new URL(request.url);
+  if (!validReadQuery(url.searchParams, readKeys ?? []))
     return failure(400, "BAD_REQUEST", "Query parameters are not supported");
   if (method === "POST" && !sameOriginMutation(request))
     return failure(403, "FORBIDDEN", "Permission denied");
@@ -177,7 +180,7 @@ async function handle(request: Request, path: string) {
     }
     try {
       const logout = path === "auth/logout";
-      const response = await backend(`/api/v1/${path}`, {
+      const response = await backend(`/api/v1/${path}${url.search}`, {
         method,
         headers: {
           Authorization: `Bearer ${session.access}`,

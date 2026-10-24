@@ -55,6 +55,97 @@ function request(path: string, id?: string, extra: RequestInit = {}) {
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn());
 });
+
+describe("M2 read-only BFF boundary (isolated backend)", () => {
+  const uuid = "11111111-1111-4111-8111-111111111111";
+  it.each([
+    "folders?page=1&size=50",
+    "files?folderId=" + uuid + "&page=0&size=50",
+    `folders/${uuid}`,
+    `folders/${uuid}/children?page=0&size=50`,
+    `files/${uuid}`,
+    "shared-with-me?page=0&size=50",
+    "files/trash?page=0&size=50",
+    "trash/folders?page=0&size=50",
+    "search?q=a%25_b&scope=SHARED&maxSizeBytes=9223372036854775807&modifiedFrom=2026-10-01T00%3A00%3A00Z&page=1&size=50",
+  ])("forwards only bearer-authenticated documented GET %s", async (path) => {
+    const session = fixture();
+    vi.mocked(fetch).mockResolvedValue(Response.json({ content: [] }));
+    const response = await bff(
+      request(path, session.id, {
+        headers: {
+          Authorization: "Bearer attacker",
+          "X-VaultDrive-CSRF": "attacker",
+        },
+      }),
+      path.split("?")[0]!,
+    );
+    expect(response.status).toBe(200);
+    expect(String(vi.mocked(fetch).mock.calls[0]![0])).toBe(
+      `http://127.0.0.1:8080/api/v1/${path}`,
+    );
+    const sent = new Headers(vi.mocked(fetch).mock.calls[0]![1]?.headers);
+    expect(sent.get("Authorization")).toBe("Bearer access");
+    expect(sent.has("Cookie")).toBe(false);
+    expect(sent.has("X-VaultDrive-CSRF")).toBe(false);
+    expect(response.headers.get("Cache-Control")).toContain("no-store");
+    sessions.delete(session.id);
+  });
+  it.each([
+    "files?sort=name",
+    "folders?page=0&page=1",
+    "search?q=x&ownerId=private",
+    "users/me?q=x",
+    "files?x=" + "a".repeat(4097),
+  ])("rejects unsupported, duplicate or oversized query %s", async (path) => {
+    const response = await bff(request(path), path.split("?")[0]!);
+    expect(response.status).toBe(400);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it.each([
+    `files/${uuid}/download`,
+    `folders/${uuid}/grants`,
+    `files/${uuid}/copy`,
+    `trash/folders/${uuid}/restore`,
+    "files/not-a-uuid",
+    "folders/../users/me",
+  ])("keeps later-milestone or malformed path closed: %s", async (path) => {
+    expect((await bff(request(path), path)).status).toBe(404);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it.each(["POST", "PATCH", "DELETE"])(
+    "does not expose resource mutations via %s",
+    async (method) => {
+      expect(
+        (await bff(request("folders", undefined, { method }), "folders"))
+          .status,
+      ).toBe(405);
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+  it.each([403, 404, 429, 503])(
+    "preserves backend read failure %i and Retry-After",
+    async (status) => {
+      const session = fixture();
+      const body = { status, error: "ERROR", message: "Unavailable" };
+      vi.mocked(fetch).mockResolvedValue(
+        Response.json(body, { status, headers: { "Retry-After": "1" } }),
+      );
+      const response = await bff(
+        request("search?q=test", session.id),
+        "search",
+      );
+      expect(response.status).toBe(status);
+      expect(await response.json()).toEqual(body);
+      expect(response.headers.get("Retry-After")).toBe("1");
+      sessions.delete(session.id);
+    },
+  );
+  it("requires a session before listing root resources", async () => {
+    expect((await bff(request("files"), "files")).status).toBe(401);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
 describe("BFF auth and cookie boundary (isolated backend fetch)", () => {
   it("forwards committed rotation cookies even when the following request loses its response", async () => {
     const session = fixture(true);
@@ -357,7 +448,10 @@ describe("BFF auth and cookie boundary (isolated backend fetch)", () => {
         )
       ).status,
     ).toBe(400);
-    expect((await bff(request("files"), "files")).status).toBe(404);
+    expect(
+      (await bff(request("files/example/download"), "files/example/download"))
+        .status,
+    ).toBe(404);
     expect(
       (
         await bff(

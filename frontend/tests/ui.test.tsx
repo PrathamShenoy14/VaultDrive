@@ -8,6 +8,7 @@ import { AccountMenu } from "@/features/shell/account-menu";
 vi.mock("next/navigation", () => ({
   usePathname: () => "/drive",
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock("next-themes", () => ({
   useTheme: () => ({ resolvedTheme: "light", setTheme: vi.fn() }),
@@ -117,7 +118,7 @@ describe("primary accessible controls", () => {
     expect(screen.getByRole("meter")).toHaveAttribute("aria-valuenow", "100");
     expect(screen.getByText("2 B of 0 B used or reserved")).toBeVisible();
   });
-  it("renders navigation, unavailable search and account controls", () => {
+  it("renders navigation, connected search and account controls", () => {
     render(
       <AppShell profile={profile} storage={<p>Storage</p>}>
         <h1>My Drive</h1>
@@ -129,7 +130,7 @@ describe("primary accessible controls", () => {
     );
     expect(
       screen.getByRole("textbox", { name: /Search in VaultDrive/ }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     expect(
       screen.getByRole("button", { name: /Account menu for Alice/ }),
     ).toBeVisible();

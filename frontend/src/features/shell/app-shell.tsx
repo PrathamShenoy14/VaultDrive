@@ -2,11 +2,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { Menu, Plus, Search, ChevronRight, ShieldCheck } from "lucide-react";
+import { Menu, Plus, ShieldCheck } from "lucide-react";
 import { Brand } from "@/components/brand";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { SearchBox } from "@/features/explorer/search-box";
 import {
   Sheet,
   SheetContent,
@@ -54,9 +54,6 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const [mobile, setMobile] = useState(false);
-  const pathname = usePathname();
-  const current =
-    navigation.find((item) => item.href === pathname)?.label ?? "My Drive";
   const side = (
     <>
       <div className="mb-7 px-3">
@@ -114,21 +111,7 @@ export function AppShell({
               {side}
             </SheetContent>
           </Sheet>
-          <div className="relative max-w-2xl min-w-0 flex-1">
-            <Search
-              aria-hidden="true"
-              className="pointer-events-none absolute top-3 left-4 size-5 text-muted-foreground"
-            />
-            <Input
-              aria-label="Search in VaultDrive, coming soon"
-              placeholder="Search in VaultDrive"
-              disabled
-              className="h-11 rounded-full border-transparent bg-secondary/70 pr-12 pl-12 shadow-none disabled:opacity-100"
-            />
-            <span className="absolute top-4 right-4 hidden text-[10px] text-foreground sm:block">
-              Soon
-            </span>
-          </div>
+          <SearchBox />
           <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-3">
             <ThemeToggle />
             <AccountMenu profile={profile} />
@@ -140,16 +123,6 @@ export function AppShell({
             tabIndex={-1}
             className="min-h-[calc(100svh-6.25rem)] rounded-2xl border bg-card p-5 outline-none sm:p-8 lg:p-10"
           >
-            <nav
-              aria-label="Breadcrumb"
-              className="mb-7 flex items-center gap-2 text-xs text-muted-foreground"
-            >
-              <span>Workspace</span>
-              <ChevronRight className="size-3" aria-hidden="true" />
-              <span aria-current="page" className="text-foreground">
-                {current}
-              </span>
-            </nav>
             {children}
             <footer className="mt-12 flex items-center gap-2 border-t pt-5 text-xs text-muted-foreground">
               <ShieldCheck className="size-3.5" aria-hidden="true" />

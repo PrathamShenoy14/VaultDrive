@@ -1,5 +1,28 @@
 # Implementation learnings
 
+## Explorer state must respect separate pages and redacted ancestry
+
+The backend exposes independent folder/file feeds with different fixed name
+orders. Sorting only loaded entries by size/date would imply a global order that
+does not exist. M2 displays each feed's supported order and totals separately,
+requests 50 entries at a time and makes further loading explicit. Query/Table
+dependencies add little for this bounded read-only interaction; scope-local state,
+abort signals and stale-completion guards cover it without a persistent cache.
+
+A null parent is ambiguous for collaborators. Breadcrumbs follow only parent IDs
+returned by current metadata, stop at redaction/denial and label Shared as entry
+points rather than asserting ownership/root hierarchy. Selection uses type plus
+UUID, so separate file/folder namespaces cannot collide. Details reread metadata
+instead of treating a search result or historical entry as enduring authority.
+Trash uses its own common-entry DTO and never calls an active-resource endpoint
+to reconstruct hidden hierarchy. Byte filters remain decimal strings; response
+sizes, page totals and quota counters retain int64 precision through lossless JSON.
+
+Component tests mock HTTP/router boundaries. Live Chrome tests use actual Spring,
+PostgreSQL and fixture APIs but bootstrap the BFF cookie through an HTTP test
+client on localhost; that does not prove trusted-HTTPS browser authentication.
+Neither kind of read-only verification closes multipart/CORS/clock release gates.
+
 ## An API freeze needs transport and lifecycle evidence
 
 The MVP review exports registered MVC routes and reachable record DTOs, then

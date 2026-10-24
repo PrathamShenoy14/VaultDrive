@@ -46,12 +46,28 @@ export function Storage({ usage }: { usage: Usage }) {
         {formatBytes(charged)} of {formatBytes(usage.limitBytes)} used or
         reserved
       </p>
-      {usage.reservedBytes > 0n && (
-        <p className="text-xs text-muted-foreground">
-          {formatBytes(usage.reservedBytes)} reserved
-        </p>
-      )}
-      <p className="text-xs text-muted-foreground">
+      <p
+        className="text-xs text-muted-foreground"
+        title={`${usage.usedBytes} bytes used`}
+      >
+        {formatBytes(usage.usedBytes)} used
+      </p>
+      <p
+        className="text-xs text-muted-foreground"
+        title={`${usage.reservedBytes} bytes reserved`}
+      >
+        {formatBytes(usage.reservedBytes)} reserved
+      </p>
+      <p
+        className="text-xs text-muted-foreground"
+        title={`${usage.limitBytes} byte limit`}
+      >
+        {formatBytes(usage.limitBytes)} limit
+      </p>
+      <p
+        className="text-xs text-muted-foreground"
+        title={`${usage.availableBytes} bytes available`}
+      >
         {formatBytes(usage.availableBytes)} available
       </p>
       <p className="text-[11px] leading-relaxed text-muted-foreground">

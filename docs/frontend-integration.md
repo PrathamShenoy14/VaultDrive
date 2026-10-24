@@ -23,6 +23,13 @@ Next.js server follows the backend contract below. See
 [ADR-0017](decisions/0017-frontend-bff-sessions.md) for the explicit single-process
 boundary, cookie handling, serialized rotation and fail-closed restart behavior.
 
+[Frontend M2](../frontend/README.md) now implements read-only Drive/Shared/Trash
+navigation and filename/filter search through additional allowlisted BFF GETs.
+It forwards only documented per-route query names, preserves fixed backend
+orders, requests independent 50-entry pages and never reconstructs private
+ancestry. Preview/download/mutation/sharing-management endpoints remain closed
+at that frontend boundary. The backend freeze and release gates are unchanged.
+
 Spring Security has **no cross-origin API CORS policy**. A browser at a different
 scheme/host/port cannot use a direct credentialed API integration. Do not solve
 this by weakening Secure/Strict cookies or reflecting origins. A same-origin proxy

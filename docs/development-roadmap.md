@@ -1,5 +1,24 @@
 # Development roadmap
 
+## Frontend M2 — File Explorer, Navigation, and Search
+
+- [x] Real root/nested folder and file feeds, accessible breadcrumbs and URL history.
+- [x] Responsive list/grid views, independent 50-entry pages and explicit incremental loading.
+- [x] Selection, keyboard navigation, context/action menus and fresh metadata details.
+- [x] Debounced filename search with all documented filters, clear/reset and pagination.
+- [x] Shared entry points and children using backend roles/capabilities and redacted ancestry.
+- [x] Separate bounded Trash feeds, lifecycle details and deferred M4 actions.
+- [x] Lossless used/reserved/limit counters and explicit resource/quota refresh.
+- [x] Narrow read-only BFF extension, abort/stale-result handling and actionable errors.
+- [x] Component/BFF tests, live backend contract checks and Chrome integration scenarios; see [frontend verification](../frontend/README.md#verification).
+- [x] Frontend, architecture and learning documentation.
+
+Stop after M2. Uploads, downloads, preview, namespace/file mutations, sharing
+management, activity and notifications remain later milestones. The backend
+fixed ordering is the only supported sorting; no backend API/schema change or
+additional frontend dependencies are introduced. HTTPS/browser release gates
+and single-process session limits remain open.
+
 ## Frontend M1 — Next.js foundation, authentication and app shell
 
 - [x] Independently buildable App Router frontend, strict TypeScript, Tailwind, shadcn Base UI, Lucide and light/dark themes.
@@ -12,9 +31,9 @@
 - [ ] Trusted HTTPS real-browser authentication and the existing multipart/CORS/clock release matrix remain unverified/open.
 - [ ] Shared durable frontend session coordination before serverless/multi-replica deployment.
 
-Stop after M1. File browsing, uploads, file management, sharing, search and
-notifications remain later frontend milestones. No backend API or infrastructure
-change is included; [the frontend README](../frontend/README.md) records limits.
+M1 stopped at the shell. M2 above adds read-only browsing/search/shared/Trash.
+No backend API or infrastructure change is included;
+[the frontend README](../frontend/README.md) records current limits.
 
 ## MVP Backend API Contract Freeze and Frontend Readiness Review
 
@@ -25,7 +44,7 @@ change is included; [the frontend README](../frontend/README.md) records limits.
 - [x] Record deliberate deferrals, compatibility policy and [freeze verification](api-contract-freeze.md).
 - [ ] Close real-browser HTTPS/CORS/native-expiry/recovery/clock gate through its separately approved procedure; **unchanged and unresolved**.
 
-That milestone stopped at the backend handoff. Frontend M1 is recorded above;
+That milestone stopped at the backend handoff. Frontend M1–M2 is recorded above;
 deployment, reclamation, retention/erasure and capacity evidence remain separate work.
 
 ## Real-browser multipart interoperability recheck (2026-10-23; blocked)

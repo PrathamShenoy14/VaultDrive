@@ -1,7 +1,9 @@
-import { protectedRead } from "@/features/auth/server/current-user";
-import { MilestonePage } from "@/features/shell/milestone-page";
+import { ExplorerPage, type ExplorerParams } from "@/features/explorer/page";
 export const metadata = { title: "Trash" };
-export default async function Trash() {
-  await protectedRead("/api/v1/users/me");
-  return <MilestonePage section="trash" />;
+export default function Trash({
+  searchParams,
+}: {
+  searchParams: ExplorerParams;
+}) {
+  return <ExplorerPage mode="trash" searchParams={searchParams} />;
 }
