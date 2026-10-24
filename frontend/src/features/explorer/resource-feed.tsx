@@ -395,7 +395,7 @@ export function ResourceFeed({
                 ? "Resources shared directly with you will appear here."
                 : feed.kind.startsWith("trash")
                   ? "Trashed items will appear here. Restore and permanent deletion arrive in M4."
-                  : "This location is empty. Uploads and new folders arrive in later milestones."}
+                  : "This location is empty. Upload files into My Drive or a folder where you have upload access."}
           </p>
         </div>
       )}

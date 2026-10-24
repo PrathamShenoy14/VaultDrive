@@ -23,3 +23,20 @@ Browser-held access tokens plus Web Locks/BroadcastChannel were deferred: all cu
 The typed client generates from frozen OpenAPI, parses int64 losslessly and normalizes quota arithmetic to bigint. Ordinary UI data comes from Server Components, so a client server-state cache is unnecessary in M1.
 
 Tests separate isolated BFF race/error coverage, real Spring/PostgreSQL contract/session checks and local Chrome layout/accessibility checks. Local HTTP tests with explicit Origin/session bootstrap are not browser HTTPS authentication proof. The existing HTTPS/CORS/clock/multipart release gate remains unresolved. See [frontend architecture and commands](../../frontend/README.md).
+
+## Frontend M3 streaming extension
+
+M3 adds only documented transfer control/status, empty creation/recovery and native
+download routes to the BFF allowlist. Multipart bytes go directly to HTTPS Garage
+with immutable signed checksum/length capabilities and no API credentials. All
+control mutations retain exact-origin/custom-header admission and no automatic
+retry. The server-held credential/rotation model is unchanged.
+
+Download authorization and upstream header acquisition remain under the per-session
+lock. The response body streams after releasing that lock, so a slow download
+does not hold the credential coordinator for its entire lifetime. Client abort
+and a separate stream deadline reach the upstream request; the metadata header
+deadline does not truncate a valid long stream. Current backend authorization is
+still checked for each new download; already admitted streams can finish after
+revocation. Native download UI reports browser ownership rather than fabricating
+completion on a link click. See [transfer limits and verification](../frontend-m3-transfers.md).

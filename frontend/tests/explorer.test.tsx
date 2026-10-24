@@ -260,7 +260,7 @@ describe("M2 explorer with mocked HTTP responses", () => {
     await user.keyboard("{Escape}");
     await waitFor(() => expect(name).toHaveFocus());
   });
-  it("offers an accessible menu and defers mutations and downloads", async () => {
+  it("offers an accessible download menu and defers mutations", async () => {
     const user = userEvent.setup();
     backend();
     render(<Explorer mode="drive" />);
@@ -269,9 +269,9 @@ describe("M2 explorer with mocked HTTP responses", () => {
     );
     expect(
       await screen.findByRole("menuitem", {
-        name: "Download · later milestone",
+        name: "Download",
       }),
-    ).toHaveAttribute("aria-disabled", "true");
+    ).toHaveAttribute("href", `/api/v1/files/${fileId}/download`);
     expect(
       screen.getByRole("menuitem", { name: "Rename · later milestone" }),
     ).toHaveAttribute("aria-disabled", "true");

@@ -5,6 +5,7 @@ import { protectedRead } from "@/features/auth/server/current-user";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StorageRetry } from "@/features/shell/storage-retry";
 import { unstable_rethrow } from "next/navigation";
+import { TransferProvider } from "@/features/transfers/provider";
 export const dynamic = "force-dynamic";
 async function StorageUsage() {
   let usage;
@@ -24,26 +25,28 @@ export default async function WorkspaceLayout({
 }) {
   const profile = await protectedRead("/api/v1/users/me");
   return (
-    <AppShell
-      profile={profile}
-      storage={
-        <Suspense
-          fallback={
-            <div
-              role="status"
-              aria-label="Loading storage usage"
-              className="space-y-3"
-            >
-              <Skeleton className="h-4 w-24" />
-              <Skeleton className="h-2 w-full" />
-            </div>
-          }
-        >
-          <StorageUsage />
-        </Suspense>
-      }
-    >
-      {children}
-    </AppShell>
+    <TransferProvider key={profile.userId} userId={profile.userId}>
+      <AppShell
+        profile={profile}
+        storage={
+          <Suspense
+            fallback={
+              <div
+                role="status"
+                aria-label="Loading storage usage"
+                className="space-y-3"
+              >
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-2 w-full" />
+              </div>
+            }
+          >
+            <StorageUsage />
+          </Suspense>
+        }
+      >
+        {children}
+      </AppShell>
+    </TransferProvider>
   );
 }

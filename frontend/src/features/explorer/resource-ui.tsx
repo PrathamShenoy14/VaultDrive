@@ -27,6 +27,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { errorMessage, ApiError } from "@/lib/api/transport";
 import { formatBytes } from "@/features/shell/storage";
 import { getMetadata } from "./api";
+import { downloadHref } from "@/features/transfers/download";
 import {
   canOpen,
   canRead,
@@ -130,11 +131,20 @@ export function EntryMenu({
           </>
         ) : (
           <>
-            {entry.resource.allowedCapabilities.includes("DOWNLOAD") && (
-              <DropdownMenuItem disabled>
-                Download · later milestone
-              </DropdownMenuItem>
-            )}
+            {entry.resourceType === "FILE" &&
+              entry.resource.allowedCapabilities.includes("DOWNLOAD") && (
+                <DropdownMenuItem
+                  render={
+                    <a
+                      href={downloadHref(entry.resource.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    />
+                  }
+                >
+                  Download
+                </DropdownMenuItem>
+              )}
             {entry.resource.allowedCapabilities.includes("RENAME") && (
               <DropdownMenuItem disabled>
                 Rename · later milestone

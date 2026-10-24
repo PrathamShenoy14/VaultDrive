@@ -1,5 +1,12 @@
 # MVP operational hardening
 
+Frontend M3 consumes these unchanged controls through a narrow authenticated BFF.
+Its [bounded transfer/recovery UX](frontend-m3-transfers.md) polls status without
+automatic control mutation retries and preserves unknown outcomes. Native file
+downloads stream through Next.js with request cancellation and separate header/
+stream deadlines; Chrome owns transfer interruption/completion. No processor,
+VM, Garage CORS, DNS, certificate, port or firewall configuration is changed.
+
 ## API freeze integration boundary
 
 The [freeze](api-contract-freeze.md) and [frontend guide](frontend-integration.md)

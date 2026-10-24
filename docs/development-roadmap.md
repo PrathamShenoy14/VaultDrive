@@ -1,5 +1,23 @@
 # Development roadmap
 
+## Frontend M3 — Uploads, Downloads, and Transfer Management
+
+- [x] File picker/drop into owned root or freshly upload-capable folders; direct immutable checksum/length-bound parts.
+- [x] Two active file/control tasks, one sliced part per file, 50-entry queue, per-file/overall provisional progress.
+- [x] Exact opaque ETag/checksum/size evidence, backend-selected completion and bounded status-only polling.
+- [x] Safe explicit admission/part retry, original-file re-selection/resume, cancellation and distinct blocked/unknown/failed outcomes.
+- [x] Dedicated empty-file admission/status/recovery with no zero-byte multipart or fabricated cancellation.
+- [x] Authenticated native streaming downloads preserving MIME/disposition/length, no large BFF buffer and clear browser-owned interruption reporting.
+- [x] Explorer menus/selection, transfer panel, quota/resource refresh, keyboard and mobile controls.
+- [x] Mocked frontend, backend/Garage and real Chrome evidence reported separately in [frontend verification](../frontend/README.md#verification).
+- [x] [State transitions, recovery UX, transfer limits and reproducible continuation](frontend-m3-transfers.md).
+- [ ] Trusted HTTPS direct-browser Garage multipart/CORS/native-expiry/fault/revocation/clock matrix remains blocked/open.
+
+Stop after M3. Preview, namespace/file mutations, sharing management and
+notifications remain outside the slice. No backend frozen contract or shared
+infrastructure changes are included. Local HTTP session bootstrap and mocked
+Chrome uploads do not close the existing browser release gate.
+
 ## Frontend M2 — File Explorer, Navigation, and Search
 
 - [x] Real root/nested folder and file feeds, accessible breadcrumbs and URL history.
@@ -13,8 +31,8 @@
 - [x] Component/BFF tests, live backend contract checks and Chrome integration scenarios; see [frontend verification](../frontend/README.md#verification).
 - [x] Frontend, architecture and learning documentation.
 
-Stop after M2. Uploads, downloads, preview, namespace/file mutations, sharing
-management, activity and notifications remain later milestones. The backend
+M2 stopped before transfers; M3 above adds uploads and downloads. Preview,
+namespace/file mutations, sharing management, activity and notifications remain later milestones. The backend
 fixed ordering is the only supported sorting; no backend API/schema change or
 additional frontend dependencies are introduced. HTTPS/browser release gates
 and single-process session limits remain open.

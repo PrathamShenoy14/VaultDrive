@@ -16,6 +16,8 @@ import { Breadcrumbs } from "./breadcrumbs";
 import { ResourceFeed, type Selection } from "./resource-feed";
 import { DetailsPanel, ReadError } from "./resource-ui";
 import { SearchFilters } from "./search-filters";
+import { UploadZone } from "@/features/transfers/upload-zone";
+import { DownloadAction } from "@/features/transfers/download";
 
 export type ExplorerMode = "drive" | "shared" | "trash" | "search";
 export function Explorer({
@@ -32,6 +34,12 @@ export function Explorer({
   const params = useSearchParams();
   const grid = params.get("view") === "grid";
   const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    const changed = () => setRevision((value) => value + 1);
+    window.addEventListener("vaultdrive:transfers-changed", changed);
+    return () =>
+      window.removeEventListener("vaultdrive:transfers-changed", changed);
+  }, []);
   const refresh = () => {
     setRevision((value) => value + 1);
     router.refresh();
@@ -129,8 +137,8 @@ export function Explorer({
       </div>
       {mode === "trash" && (
         <p className="rounded-xl bg-muted/50 p-4 text-sm text-muted-foreground">
-          Trash is read-only in M2. Restore and permanent deletion arrive in M4.
-          Pending entries may have no available actions.
+          Restore and permanent deletion arrive in M4. Pending entries may have
+          no available actions.
         </p>
       )}
       <Scope
@@ -205,7 +213,7 @@ function Scope({
     setSelection,
     details: setDetails,
   };
-  return (
+  const content = (
     <>
       {metadata && (
         <>
@@ -275,6 +283,10 @@ function Scope({
           <Info aria-hidden="true" />
           Details
         </Button>
+        {single?.resourceType === "FILE" &&
+          single.resource.allowedCapabilities.includes("DOWNLOAD") && (
+            <DownloadAction id={single.resource.id} />
+          )}
         <Button
           variant="ghost"
           size="icon-sm"
@@ -341,5 +353,14 @@ function Scope({
       )}
       <DetailsPanel entry={details} close={() => setDetails(null)} />
     </>
+  );
+  const canUpload =
+    (mode === "drive" && !folder) ||
+    ((mode === "drive" || mode === "shared") &&
+      metadata?.allowedCapabilities.includes("UPLOAD"));
+  return canUpload ? (
+    <UploadZone folderId={folder ?? null}>{content}</UploadZone>
+  ) : (
+    content
   );
 }

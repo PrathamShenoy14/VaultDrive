@@ -27,8 +27,10 @@ boundary, cookie handling, serialized rotation and fail-closed restart behavior.
 navigation and filename/filter search through additional allowlisted BFF GETs.
 It forwards only documented per-route query names, preserves fixed backend
 orders, requests independent 50-entry pages and never reconstructs private
-ancestry. Preview/download/mutation/sharing-management endpoints remain closed
-at that frontend boundary. The backend freeze and release gates are unchanged.
+ancestry. [Frontend M3](frontend-m3-transfers.md) adds bounded direct browser parts,
+upload/empty recovery controls and native authenticated streaming downloads to the
+same BFF. No multipart bytes traverse the BFF. Preview, namespace/file mutations
+and sharing management remain closed. The backend freeze and release gates are unchanged.
 
 Spring Security has **no cross-origin API CORS policy**. A browser at a different
 scheme/host/port cannot use a direct credentialed API integration. Do not solve

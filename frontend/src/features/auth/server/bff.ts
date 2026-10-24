@@ -2,6 +2,7 @@ import "server-only";
 import { env } from "@/lib/env";
 import { ApiError } from "@/lib/api/transport";
 import { readQueryKeys, validReadQuery } from "@/features/explorer/read-policy";
+import { transferPolicy } from "@/features/transfers/policy";
 import { applyIssued, backend, ensureFresh, unauthorized } from "./backend";
 import {
   captureCookies,
@@ -48,6 +49,9 @@ export function forward(response: Response, cookies: string[] = []) {
     "Location",
     "ETag",
     "Allow",
+    "Content-Disposition",
+    "Content-Length",
+    "X-Content-Type-Options",
   ]) {
     const value = response.headers.get(name);
     if (value) headers.set(name, value);
@@ -90,6 +94,32 @@ export async function bff(request: Request, path: string): Promise<Response> {
   } catch (error) {
     result = errorResponse(error);
   }
+  if (
+    transferPolicy(path)?.download &&
+    !result.ok &&
+    request.headers.get("Accept")?.includes("text/html")
+  ) {
+    const status = result.status;
+    // Native navigation owns the file stream. Pre-stream errors get a safe,
+    // accessible page; neither credentials nor provider text enter the document.
+    const message =
+      status === 401
+        ? "Your session has ended. Sign in again before retrying the download."
+        : status === 403 || status === 404
+          ? "This file is unavailable or your current access does not allow downloading it."
+          : status === 429
+            ? "Download capacity is busy. Wait before trying again."
+            : "The download could not start. Check your connection and try again.";
+    const headers = new Headers(result.headers);
+    headers.set("Content-Type", "text/html; charset=utf-8");
+    headers.delete("Content-Length");
+    headers.delete("Content-Disposition");
+    void result.body?.cancel();
+    result = new Response(
+      `<!doctype html><html lang="en"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Download unavailable · VaultDrive</title><body><main><h1>Download unavailable</h1><p>${message}</p><p>HTTP ${status}. Downloads have no automatic retry or Range resume. After a transfer starts, check the browser download panel for interruptions.</p><p><a href="/login">Sign in</a> · <a href="/drive">My Drive</a></p></main></body></html>`,
+      { status, headers },
+    );
+  }
   return noStore(result);
 }
 function errorResponse(error: unknown) {
@@ -101,8 +131,10 @@ function errorResponse(error: unknown) {
     : failure(502, "BAD_GATEWAY", "Unable to complete the request.");
 }
 async function handle(request: Request, path: string) {
+  const transfer = transferPolicy(path);
   const readKeys = readQueryKeys(path);
-  const method = allowed.get(path) ?? (readKeys ? "GET" : undefined);
+  const method =
+    allowed.get(path) ?? transfer?.methods[0] ?? (readKeys ? "GET" : undefined);
   if (!method) return failure(404, "NOT_FOUND", "Resource unavailable");
   if (request.method !== method) {
     const response = failure(405, "METHOD_NOT_ALLOWED", "Method not allowed");
@@ -110,10 +142,43 @@ async function handle(request: Request, path: string) {
     return response;
   }
   const url = new URL(request.url);
-  if (!validReadQuery(url.searchParams, readKeys ?? []))
+  if (!validReadQuery(url.searchParams, transfer?.query ?? readKeys ?? []))
     return failure(400, "BAD_REQUEST", "Query parameters are not supported");
   if (method === "POST" && !sameOriginMutation(request))
     return failure(403, "FORBIDDEN", "Permission denied");
+  if (
+    transfer?.download &&
+    (["cross-site", "same-site"].includes(
+      request.headers.get("Sec-Fetch-Site") ?? "",
+    ) ||
+      (request.headers.has("Origin") &&
+        request.headers.get("Origin") !== env().APP_ORIGIN))
+  )
+    return failure(403, "FORBIDDEN", "Permission denied");
+  let transferBody: string | undefined;
+  if (transfer && method === "POST") {
+    if (
+      transfer.json &&
+      request.headers
+        .get("Content-Type")
+        ?.split(";", 1)[0]
+        ?.trim()
+        .toLowerCase() !== "application/json"
+    )
+      return failure(415, "UNSUPPORTED_MEDIA_TYPE", "JSON is required");
+    if (Number(request.headers.get("Content-Length")) > 16384)
+      return failure(413, "CONTENT_TOO_LARGE", "Request is too large");
+    transferBody = await boundedBody(request);
+    if (transferBody === undefined)
+      return failure(413, "CONTENT_TOO_LARGE", "Request is too large");
+    if (!transfer.json && transferBody !== "")
+      return failure(400, "BAD_REQUEST", "This operation accepts no body");
+    if (
+      transfer.key &&
+      !/^[!-~]{1,128}$/.test(request.headers.get("Idempotency-Key") ?? "")
+    )
+      return failure(400, "BAD_REQUEST", "An idempotency key is required");
+  }
   if (path === "auth/register" || path === "auth/login") {
     if (
       request.headers
@@ -180,18 +245,32 @@ async function handle(request: Request, path: string) {
     }
     try {
       const logout = path === "auth/logout";
-      const response = await backend(`/api/v1/${path}${url.search}`, {
-        method,
-        headers: {
-          Authorization: `Bearer ${session.access}`,
-          ...(logout
-            ? {
-                Cookie: [...session.cookies.values()].join("; "),
-                "X-VaultDrive-CSRF": session.csrf,
-              }
-            : {}),
+      const response = await backend(
+        `/api/v1/${path}${url.search}`,
+        {
+          method,
+          ...(transferBody ? { body: transferBody } : {}),
+          ...(transfer?.download ? { signal: request.signal } : {}),
+          headers: {
+            Authorization: `Bearer ${session.access}`,
+            ...(transfer?.download
+              ? { Accept: "*/*", "Accept-Encoding": "identity" }
+              : {}),
+            ...(transfer?.json ? { "Content-Type": "application/json" } : {}),
+            ...(transfer?.key
+              ? { "Idempotency-Key": request.headers.get("Idempotency-Key")! }
+              : {}),
+            ...(logout
+              ? {
+                  Cookie: [...session.cookies.values()].join("; "),
+                  "X-VaultDrive-CSRF": session.csrf,
+                }
+              : {}),
+          },
         },
-      });
+        transfer?.download,
+        transfer ? 25000 : 10000,
+      );
       captureCookies(session, response.headers);
       // An unexpired JWT rejected by the backend is revoked/invalid; do not refresh it.
       if (response.status === 401 || (logout && response.status === 204))

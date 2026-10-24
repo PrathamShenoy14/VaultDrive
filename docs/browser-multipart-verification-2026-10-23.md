@@ -1,5 +1,40 @@
 # Real-browser multipart verification — 2026-10-23
 
+## Frontend M3 continuation — 2026-10-24
+
+The dated observation/matrix below remains historical. M3 now has installed Chrome
+execution, product upload/recovery controls and authenticated BFF streaming
+downloads; see [the frontend verification record](../frontend/README.md#verification)
+and [M3 reproduction](frontend-m3-transfers.md#reproduction-and-remaining-gates).
+Three desktop/phone/tablet M3 scenarios downloaded actual Garage zero-byte and
+16 MiB + 37-byte objects, matching length and whole-file SHA-256. Fixture multipart
+PUTs used Node HTTP, and authentication used the existing HTTP session bootstrap.
+These are **real native browser downloads**, not trusted-HTTPS auth or browser
+multipart proof. Three separate mocked Chrome transfer scenarios contribute
+zero Garage PUT interoperability passes.
+
+Read-only reinspection found image/runtime Garage **2.3.0**, HTTP signing binding
+`http://localhost:3900`, no TLS ingress in the inspected VM container/listener
+inventory, and no TLS_CERT/TLS_KEY configured in the task shell. At 11:16:02Z,
+VM-side OPTIONS for page Origin `https://localhost:3000`, method PUT and header
+`x-amz-checksum-sha256` returned **403**, `Access-Control-Allow-Origin: *`, with
+no required Allow-Methods/Allow-Headers/Expose-Headers. This is a nonbrowser
+diagnostic, not a bucket policy readback or proof of browser CORS enforcement.
+Windows UTC at 11:32:19.664Z and VM at 11:32:20Z were close samples; VM reported
+NTP=yes/NTPSynchronized=yes. No sustained browser/JVM/Garage/PostgreSQL clock or
+native URL/session-expiry bound is established. No signed URL or credential was
+recorded, and no infrastructure setting changed.
+
+**Direct browser multipart remains BLOCKED/NOT EXECUTED.** Obtain the existing
+explicit infrastructure approval below, then use the product picker/drop and
+the original harness matrix to verify actual PUT destinations/framing, exposed
+evidence, native expiry, interruption/resume, completion-loss/recovery, cancellation,
+quota and Editor revoke. Trusted-HTTPS download/interruption and authentication
+remain separate release checks. Local HTTP browser upload admission was verified
+to fail closed; its Origin was not rewritten to impersonate HTTPS.
+
+## Historical 2026-10-23 result
+
 **Result: blocked; zero confirmed real-browser passes.** This is the safe fallback
 configuration plan and execution procedure, not completed browser release proof.
 The [main runbook](browser-multipart-interoperability.md) defines the full scenario

@@ -2,7 +2,7 @@
 
 Last reconciled with the repository on 2026-10-24. This is the current implementation map. Earlier phase records and ADR extensions preserve history; their original boundaries are not the current inventory.
 
-## Frontend M1–M2: authentication, shell and read-only explorer
+## Frontend M1–M3: authentication, explorer and transfers
 
 `frontend/` is an independently buildable Next.js App Router/strict TypeScript app
 with Tailwind, shadcn Base UI, Lucide and next-themes. Server Components guard
@@ -11,8 +11,13 @@ registration/login/logout, and `/session/restore` uses the sole Route Handler
 refresh coordinator. Profile and logical quota come from the backend. M2 adds
 root/child file and folder feeds, capability-aware Shared entry points and traversal,
 filename/filter search, fresh metadata details, and read-only common-entry Trash.
-Only activity remains a placeholder. Mutations, preview, downloads and sharing
-management remain deferred.
+Only activity remains a placeholder. M3 adds picker/drop uploads, a persistent
+workspace transfer panel, bounded direct multipart part uploads and explicit
+completion/cancellation/empty recovery. File menus and selection offer streaming
+authenticated downloads. Namespace/file mutations, preview and sharing management
+remain deferred. [M3's state/transport/verification contract](frontend-m3-transfers.md)
+describes two file tasks, one sliced 8 MiB part per file, at most 50 panel entries,
+metadata-only tab recovery and the unresolved browser HTTPS/CORS/clock gates.
 
 Explorer URL parameters preserve folder/search/filter/view state across reload and
 history navigation. Each file/folder/Trash feed requests 50 entries independently
@@ -60,7 +65,7 @@ credential/CSRF rotation, redacted navigation, transfer/copy/deletion states and
 explicit recovery. No new endpoint is required for those bounded MVP flows.
 Public-link downloads retain octet-stream MIME, including empty files. Contract
 readiness does not close the [real-browser gate](browser-multipart-verification-2026-10-23.md)
-or operational launch gates. Frontend M1–M2 is implemented as described above;
+or operational launch gates. Frontend M1–M3 is implemented as described above;
 deployment and infrastructure remain outside that milestone.
 
 ## System and responsibility boundaries

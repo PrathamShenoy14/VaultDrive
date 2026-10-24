@@ -1,5 +1,33 @@
 # Implementation learnings
 
+## Transfer progress is separate from storage publication
+
+XHR bytes sent can reach 100% while Complete is still UNKNOWN or publication is
+blocked. M3 keeps provisional progress and authoritative READY separate, preserves
+the last control dispatch/key/operation ID across reload, and polls only status.
+Explicit recovery follows the backend protocol; stale OPEN, timeouts, URL expiry
+and local abort do not grant another uncertain Create/Complete/Abort. Same-content
+part retry is different: rehash, inspect authoritative parts, then refresh the
+same immutable capability only for missing evidence. ETag quotes matter and an
+ETag is not a content digest. Empty creation has its own state and no cancel API.
+
+An admission-before-business 429 describes only the rejected request. It cannot
+erase an earlier unknown initiation/completion/abort, nor prove that a lost
+admission never happened. M3 rolls back only the new marker of that specific
+control request; status reads and safe replays preserve prior uncertainty.
+
+Browser memory is bounded by slices and concurrency, not by reading whole files
+into blobs. Native authenticated downloads similarly pass the upstream stream
+through the BFF, release the credential lock after headers, and let Chrome report
+completion/interruption. Keeping the metadata ten-second abort signal on that
+stream would silently truncate longer downloads. A declared five-GiB mock stream
+tests nonbuffering shape; real smaller Garage downloads establish different evidence.
+
+Mocked Chrome exercises actual slicing/hash/XHR/UI behavior but bypasses the
+deployment CORS decision. Real Chrome downloads of HTTP-client-created Garage
+fixtures also do not establish direct browser multipart. M3 keeps these categories
+separate and refuses HTTP signed storage endpoints. See [the transfer contract](frontend-m3-transfers.md).
+
 ## Explorer state must respect separate pages and redacted ancestry
 
 The backend exposes independent folder/file feeds with different fixed name

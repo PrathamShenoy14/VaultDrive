@@ -1,6 +1,14 @@
-# VaultDrive frontend M1 and M2
+# VaultDrive frontend M1–M3
 
-Next.js App Router, real backend authentication and a responsive Drive-inspired file explorer. M2 adds read-only navigation, selection, metadata, search, Shared and Trash. The frozen [OpenAPI contract](../docs/openapi.json) and backend remain authoritative. No backend runtime, migration or infrastructure changes are included.
+Next.js App Router, real backend authentication and a responsive Drive-inspired file explorer. M2 adds navigation, selection, metadata, search, Shared and Trash; M3 adds direct multipart uploads, empty files, recovery/transfer management and streaming authenticated downloads. The frozen [OpenAPI contract](../docs/openapi.json) and backend remain authoritative. No backend runtime, migration or infrastructure changes are included.
+
+## Uploads, downloads and transfer management
+
+Use Upload files or drop files into My Drive / a freshly editable folder. The workspace transfer panel survives navigation, shows per-file/overall provisional progress and provides Cancel, Check status, safe explicit Retry/Resume and Recover. It reserves at most 50 panel entries and runs two files with one 8 MiB slice each; files are limited to 5 GiB. A user-scoped sessionStorage journal retains keys/session IDs and re-selection metadata, never bytes, signed URLs or credentials. Reload requires the original file. Empty files use `/files/empty`; READY alone completes a transfer. INITIATING, blocked and uncertain completion/cancellation remain visible; neither cancel nor logical quota release promises physical Garage reclamation.
+
+File menus and the single-file selection toolbar provide native downloads through the authenticated same-origin BFF stream. The BFF preserves MIME/disposition/length, including zero, and streams without buffering large files. Chrome owns download completion/interruption; retries are explicit, with no Range contract. Native errors open a sanitized status page in a separate tab. See [M3 architecture, state transitions, limits, security and verification steps](../docs/frontend-m3-transfers.md).
+
+Direct browser multipart requires an approved trusted HTTPS Garage binding and exact page-origin CORS exposing ETag/checksum. The current HTTP storage/denied preflight still blocks real browser multipart. Mocked Chrome scenarios never close that gate. Local HTTP browser mutations fail the configured HTTPS Origin check by design.
 
 ## Run locally
 
@@ -35,7 +43,8 @@ src/components/ui/             shadcn base-nova / Base UI controls
 src/components/                Branding and theme providers
 src/features/auth/             Forms, validation and server-only BFF/session code
 src/features/shell/            Navigation, account menu, storage and activity placeholder
-src/features/explorer/         Read-only feeds, selection, metadata, breadcrumbs and search
+src/features/explorer/         Feeds, selection, metadata, breadcrumbs and search
+src/features/transfers/        Upload manager, direct part transport, recovery and downloads
 src/lib/api/                   Generated types and typed lossless JSON transport
 src/lib/env.ts                 Server environment validation
 scripts/generate-api.mjs       Reproducible contract generation/drift check
@@ -52,13 +61,13 @@ tests/e2e/                    Chrome UI + real backend HTTP integration checks
 - `/activity` remains a deliberate placeholder. All workspace pages retain server-side authentication.
 - `?view=list|grid` selects the view on explorer routes. Folder/search/filter/view state survives reload and browser history; selection and accumulated pages are local to a mounted scope.
 - `/session/restore` posts to the sole BFF refresh coordinator, then reloads `/drive`. It never receives tokens.
-- `/api/v1/[...path]` allows POST `auth/register|login|refresh|logout` and GET `users/me|users/me/storage`, `folders`, `folders/{uuid}`, `folders/{uuid}/children`, `files`, `files/{uuid}`, `shared-with-me`, `search`, `files/trash`, `trash/folders`. Only documented query names are forwarded for each read. Duplicate, unknown and oversized queries are rejected; domain validation and authorization remain in Spring. Unlisted paths return 404 and resource mutations return 405.
+- `/api/v1/[...path]` allows POST `auth/register|login|refresh|logout` and GET `users/me|users/me/storage`, `folders`, `folders/{uuid}`, `folders/{uuid}/children`, `files`, `files/{uuid}`, `shared-with-me`, `search`, `files/trash`, `trash/folders`. M3 additionally allowlists multipart admission/initiate/sign/complete/recover/cancel, session/parts/cancellation reads, empty-file admission/status/recovery and `files/{uuid}/download`. Only documented query names are forwarded. Duplicate, unknown and oversized queries are rejected; domain validation and authorization remain in Spring. Unlisted paths return 404 and unsupported resource methods return 405.
 
 Server Components own protected profile/quota reads; Client Components handle forms, theme, dialogs, menus and responsive navigation. M2 keeps scope-local, abortable read state rather than introducing TanStack Query/Table: independent feeds, explicit page loading and native checkbox/keyboard interactions do not yet need a shared resource cache or table framework. React Hook Form uses Zod validation and field errors without an additional resolver adapter. Tailwind semantic tokens support light/dark themes and future file grids/tables. Base UI provides focus management and keyboard behavior. `next-themes` stores only a theme preference in localStorage.
 
 ## Explorer behavior and contracts
 
-Folder/file feeds request **50 entries each**, with independent totals and explicit Load more controls. No global combined total is invented. The displayed order is the backend's fixed name order (Trash: deletion date descending); sorting controls deliberately expose no unsupported options and never submit `sort`. New pages are deduplicated by resource type plus UUID because concurrent offset snapshots can shift. Refresh restarts the scope and rereads server quota; M2 performs no quota-changing operations.
+Folder/file feeds request **50 entries each**, with independent totals and explicit Load more controls. No global combined total is invented. The displayed order is the backend's fixed name order (Trash: deletion date descending); sorting controls deliberately expose no unsupported options and never submit `sort`. New pages are deduplicated by resource type plus UUID because concurrent offset snapshots can shift. Refresh restarts the scope and rereads server quota. M3 admission, completion, cancellation and quota conflicts trigger refresh too.
 
 Click a checkbox or row to select; Ctrl/Command click toggles and Shift click selects a range within a feed. Ctrl/Command+A within a resource group selects its loaded items; Escape clears selection. Arrow Up/Down, Home/End move row focus, Space toggles, Enter opens folders or metadata, and Shift+F10/right click opens the same Base UI action menu as the visible actions button. Folder names also provide an explicit open control for touch/keyboard users. List/grid switching preserves selection. Details use a fresh metadata GET and Base UI's focus-managed sheet; unavailable/revoked metadata renders an error rather than a stale snapshot.
 
@@ -74,7 +83,7 @@ See [ADR-0017](../docs/decisions/0017-frontend-bff-sessions.md). The browser get
 
 Login sends exactly `X-VaultDrive-Client: 1` to Spring. Backend login/refresh returns a JWT and CSRF header; the BFF consumes them and returns **204**, deliberately differing from the backend's 200 token response. Registration and profile/quota JSON remain backend responses. The browser helper's types model this separate BFF boundary explicitly; generated types describe the backend.
 
-Every BFF mutation requires the exact configured Origin and `X-VaultDrive-Client: 1`, rejects cross-site/same-site Fetch Metadata, and requires JSON for login/registration. Backend cookie mutations use exactly its stored CSRF header. Refresh omits Authorization and queries; logout includes the latest bearer, refresh cookie and CSRF. Cookie headers use `Headers.getSetCookie()` and individual append operations, including multiple cookies with comma-containing Expires attributes. No comma splitting or attribute weakening occurs. Ordinary backend requests are bearer-only. Responses/fetches are no-store, personalized pages are dynamic, login/logout use full navigations to discard the Router Cache, and the proxy exposes only the M1 authentication/profile/quota and M2 explorer reads. Downloads, previews, mutations and sharing management remain closed.
+Every BFF mutation requires the exact configured Origin and `X-VaultDrive-Client: 1`, rejects cross-site/same-site Fetch Metadata, and requires documented bounded JSON/no-body requests. Backend cookie mutations use exactly its stored CSRF header. Refresh omits Authorization and queries; logout includes the latest bearer, refresh cookie and CSRF. Cookie headers use `Headers.getSetCookie()` and individual append operations, including multiple cookies with comma-containing Expires attributes. No comma splitting or attribute weakening occurs. Ordinary backend requests are bearer-only. Responses/fetches are no-store, personalized pages are dynamic, and login/logout use full navigations to discard the Router Cache. M3 adds only upload-session control/status/parts, empty-file admission/status/recovery and authenticated file download routes to the M1/M2 allowlist. Preview, namespace/file mutations and sharing management remain closed. Streaming downloads release the session lock after upstream headers.
 
 The backend's `expiresIn` controls access expiry (normally 1800 seconds). A 15-second early-refresh margin reduces clock-boundary failures; it does not establish monitored clock correctness. The browser's opaque session has at most seven days, and server expiry can only decrease with the backend's remaining cookie lifetime. Rotation never extends the family. An async per-session lock covers refresh, protected reads and logout across all tabs/requests in the one supported Node process. Waiting callers reread the session and use its latest credentials; duplicate refresh POSTs do not rotate an already-fresh token. Logout is serialized with them. No mutation is automatically retried. A backend 401 for an unexpired bearer destroys local state rather than trying to refresh a revoked family.
 
@@ -122,6 +131,34 @@ The M2 selection also includes `SearchIntegrationTest`, `TrashControllerTest` an
 
 The M2 Chrome scenario uses existing backend APIs **only for disposable fixture setup**: registered users, 50+ root folders, nested/shared folders, direct Viewer/Editor grants, real zero-byte files and trashed entries. Zero-byte fixture creation requires reachable Garage. No fixture mutation API is added to the BFF or product UI. Fixture schemas/accounts/objects are retained; no shared user data, infrastructure policy, restore or permanent deletion is changed. Test traces remain disabled.
 
+## Executed M3 verification — 2026-10-24
+
+Node **24.22.1**: API drift, strict TypeScript (including route type generation), ESLint, Prettier, **173 Vitest tests** and the production build passed. No dependencies, backend runtime/migrations, or frozen API/generated types changed. The upload button uses an opaque hover color and no disabled-to-enabled fade after the full Chrome scan exposed transient low contrast during hydration; the corrected complete suite passed. Request-scoped 429 rollback preserves any earlier uncertain dispatch; regression tests first reproduced lost evidence after status-read and admission-replay rate limits, then passed with the fix. Closing the workspace also fences new control dispatches after pending reads.
+
+Evidence is separated as follows:
+
+1. **Mocked frontend:** Vitest covers single/multipart slicing, two-file concurrency, progress, queued/in-flight cancellation, exact evidence, safe URL refresh/retry, successful original-file reload/resume, mismatched files, lost admission/initiation/completion/abort responses, empty READY/recovery/FAILED/REMOVED, bounded ten-GET polling, unfamiliar completion states, quota/permission/auth failures, BFF CSRF/admission, no automatic control retries, zero downloads and cancellation/backpressure of a declared five-GiB stream. **Three additional mocked Chrome scenarios** exercise actual browser slicing/hash/XHR, multiple files, unknown completion, explicit recovery and navigation persistence. Their API/storage responses are intercepted; they prove no Garage interoperability.
+2. **Backend:** **357 tests passed**, zero failures/errors/skips (317 transfer/storage/contract cases plus 40 session/security/download cases). This includes real PostgreSQL quota/permission/race/recovery tests and **31 enabled live Garage multipart/receipt/cancellation/copy/empty cases**. Backend unit/controller/adapter cases are included in that total; not every backend case is an integration test. The full unrelated broker/purge/process suite was not rerun for this frontend change.
+3. **Real browser / actual Garage:** Chrome **156.0.8078.47**, desktop, emulated phone and tablet: **18 total M1–M3 scenarios passed**, including **three M3 native-download scenarios**. Each downloaded real Garage empty and **16 MiB + 37-byte** files through the authenticated BFF, preserving names/zero MIME/length and matching whole-file SHA-256. Fixtures were created through actual HTTP APIs; multipart fixture PUTs used Node, not Chrome. Session bootstrap supplied the configured HTTPS Origin through the HTTP test client. Real HTTP browser upload admission failed closed. Scanned light/dark/mobile pages had zero axe violations and no horizontal overflow; screenshots were reviewed. This does not prove trusted-HTTPS browser login or direct multipart.
+4. **Blocked/unverified:** Actual Chrome-to-Garage multipart remains **BLOCKED/NOT EXECUTED**. Current signing binding is HTTP on localhost:3900; no trusted page/storage TLS configuration was established, and the exact page-origin checksum PUT preflight returned 403 without required allow/expose headers. Native signed URL/session expiry, browser Garage interruption/cancellation/completion-loss/revocation, trusted-HTTPS downloads/auth and sustained browser/JVM/PostgreSQL/Garage clock bounds remain open. A five-GiB declared mock is not a five-GiB download/capacity measurement. See [prerequisites and continuation](../docs/frontend-m3-transfers.md#reproduction-and-remaining-gates).
+
+The live backend used fresh schema `frontend_m3_live_20261024` in `vaultdrive_test`, with every normal autonomous processor/probe explicitly off. Synthetic browser accounts/objects and verification schemas are retained. Tests clean up only their own disposable fixtures where their existing runbooks permit it; retained ambiguous allocations were not adopted or swept. No VM, Garage CORS, DNS, certificate, firewall, port or shared infrastructure setting changed.
+
+Reproduce the backend selections from `backend/` (the two schema names below were the executed default-context overrides; suites with UUID schemas retain their isolation):
+
+```powershell
+. .\.env.local.ps1
+$env:GARAGE_MULTIPART_TRANSFER_TEST='true'
+$env:GARAGE_MULTIPART_COMPLETION_TEST='true'
+$env:GARAGE_MULTIPART_CANCELLATION_TEST='true'
+$env:GARAGE_MULTIPART_VERSION='2.3.0'
+$env:GARAGE_COPY_TEST='true'
+.\mvnw.cmd -o '-Dtest=MultipartSessionIntegrationTest,MultipartTransferIntegrationTest,MultipartCompletionIntegrationTest,MultipartCancellationIntegrationTest,DelegatedMultipartIntegrationTest,EmptyFileIntegrationTest,StorageUsageIntegrationTest,FileControllerTest,ApiContractFreezeIntegrationTest,GarageMultipartTransferIntegrationTest,GarageMultipartCompletionIntegrationTest,GarageMultipartCancellationIntegrationTest,GarageFileCopyIntegrationTest,GarageMultipartCompletionEvidenceTest,S3MultipartStorageTest' '-Dspring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=frontend_m3_verification_20261024' '-Dspring.flyway.schemas=frontend_m3_verification_20261024' '-Dspring.flyway.default-schema=frontend_m3_verification_20261024' test
+.\mvnw.cmd -o '-Dtest=SharingDownloadIntegrationTest,AuthControllerTest,AuthenticationSessionIntegrationTest,ApiContractConcurrencyIntegrationTest' '-Dspring.datasource.url=jdbc:postgresql://localhost:5432/vaultdrive_test?currentSchema=frontend_m3_security_20261024' '-Dspring.flyway.schemas=frontend_m3_security_20261024' '-Dspring.flyway.default-schema=frontend_m3_security_20261024' test
+```
+
+`npm run test:e2e` runs all 18 Chrome checks; `npm run test:e2e -- m3.spec.ts` runs the six M3 scenarios, three live-download and three mocked-transfer. Do not combine those categories into a browser Garage upload claim.
+
 ## Executed M2 verification — 2026-10-24
 
 Repository-local Node **24.22.1**: generated API drift check, strict TypeScript, ESLint, Prettier, **94 Vitest tests** and production build passed. No dependencies or backend runtime/migrations changed. The isolated tests cover independent paging/retry, fixed ordering, selection, keyboard/menu/focus behavior, all filter controls, lossless sizes, denied metadata, redacted/bounded breadcrumbs, Trash, timeouts, StrictMode and cancellation/stale responses. These are mocked component/BFF tests.
@@ -150,10 +187,10 @@ The live frontend calls used a fresh `frontend_m1_*` schema in the existing test
 - Exactly one Node process; no serverless, horizontal scaling, clustered PM2 or rolling multi-process deployment. Shared durable credential storage and distributed serialization require a later reviewed implementation. Sticky routing alone does not provide failover-safe rotation.
 - Authentication forms require JavaScript. Their native fallback submits with POST so credentials do not become URL query parameters when scripts are unavailable.
 - Process restarts require login. Sessions are bounded in memory, without persistence or performance/capacity claims. Backend families remain PostgreSQL-authoritative and expire independently.
-- No uploads/multipart, downloads, preview, file/folder mutations, sharing management, restore/permanent deletion, activity/notifications, profile editing or account recovery. No file content or counts are fabricated.
+- No preview, file/folder mutations, sharing management, restore/permanent deletion, activity/notifications, profile editing or account recovery. No file content or counts are fabricated.
 - The backend supports fixed order only; arbitrary date/type/size sorting is deferred. Offset pages are independent snapshots and can shift under concurrent changes. Explicit refresh resets accumulated pages and selection and rereads quota.
 - No persistent resource cache, virtualization or performance/capacity claims. Loaded pages and selection are scoped to the current navigation; back/forward restores the location and reloads bounded feeds, not prior accumulated pages.
 - Real-browser trusted HTTPS/CORS/clock/native-expiry/recovery/download verification remains [blocked/open](../docs/browser-multipart-verification-2026-10-23.md). Local HTTP UI checks do not close it. No multipart interoperability is claimed.
 - CSP limits framing/base/form/object embedding; a nonce-based script policy and operational edge/fleet abuse controls remain deployment work. No deployment or infrastructure changes are included.
 
-Stop at M2.
+Stop at M3.

@@ -4,9 +4,9 @@ VaultDrive is a production-minded cloud file storage and sharing platform inspir
 
 The project focuses on learning backend engineering, system design, database management, authentication, security, and cloud storage architecture.
 
-VaultDrive is developed incrementally with a Spring Boot backend and an independently buildable Next.js frontend. Frontend M1 implements authentication and the responsive app shell; file workflows and a React Native mobile application remain planned.
+VaultDrive is developed incrementally with a Spring Boot backend and an independently buildable Next.js frontend. Frontend M1–M3 implements authentication, the responsive explorer/search, bounded direct uploads/recovery and authenticated streaming downloads. File mutations, sharing management, notifications and a React Native mobile application remain planned frontend work.
 
-For frontend setup, routes, environment, authentication design, tests and known limitations, see the [Frontend M1 guide](frontend/README.md). The frontend currently requires one long-lived Node process; trusted-HTTPS browser authentication and the existing multipart/CORS/clock release gate remain unverified.
+For frontend setup, routes, environment, authentication design, tests and known limitations, see the [frontend guide](frontend/README.md). The frontend currently requires one long-lived Node process; trusted-HTTPS browser authentication and the existing multipart/CORS/clock release gate remain unverified.
 
 For the current implementation boundary and design rationale, see [Architecture](docs/architecture.md), [Development roadmap](docs/development-roadmap.md), and [Architecture decisions](docs/decisions/).
 

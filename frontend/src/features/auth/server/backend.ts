@@ -8,13 +8,26 @@ import {
   type Session,
 } from "./session-store";
 
-export async function backend(path: string, init: RequestInit = {}) {
+export async function backend(
+  path: string,
+  init: RequestInit = {},
+  stream = false,
+  deadline = 10000,
+) {
+  // Bound header acquisition separately: downloads may stream for the backend's
+  // five-minute budget without inheriting the metadata ten-second deadline.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), stream ? 10000 : deadline);
   try {
     return await fetch(new URL(path, env().BACKEND_URL), {
       ...init,
       cache: "no-store",
       redirect: "manual",
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.any([
+        controller.signal,
+        ...(init.signal ? [init.signal] : []),
+        AbortSignal.timeout(stream ? 310000 : deadline),
+      ]),
       headers: {
         Accept: "application/json",
         ...Object.fromEntries(new Headers(init.headers)),
@@ -29,6 +42,8 @@ export async function backend(path: string, init: RequestInit = {}) {
         ? "The backend request timed out. Please try again."
         : "The backend is unreachable. Please try again later.",
     });
+  } finally {
+    clearTimeout(timer);
   }
 }
 export function unauthorized() {

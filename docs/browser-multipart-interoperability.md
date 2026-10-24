@@ -1,5 +1,12 @@
 # Browser multipart interoperability
 
+Frontend M3 now provides the product picker/drop, queue, exact part-evidence
+checks, resume, explicit recovery and native downloads. Follow
+[its continuation steps and evidence boundaries](frontend-m3-transfers.md#reproduction-and-remaining-gates)
+alongside this harness matrix. The existing HTTP Garage binding and denied
+preflight still block actual browser multipart. Mocked frontend/Chrome passes
+and real Garage-backed native downloads do not establish browser PUT interoperability.
+
 The [API freeze](api-contract-freeze.md) and [Next.js integration guide](frontend-integration.md)
 now provide the complete backend handoff and [OpenAPI artifact](openapi.json).
 They preserve this document's same-origin API versus Garage PUT CORS distinction.
