@@ -50,6 +50,7 @@ export function ManagementProvider({
 }) {
   const router = useRouter();
   const [store, setStore] = useState<ManagementStore>();
+  const [revision, setRevision] = useState(0);
   const [intent, setIntent] = useState<Intent>();
   const [notice, setNotice] = useState("");
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -78,8 +79,16 @@ export function ManagementProvider({
     // The effect owns this store lifetime, including StrictMode remounts.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setStore(instance);
-    return () => instance.stop();
-  }, [userId, router]);
+    const pause = () => instance.stop();
+    const resume = () => setRevision((value) => value + 1);
+    window.addEventListener("vaultdrive:session-paused", pause);
+    window.addEventListener("vaultdrive:session-resumed", resume);
+    return () => {
+      instance.stop();
+      window.removeEventListener("vaultdrive:session-paused", pause);
+      window.removeEventListener("vaultdrive:session-resumed", resume);
+    };
+  }, [userId, router, revision]);
   return (
     <Context.Provider
       value={

@@ -2,7 +2,7 @@
 
 Last reconciled with the repository on 2026-10-26. This is the current implementation map. Earlier phase records and ADR extensions preserve history; their original boundaries are not the current inventory.
 
-## Frontend M1–M6: authenticated workspace and account experience
+## Frontend M1–M7: authenticated workspace and account experience
 
 `frontend/` is an independently buildable Next.js App Router/strict TypeScript app
 with Tailwind, shadcn Base UI, Lucide and next-themes. Server Components guard
@@ -25,8 +25,11 @@ secrets and uses isolated header-based metadata and native streamed download ada
 see [M5 sharing](frontend-m5-sharing.md). M6 adds a bounded unread-count bell/panel,
 paginated recipient notifications, separate owner resource/permission histories,
 display-name editing and exact logical quota details; see
-[M6 account/activity](frontend-m6-account-activity.md). Logout cancels M6 requests
-and broadcasts credential-free session changes across tabs. Preview remains
+[M6 account/activity](frontend-m6-account-activity.md). [M7 stabilization](frontend-m7-integration-polish.md)
+extends session cancellation to every authenticated browser feature, fences cancelled
+BFF lock waiters before refresh/dispatch, retains recovery evidence and fixes
+failed-read retries and narrow/short-screen layouts. Logout stops local transfer and
+management processing and broadcasts credential-free session changes across tabs. Preview remains
 deferred. [M3's state/transport/verification contract](frontend-m3-transfers.md)
 describes two file tasks, one sliced 8 MiB part per file, at most 50 panel entries,
 metadata-only tab recovery and the unresolved browser HTTPS/CORS/clock gates.
@@ -60,8 +63,10 @@ and verification limits. OpenAPI-derived int64 types and lossless JSON parsing
 preserve quota precision. Authenticated pages/responses/fetches are not cached.
 
 No backend API, migration, storage protocol or shared infrastructure is changed.
-Local HTTP integration and Chrome layout checks do not establish trusted-HTTPS
-browser authentication or close the existing browser multipart/CORS/clock gate.
+M4–M7 verify local trusted-HTTPS browser forms and Garage-backed native downloads;
+M7 also verifies zero-byte browser admission. The current multipart fixture is
+clock-gated, and direct browser-to-Garage multipart remains unverified. These
+checks do not close the storage HTTPS/CORS/clock or deployment gates.
 
 ## MVP API freeze and frontend handoff
 
@@ -77,8 +82,8 @@ credential/CSRF rotation, redacted navigation, transfer/copy/deletion states and
 explicit recovery. No new endpoint is required for those bounded MVP flows.
 Public-link downloads retain octet-stream MIME, including empty files. Contract
 readiness does not close the [real-browser gate](browser-multipart-verification-2026-10-23.md)
-or operational launch gates. Frontend M1–M5 is implemented as described above;
-deployment and infrastructure remain outside that milestone.
+or operational launch gates. Frontend M1–M7 is implemented as described above;
+deployment and infrastructure remain outside those milestones.
 
 ## System and responsibility boundaries
 

@@ -168,6 +168,28 @@ it("stops polling after unmount, including an in-flight response", async () => {
   await vi.advanceTimersByTimeAsync(600000);
   expect(request).toHaveBeenCalledTimes(2);
 });
+it("fences all management controls after workspace shutdown while retaining original evidence", async () => {
+  request.mockResolvedValue(fileStatus);
+  const op = await store.copy("FILE", "source", { name: "Copy.txt" });
+  const before = journal(store.snapshot());
+  store.stop();
+  await store.check(op);
+  await store.control(op, "recover");
+  await store.replay({ ...op, id: undefined });
+  await expect(
+    store.copy("FILE", "source", { name: "Another.txt" }),
+  ).rejects.toMatchObject({ name: "AbortError" });
+  await expect(
+    store.mutate(
+      "folders",
+      "POST",
+      { name: "Folder" },
+      { name: "Folder", sourceId: "root", sourceType: "FOLDER" },
+    ),
+  ).rejects.toMatchObject({ name: "AbortError" });
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(journal(store.snapshot())).toBe(before);
+});
 it.each(["ACCEPTED", "PROCESSING", "BLOCKED", "FAILED", "LOGICALLY_COMPLETED"])(
   "reads deletion state %s without assuming physical completion",
   async (state) => {

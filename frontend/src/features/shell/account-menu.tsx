@@ -1,6 +1,6 @@
 "use client";
 /* eslint-disable @next/next/no-location-assign-relative-destination -- Logout must discard all personalized Router Cache entries. */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { LogOut, UserRound } from "lucide-react";
 import Link from "next/link";
 import {
@@ -36,8 +36,11 @@ export function AccountMenu({ profile }: { profile: Profile }) {
   const [account, setAccount] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const trigger = useRef<HTMLButtonElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
   async function logout() {
     setBusy(true);
+    setAccount(false);
     setError(undefined);
     pauseSession();
     try {
@@ -70,6 +73,7 @@ export function AccountMenu({ profile }: { profile: Profile }) {
         <DropdownMenuTrigger
           render={
             <Button
+              ref={trigger}
               variant="ghost"
               size="icon"
               className="rounded-full"
@@ -106,14 +110,19 @@ export function AccountMenu({ profile }: { profile: Profile }) {
         </DropdownMenuContent>
       </DropdownMenu>
       <Dialog open={account} onOpenChange={setAccount}>
-        <DialogContent>
+        <DialogContent
+          initialFocus={() => heading.current}
+          finalFocus={() => trigger.current}
+        >
           <DialogHeader>
-            <DialogTitle>Your account</DialogTitle>
+            <DialogTitle ref={heading} tabIndex={-1} className="outline-none">
+              Your account
+            </DialogTitle>
             <DialogDescription>
               Your profile, connected to VaultDrive.
             </DialogDescription>
           </DialogHeader>
-          <dl className="grid gap-4 py-4 text-sm">
+          <dl className="grid min-w-0 grid-cols-1 gap-4 py-4 text-sm">
             <div>
               <dt className="text-muted-foreground">Name</dt>
               <dd className="mt-1 break-words font-medium">

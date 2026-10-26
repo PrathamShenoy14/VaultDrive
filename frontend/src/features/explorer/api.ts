@@ -1,4 +1,4 @@
-import { readResponse } from "@/lib/api/transport";
+import { sessionRequest } from "@/features/auth/session-request";
 import type { components } from "@/lib/api/generated";
 import {
   PAGE_SIZE,
@@ -42,13 +42,11 @@ export async function getMetadata(
   );
 }
 async function get<T>(url: string, signal: AbortSignal): Promise<T> {
-  return readResponse<T>(
-    await fetch(url, {
-      signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
-      cache: "no-store",
-      credentials: "same-origin",
-    }),
-  );
+  return sessionRequest<T>(url, {
+    signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
+    cache: "no-store",
+    credentials: "same-origin",
+  });
 }
 export async function getPage(
   feed: Feed,

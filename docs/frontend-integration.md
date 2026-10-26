@@ -35,7 +35,10 @@ deletion tracking and owner-only copy with retained recovery evidence.
 [Frontend M5](frontend-m5-sharing.md) adds registered-email grants, inherited-access
 displays and file Viewer links with fragment-to-header redemption. M6 adds
 [notifications, owner histories and account/quota Settings](frontend-m6-account-activity.md)
-through the same BFF. Preview remains outside these slices. The backend freeze
+through the same BFF. [M7 integration/polish](frontend-m7-integration-polish.md)
+extends browser session cancellation and queued BFF admission fencing across all
+authenticated workflows, corrects failed-read retries and polishes responsive access.
+Preview remains outside these slices. The backend freeze
 and release gates are unchanged.
 
 Spring Security has **no cross-origin API CORS policy**. A browser at a different

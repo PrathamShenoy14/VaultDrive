@@ -51,7 +51,7 @@ export function SearchBox() {
   return (
     <form
       role="search"
-      className="relative max-w-2xl min-w-0 flex-1"
+      className="relative order-last max-w-2xl min-w-0 basis-full sm:order-none sm:flex-1 sm:basis-auto"
       onSubmit={(event) => {
         event.preventDefault();
         dirty.current = false;

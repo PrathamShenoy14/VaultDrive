@@ -59,6 +59,7 @@ export function ResourceFeed({
   const rows = useRef<HTMLDivElement>(null);
   const loadedPage = useRef(0);
   const knownEntries = useRef<ExplorerEntry[]>([]);
+  const failedRead = useRef({ page: 0, replace: true });
   async function load(next: number, replace = false) {
     if (busy.current) return;
     busy.current = true;
@@ -108,6 +109,7 @@ export function ResourceFeed({
       }
     } catch (error) {
       if (!controller.signal.aborted) {
+        failedRead.current = { page: next, replace };
         setError(error);
         // Do not leave previously loaded personalized data after a denial.
         if (
@@ -303,7 +305,7 @@ export function ResourceFeed({
                   aria-label={`Select ${entry.resource.name}`}
                   checked={selected}
                   onChange={() => select(entry, true)}
-                  className="size-4 shrink-0 accent-primary"
+                  className="size-6 shrink-0 accent-primary"
                 />
                 <div
                   className={
@@ -408,10 +410,23 @@ export function ResourceFeed({
         </div>
       )}
       {error !== undefined && (
-        <ReadError
-          error={error}
-          retry={() => requestPage(page ? page.page + 1 : 0)}
-        />
+        <>
+          {entries.length > 0 && (
+            <p role="status" className="mt-3 text-sm text-muted-foreground">
+              Previously loaded items are shown. This read failed; Try again
+              retries the failed read.
+            </p>
+          )}
+          <ReadError
+            error={error}
+            retry={() => {
+              if (busy.current) return;
+              setLoading(true);
+              setError(undefined);
+              void load(failedRead.current.page, failedRead.current.replace);
+            }}
+          />
+        </>
       )}
       {!loading && !error && entries.length === 0 && (
         <div className="rounded-xl border border-dashed bg-muted/20 px-5 py-10 text-center">

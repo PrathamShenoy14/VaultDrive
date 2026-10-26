@@ -205,8 +205,8 @@ test("live M2 navigation, pagination, selection, metadata, search, sharing, Tras
   ).toBeVisible();
   await page.getByRole("button", { name: "Actions for Old.txt" }).click();
   await expect(
-    page.getByRole("menuitem", { name: "Restore · M4" }),
-  ).toBeDisabled();
+    page.getByRole("menuitem", { name: "Restore", exact: true }),
+  ).toBeEnabled();
   await page.keyboard.press("Escape");
   await bootstrap(request, context, viewer.input);
   await page.goto("/shared");

@@ -281,12 +281,18 @@ async function handle(request: Request, path: string) {
   return sessions.locked(id, async () => {
     const session = sessions.get(id);
     if (!session) throw unauthorized();
-    // A cancelled M6 request waiting behind another caller must not rotate or
+    // A cancelled request waiting behind another caller must not rotate or
     // dispatch after its UI lifetime has ended. An already-started refresh keeps
     // the existing serialization and uncertainty rules.
-    if (experience && request.signal.aborted)
+    if (request.signal.aborted)
       return failure(400, "BAD_REQUEST", "Request cancelled");
     const cookies = await ensureFresh(session);
+    if (request.signal.aborted) {
+      const cancelled = failure(400, "BAD_REQUEST", "Request cancelled");
+      for (const cookie of cookies)
+        cancelled.headers.append("Set-Cookie", cookie);
+      return cancelled;
+    }
     if (path === "auth/refresh") {
       const result = new Response(null, { status: 204 });
       for (const cookie of cookies) result.headers.append("Set-Cookie", cookie);
@@ -299,7 +305,7 @@ async function handle(request: Request, path: string) {
         {
           method,
           ...(transferBody ? { body: transferBody } : {}),
-          ...(transfer?.download || experience
+          ...(transfer?.download || experience || method === "GET"
             ? { signal: request.signal }
             : {}),
           headers: {

@@ -1,6 +1,7 @@
 import type { components } from "@/lib/api/generated";
 import type { ExplorerEntry } from "@/features/explorer/contracts";
-import { ApiError, errorMessage, readResponse } from "@/lib/api/transport";
+import { ApiError, errorMessage } from "@/lib/api/transport";
+import { sessionRequest } from "@/features/auth/session-request";
 
 export type Action = "rename" | "move" | "copy" | "trash" | "restore" | "purge";
 export const labels: Record<Action, string> = {
@@ -86,20 +87,18 @@ export async function managementRequest<T>(
   body?: unknown,
   key?: string,
 ): Promise<T> {
-  return readResponse<T>(
-    await fetch(`/api/v1/${path}`, {
-      method,
-      credentials: "same-origin",
-      cache: "no-store",
-      signal: AbortSignal.timeout(30000),
-      headers: {
-        ...(method !== "GET" ? { "X-VaultDrive-Client": "1" } : {}),
-        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-        ...(key ? { "Idempotency-Key": key } : {}),
-      },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    }),
-  );
+  return sessionRequest<T>(`/api/v1/${path}`, {
+    method,
+    credentials: "same-origin",
+    cache: "no-store",
+    signal: AbortSignal.timeout(30000),
+    headers: {
+      ...(method !== "GET" ? { "X-VaultDrive-Client": "1" } : {}),
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...(key ? { "Idempotency-Key": key } : {}),
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
 }
 export function operationPath(op: Operation) {
   return `${op.kind === "deletion" ? "deletion-operations" : op.kind === "folder-copy" ? "folder-copy-operations" : "copy-operations"}/${op.id}`;
@@ -207,6 +206,7 @@ export class ManagementStore {
     evidence: Pick<Operation, "name" | "sourceId" | "sourceType">,
     deletion = false,
   ): Promise<T> {
+    if (this.stopped) throw new DOMException("Workspace stopped", "AbortError");
     // Retain intent before dispatch, including permanent deletion with a lost acceptance.
     const op: Operation = {
       ...evidence,
@@ -249,6 +249,7 @@ export class ManagementStore {
     sourceId: string,
     request: CopyRequest,
   ) {
+    if (this.stopped) throw new DOMException("Workspace stopped", "AbortError");
     const op: Operation = {
       localId: crypto.randomUUID(),
       kind: sourceType === "FILE" ? "file-copy" : "folder-copy",
@@ -264,6 +265,7 @@ export class ManagementStore {
   }
   async replay(op: Operation) {
     if (
+      this.stopped ||
       op.busy ||
       op.id ||
       !op.request ||
@@ -295,7 +297,8 @@ export class ManagementStore {
     }
   }
   async check(op: Operation, pollCount = 0) {
-    if (op.busy || !op.id || Date.now() < (op.retryAt ?? 0)) return;
+    if (this.stopped || op.busy || !op.id || Date.now() < (op.retryAt ?? 0))
+      return;
     const timer = this.timers.get(op.localId);
     if (timer) clearTimeout(timer);
     this.update(op, { busy: true, error: undefined });
@@ -343,6 +346,7 @@ export class ManagementStore {
   }
   async control(op: Operation, action: ReturnType<typeof controls>[number]) {
     if (
+      this.stopped ||
       op.busy ||
       !controls(op).includes(action) ||
       Date.now() < (op.retryAt ?? 0)

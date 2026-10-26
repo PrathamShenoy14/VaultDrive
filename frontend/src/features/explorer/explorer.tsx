@@ -44,6 +44,7 @@ export function Explorer({
     window.addEventListener("vaultdrive:transfers-changed", changed);
     window.addEventListener("vaultdrive:management-changed", changed);
     window.addEventListener("vaultdrive:sharing-changed", changed);
+    window.addEventListener("vaultdrive:session-resumed", changed);
     const visible = () => {
       if (document.visibilityState !== "hidden") changed();
     };
@@ -53,6 +54,7 @@ export function Explorer({
       window.removeEventListener("vaultdrive:transfers-changed", changed);
       window.removeEventListener("vaultdrive:management-changed", changed);
       window.removeEventListener("vaultdrive:sharing-changed", changed);
+      window.removeEventListener("vaultdrive:session-resumed", changed);
       window.removeEventListener("focus", visible);
       document.removeEventListener("visibilitychange", visible);
     };
@@ -129,13 +131,13 @@ export function Explorer({
         </>
       )}
       <div className="mb-5 flex flex-wrap items-center justify-between gap-2 border-b pb-4 text-xs text-muted-foreground">
-        <label className="flex items-center gap-2">
+        <label className="flex max-w-full min-w-0 flex-wrap items-center gap-2">
           Sort
           <select
             aria-label="Sort order"
             title="The backend supports this fixed order only"
             disabled
-            className="max-w-full rounded-md border bg-background p-2 text-foreground"
+            className="max-w-full min-w-0 rounded-md border bg-background p-2 text-foreground"
             defaultValue="backend"
           >
             <option value="backend">

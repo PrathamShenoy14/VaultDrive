@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AuthForm } from "@/features/auth/auth-form";
 import { AppShell } from "@/features/shell/app-shell";
@@ -21,6 +21,41 @@ const profile = {
   updatedAt: "2026-10-24T00:00:00Z",
 };
 describe("primary accessible controls", () => {
+  it("closes account details while logout is pending and restores actionable refusal feedback", async () => {
+    const user = userEvent.setup();
+    let finish!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            finish = resolve;
+          }),
+      ),
+    );
+    render(<AccountMenu profile={profile} />);
+    const trigger = screen.getByRole("button", {
+      name: /Account menu for Alice/,
+    });
+    await user.click(trigger);
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Your account" }),
+    );
+    await user.click(await screen.findByRole("button", { name: "Sign out" }));
+    expect(
+      screen.queryByRole("dialog", { name: "Your account" }),
+    ).not.toBeInTheDocument();
+    await act(async () => {
+      finish(
+        Response.json(
+          { status: 403, error: "FORBIDDEN", message: "Denied" },
+          { status: 403 },
+        ),
+      );
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("not permitted");
+    expect(trigger).toBeEnabled();
+  });
   it("sends logout from the account menu and displays a backend refusal", async () => {
     const user = userEvent.setup();
     const fetcher = vi

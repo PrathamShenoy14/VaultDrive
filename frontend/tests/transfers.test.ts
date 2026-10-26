@@ -155,6 +155,34 @@ async function idle(manager: UploadManager) {
 }
 
 describe("M3 upload state machine (mocked control and storage)", () => {
+  it("does not start completion recovery after shutdown during a status read", async () => {
+    const f = fixture();
+    f.put.mockRejectedValue(new TransferProblem("Interrupted", "paused"));
+    f.manager.add([f.file], null);
+    await idle(f.manager);
+    let finish!: (value: UploadSession) => void;
+    vi.mocked(f.api.session).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    f.manager.act(f.manager.snapshot()[0]!.id, "recover");
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    f.manager.stop();
+    finish({
+      ...session(3, "COMPLETION_DECIDED"),
+      completion: {
+        disposition: "UNKNOWN",
+        revision: 1,
+        dispatchId: uuid,
+        receiptRecorded: false,
+        reason: null,
+      },
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(f.api.recover).not.toHaveBeenCalled();
+  });
   it("does not start cancellation after the workspace closes during its status read", async () => {
     const f = fixture();
     f.put.mockRejectedValue(new TransferProblem("Interrupted", "paused"));

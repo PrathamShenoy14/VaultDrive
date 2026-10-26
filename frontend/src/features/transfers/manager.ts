@@ -345,6 +345,7 @@ export class UploadManager {
       else if (t.sessionId) {
         const session = await this.deps.api.session(t.sessionId);
         this.sessionState(t, session);
+        if (this.halted(t, signal)) return;
         if (session.state === "ABANDONMENT_DECIDED")
           this.cancelState(
             t,

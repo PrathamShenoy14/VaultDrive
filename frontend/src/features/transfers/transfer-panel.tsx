@@ -174,7 +174,7 @@ export function TransferPanel({ manager }: { manager: UploadManager }) {
   return (
     <section
       aria-label="Transfers"
-      className="fixed inset-x-3 bottom-3 z-30 max-w-lg rounded-2xl border bg-card p-4 shadow-xl sm:right-5 sm:left-auto sm:w-[28rem]"
+      className="fixed inset-x-3 bottom-3 z-30 max-h-[calc(100dvh-1.5rem)] max-w-lg overflow-y-auto overscroll-contain rounded-2xl border bg-card p-4 shadow-xl sm:right-5 sm:left-auto sm:w-[28rem]"
     >
       <div className="flex items-center justify-between gap-2">
         <h2 className="font-semibold">Transfers</h2>

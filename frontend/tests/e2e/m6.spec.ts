@@ -172,6 +172,9 @@ test("real HTTPS M6 account, owner histories, empty disabled-worker inbox, admis
   await expect(
     page.getByRole("button", { name: /Account menu for M6 Browser Check/ }),
   ).toBeVisible();
+  // Account replacement hard-reloads this tab. The streamed server header can
+  // be visible before Base UI has hydrated its menu handlers.
+  await page.waitForLoadState("networkidle");
   await page
     .getByRole("button", { name: /Account menu for M6 Browser Check/ })
     .click();

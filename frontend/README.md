@@ -1,6 +1,28 @@
-# VaultDrive frontend M1–M6
+# VaultDrive frontend M1–M7
 
-Next.js App Router, real backend authentication and a responsive Drive-inspired file explorer. M2 adds navigation, selection, metadata, search, Shared and Trash; M3 adds transfers; M4 adds file/folder management; M5 adds direct grants, inherited-access displays and file Viewer links; M6 adds recipient notifications, owner histories and account/storage Settings. The frozen [OpenAPI contract](../docs/openapi.json) and backend remain authoritative. No backend runtime, migration or infrastructure changes are included.
+Next.js App Router, real backend authentication and a responsive Drive-inspired file explorer. M2 adds navigation, selection, metadata, search, Shared and Trash; M3 adds transfers; M4 adds file/folder management; M5 adds direct grants, inherited-access displays and file Viewer links; M6 adds recipient notifications, owner histories and account/storage Settings. M7 stabilizes integration, cancellation, recovery, responsive layouts and accessibility. The frozen [OpenAPI contract](../docs/openapi.json) and backend remain authoritative. No backend runtime, migration or infrastructure changes are included.
+
+## M7 stabilization
+
+Authenticated browser requests now share session cancellation across the explorer,
+transfers, management, sharing and account/history features. Logout stops local
+processing and polling; a refused logout restores journal-backed controls without
+replaying mutations. Interrupted nonempty uploads require the original file again.
+401 invalidates other tabs; 403 remains a permission failure. The BFF fences
+cancelled queued callers before refresh/dispatch and retains any completed rotation.
+Cancelling a request never proves that a dispatched mutation rolled back.
+
+Explorer retries repeat the failed read, including refreshes of loaded pages,
+and label retained items after a read failure. Phone search has its own full-width
+row. Account dialogs, navigation and transfer panels scroll within short screens;
+account focus returns after Escape, and explorer checkboxes have 24px targets.
+
+See the [M7 review, findings, exact verification and launch gates](../docs/frontend-m7-integration-polish.md).
+Real HTTPS zero-byte browser uploads and Garage-backed native downloads are verified.
+Direct browser multipart remains blocked by storage HTTPS/CORS and clock gates.
+The existing nonempty native-download fixture is explicitly skipped when its
+database-created deadline is already past according to the backend HTTP Date;
+this is an unverified infrastructure-dependent check, not a pass.
 
 ## Notifications, activity and account
 
@@ -31,7 +53,7 @@ Use Share on active resources with `MANAGE_GRANTS`, or Access details to inspect
 
 Files support expiring, revocable Viewer links independently from user grants. Creation exposes a secret once, with Copy link and manual-copy fallback. Existing secrets cannot be recovered. The public `/share/{id}#<secret>` page removes the fragment before header-only reads. An exact-origin POST prepares a one-use, 60-second HttpOnly download ticket; native GET navigation consumes it and streams the existing backend GET without JWTs, auth rotation or a large browser Blob. The ticket map holds at most 256 pending handoffs in this Node process. Secrets stay out of logs, query strings, browser storage and subsequent list responses. Default link expiry is 24 hours; explicit expiry is at most seven days. All sharing mutations run once through the established exact-origin BFF; stale versions and uncertain outcomes require refreshed access before another explicit change.
 
-See [M5 workflows, API mappings, inheritance, link security and limitations](../docs/frontend-m5-sharing.md). There is no directory/invitation, folder/Editor link, real-time editing/presence, activity or notification UI.
+See [M5 workflows, API mappings, inheritance, link security and limitations](../docs/frontend-m5-sharing.md). There is no directory/invitation, folder/Editor link or real-time editing/presence. M6 supplies the activity and notification UI.
 
 ## File and folder management
 
@@ -45,7 +67,7 @@ Use Upload files or drop files into My Drive / a freshly editable folder. The wo
 
 File menus and the single-file selection toolbar provide native downloads through the authenticated same-origin BFF stream. The BFF preserves MIME/disposition/length, including zero, and streams without buffering large files. Chrome owns download completion/interruption; retries are explicit, with no Range contract. Native errors open a sanitized status page in a separate tab. See [M3 architecture, state transitions, limits, security and verification steps](../docs/frontend-m3-transfers.md).
 
-Direct browser multipart requires an approved trusted HTTPS Garage binding and exact page-origin CORS exposing ETag/checksum. The current HTTP storage/denied preflight still blocks real browser multipart. Mocked Chrome scenarios never close that gate. Local HTTP browser mutations fail the configured HTTPS Origin check by design.
+Direct browser multipart requires an approved trusted HTTPS Garage binding and exact page-origin PUT CORS exposing ETag/checksum. The current HTTP storage/unsupported PUT preflight still blocks real browser multipart. Mocked Chrome scenarios never close that gate. Local HTTP browser mutations fail the configured HTTPS Origin check by design.
 
 ## Run locally
 
@@ -79,11 +101,12 @@ src/app/                       App Router pages, loading/error states, API route
 src/components/ui/             shadcn base-nova / Base UI controls
 src/components/                Branding and theme providers
 src/features/auth/             Forms, validation and server-only BFF/session code
-src/features/shell/            Navigation, account menu, storage and activity placeholder
+src/features/shell/            Navigation, account menu and storage
 src/features/explorer/         Feeds, selection, metadata, breadcrumbs and search
 src/features/transfers/        Upload manager, direct part transport, recovery and downloads
 src/features/management/       Namespace mutations, bounded copy and deletion tracking
 src/features/sharing/          Owner grants, inherited/effective access and Viewer links
+src/features/experience/       Notifications, owner histories and account/quota Settings
 src/lib/api/                   Generated types and typed lossless JSON transport
 src/lib/env.ts                 Server environment validation
 scripts/generate-api.mjs       Reproducible contract generation/drift check
@@ -97,11 +120,11 @@ tests/e2e/                    Chrome UI + real backend HTTP integration checks
 - `/shared` lists real direct shared entry points; `?folder=<uuid>` traverses accessible children.
 - `/search?q=<filename>` searches owned/effectively shared resources with documented filters.
 - `/trash` lists independent bounded folder/file Trash feeds with lifecycle details.
-- `/activity` remains a deliberate placeholder. All workspace pages retain server-side authentication.
+- `/activity` displays separate owner resource and permission histories; `/notifications` lists recipient notifications; `/settings` edits display name and shows logical quota. All workspace pages retain server-side authentication.
 - `/share/{id}#<secret>` is a public file Viewer page. The fragment is removed before requests. `/share/{id}/download` prepares a handoff with POST and streams a freshly authorized public download with GET.
 - `?view=list|grid` selects the view on explorer routes. Folder/search/filter/view state survives reload and browser history; selection and accumulated pages are local to a mounted scope.
 - `/session/restore` posts to the sole BFF refresh coordinator, then reloads `/drive`. It never receives tokens.
-- `/api/v1/[...path]` allows POST `auth/register|login|refresh|logout` and GET `users/me|users/me/storage`, `folders`, `folders/{uuid}`, `folders/{uuid}/children`, `files`, `files/{uuid}`, `shared-with-me`, `search`, `files/trash`, `trash/folders`. M3 additionally allowlists multipart admission/initiate/sign/complete/recover/cancel, session/parts/cancellation reads, empty-file admission/status/recovery and `files/{uuid}/download`. Only documented query names are forwarded. Duplicate, unknown and oversized queries are rejected; domain validation and authorization remain in Spring. Unlisted paths return 404 and unsupported resource methods return 405.
+- `/api/v1/[...path]` narrowly allowlists the frozen authentication/profile/storage, explorer/search/Trash, transfer/empty/download, management/copy/deletion, grant/link/public-access and notification/history operations through the existing per-feature policies. Only documented methods and query names are forwarded. Duplicate, unknown and oversized queries are rejected; domain validation and authorization remain in Spring. Unlisted paths return 404 and unsupported resource methods return 405. The milestone records map each workflow to its actual backend endpoint.
 
 Server Components own protected profile/quota reads; Client Components handle forms, theme, dialogs, menus and responsive navigation. M2 keeps scope-local, abortable read state rather than introducing TanStack Query/Table: independent feeds, explicit page loading and native checkbox/keyboard interactions do not yet need a shared resource cache or table framework. React Hook Form uses Zod validation and field errors without an additional resolver adapter. Tailwind semantic tokens support light/dark themes and future file grids/tables. Base UI provides focus management and keyboard behavior. `next-themes` stores only a theme preference in localStorage.
 
@@ -156,9 +179,9 @@ npm start
 
 Vitest isolates backend fetches to cover envelope/status/retry behavior, lossless quota, credential boundaries, multiple Set-Cookie headers, custom-header/Origin admission, registration/login/logout, restoration, expiry/revocation, absolute lifetime, concurrent rotation and protected server redirects. UI tests cover form labels/errors, visibility control, navigation and quota. These are isolated tests, not backend end-to-end evidence.
 
-`npm run test:e2e` expects a built frontend on `http://localhost:3000`, backend reachable through `BACKEND_URL`, and Google Chrome installed. Override `E2E_BASE_URL` and `E2E_APP_ORIGIN` as needed. Use only a fresh disposable test schema with all workers off: the suite registers UUID-addressed test users and leaves those test rows/schema retained. It must not target production/shared user data. The backend can be started with the existing ignored private environment and fresh `spring.datasource.url`/Flyway schema overrides, as in the existing backend verification runbooks; no secrets belong in frontend config.
+`npm run test:e2e` expects an already-running frontend, backend reachable through `BACKEND_URL`, and Google Chrome installed. Use the existing trusted HTTPS development certificates with `E2E_BASE_URL=https://localhost:3000`, `E2E_APP_ORIGIN=https://localhost:3000` and `NODE_USE_SYSTEM_CA=1`; never bypass TLS validation. Its default HTTP URL supports the older bootstrap/layout checks, while M4–M7 real form flows require HTTPS. Use only a fresh disposable test schema with all workers off: the suite registers UUID-addressed test users and leaves those test rows/schema retained. It must not target production/shared user data. The backend can be started with the existing ignored private environment and fresh `spring.datasource.url`/Flyway schema overrides, as in the existing backend verification runbooks; no secrets belong in frontend config.
 
-The Chrome suite checks desktop, emulated phone and tablet layouts, keyboard dismissal/focus, account controls, themes, no horizontal overflow and axe accessibility. Registration/login/profile/quota/logout are also exercised through real BFF HTTP calls against Spring/PostgreSQL. **The HTTP test client supplies the configured HTTPS Origin and bootstraps an HttpOnly session into Chromium using localhost's Secure-cookie exception. This is not a real-browser login/logout or trusted-HTTPS cookie/CSRF proof.** Refresh rotation/expiry/revocation are covered by isolated BFF tests and the backend's real session integration suite, not a 30-minute browser session-expiry run. Screenshots and reports are ignored. Traces are disabled to avoid retaining credential-bearing network traffic.
+The Chrome suite checks desktop, emulated phone and tablet layouts, keyboard dismissal/focus, account controls, themes, overflow and axe accessibility. Older M1–M3 fixtures bootstrap browser sessions through an HTTP API client supplying the configured HTTPS Origin; their HTTP-localhost mode relies on Chromium's Secure-cookie exception and does not prove browser HTTPS authentication. M4–M7 actual HTTPS form workflows and their separate intercepted failure scenarios are classified in the milestone records. Refresh rotation/expiry/revocation are covered by isolated BFF tests and the backend's real session integration suite, not a 30-minute browser session-expiry run. Screenshots and reports are ignored. Traces are disabled to avoid retaining credential-bearing network traffic.
 
 Relevant backend checks (from `backend/`, private environment loaded in the same shell):
 
@@ -170,6 +193,33 @@ Relevant backend checks (from `backend/`, private environment loaded in the same
 The M2 selection also includes `SearchIntegrationTest`, `TrashControllerTest` and `ApiContractConcurrencyIntegrationTest`. Supply fresh default-context datasource/Flyway schemas, as in the verification record below; suites with their own UUID schemas retain that isolation. No backend production code changed, so full storage/purge/broker regression is outside this frontend slice.
 
 The M2 Chrome scenario uses existing backend APIs **only for disposable fixture setup**: registered users, 50+ root folders, nested/shared folders, direct Viewer/Editor grants, real zero-byte files and trashed entries. Zero-byte fixture creation requires reachable Garage. No fixture mutation API is added to the BFF or product UI. Fixture schemas/accounts/objects are retained; no shared user data, infrastructure policy, restore or permanent deletion is changed. Test traces remain disabled.
+
+## Executed M7 verification — 2026-10-26
+
+Node **24.22.1**: typecheck, ESLint with zero warnings, Prettier, generated API
+drift, **416 frontend tests in 21 files**, and the production build pass.
+The combined relevant backend selection passes **458 tests**, zero failures,
+errors or skips, including frozen-contract comparison and real Garage public
+downloads. The backend change is a test-only database-clock fixture correction.
+
+The complete Chrome suite passes **54 cases, zero failures, with 3 explicit
+clock-gated skips**, across desktop, emulated phone and tablet, light/dark themes,
+authenticated and public routes, axe and keyboard checks. Of the passes, 24 are
+actual HTTPS/backend journeys (18 form-based and 6 legacy API-client bootstraps),
+6 are public frontend/fallback checks, and 24 mix real authentication with
+intercepted workflow responses. Actual zero-byte browser upload and Garage-backed
+native downloads pass integrity checks. The skipped M3 multipart-dependent fixture
+does not re-establish nonempty browser downloads; direct browser-to-Garage multipart
+remains unverified. Browser runs use the trusted HTTPS development server;
+production build verification is separate.
+
+Read-only diagnostics confirm approximately 41 hours of Windows/JVM versus VM/
+PostgreSQL clock drift, HTTP-only Garage and a rejected bucket-path PUT preflight.
+Normal workers remain disabled. Single-process sessions, physical retention/
+capacity and the remaining deployment gates are preserved. No infrastructure,
+certificate, frozen contract, generated API-type or backend runtime change is made.
+See the [M7 report](../docs/frontend-m7-integration-polish.md) for reproduction,
+screenshots, exact commands, file inventory and limitations.
 
 ## Executed M6 verification — 2026-10-26
 
@@ -233,7 +283,7 @@ Earlier M6 runs also caught duplicate quota landmarks (fixed), streamed-title sc
 timing, a label selector and a test text-encoding mistake (corrected and rerun).
 This does not close the clock gate. Direct Chrome-to-Garage
 multipart, sustained clock bounds, physical retention/capacity and multi-process
-deployment remain unresolved. M7 is not started.
+deployment remain unresolved. At the M6 baseline, M7 had not started; see the current M7 record above.
 
 ## Executed M5 verification — 2026-10-24
 
@@ -362,4 +412,4 @@ The live frontend calls used a fresh `frontend_m1_*` schema in the existing test
 - Browser-to-Garage multipart HTTPS/CORS/clock/native-expiry/fault/recovery verification remains [blocked/open](../docs/browser-multipart-verification-2026-10-23.md). M4/M5 verify local HTTPS auth and native downloads as recorded above. No multipart interoperability is claimed.
 - CSP limits framing/base/form/object embedding; a nonce-based script policy and operational edge/fleet abuse controls remain deployment work. No deployment or infrastructure changes are included.
 
-Stop after frontend M6. M7 is not included.
+Stop after frontend M7. Production deployment and infrastructure remediation are not included.

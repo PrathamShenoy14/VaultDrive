@@ -30,6 +30,7 @@ export function TransferProvider({
 }) {
   const router = useRouter();
   const [manager, setManager] = useState<UploadManager | null>(null);
+  const [revision, setRevision] = useState(0);
   useEffect(() => {
     const key = `vaultdrive-transfers-v1:${userId}`;
     const instance = new UploadManager({
@@ -55,8 +56,16 @@ export function TransferProvider({
     // Each effect lifetime owns its manager, including StrictMode remounts.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setManager(instance);
-    return () => instance.stop();
-  }, [userId, router]);
+    const pause = () => instance.stop();
+    const resume = () => setRevision((value) => value + 1);
+    window.addEventListener("vaultdrive:session-paused", pause);
+    window.addEventListener("vaultdrive:session-resumed", resume);
+    return () => {
+      instance.stop();
+      window.removeEventListener("vaultdrive:session-paused", pause);
+      window.removeEventListener("vaultdrive:session-resumed", resume);
+    };
+  }, [userId, router, revision]);
   return (
     <Context.Provider value={manager}>
       {children}

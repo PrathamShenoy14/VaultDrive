@@ -72,7 +72,7 @@ async function digestFile(path: string) {
   return hash.digest("hex");
 }
 
-test("live Garage-backed native empty and multipart-file downloads; HTTP upload admission fails closed", async ({
+test("live Garage-backed native empty and multipart-file downloads; origin-aware browser admission", async ({
   page,
   request,
   context,
@@ -100,6 +100,13 @@ test("live Garage-backed native empty and multipart-file downloads; HTTP upload 
   });
   expect(reserve.status()).toBe(201);
   const session = await reserve.json();
+  // Do not bypass expiry or manufacture storage proof when the isolated
+  // PostgreSQL clock creates a deadline already in the JVM's past.
+  const serverTime = Date.parse(reserve.headers()["date"] ?? "");
+  test.skip(
+    Number.isFinite(serverTime) && Date.parse(session.expiresAt) <= serverTime,
+    "Infrastructure clock gate: PostgreSQL upload expiry is already past according to the backend HTTP Date; multipart fixture cannot be signed.",
+  );
   const path = `${backend}/api/v1/upload-sessions/${session.id}`;
   expect(
     (await request.post(`${path}/initiate`, { headers: bearer })).status(),
@@ -154,14 +161,23 @@ test("live Garage-backed native empty and multipart-file downloads; HTTP upload 
   expect(downloadHeaders.headers()["content-length"]).toBe("0");
   expect(downloadHeaders.headers()["content-type"]).toContain("text/plain");
   // A real HTTP browser Origin must not impersonate the approved HTTPS origin.
+  // On approved HTTPS, this exercises actual zero-byte browser admission.
+  await expect(
+    page.getByRole("button", { name: "Upload files", exact: true }),
+  ).toBeEnabled();
   await page.getByLabel("Choose files to upload").setInputFiles({
     name: "Http-blocked.txt",
     mimeType: "text/plain",
     buffer: Buffer.alloc(0),
   });
   const panel = page.getByRole("region", { name: "Transfers" });
-  await expect(panel.getByText("blocked", { exact: true })).toBeVisible();
-  await expect(panel.getByText(/not permitted/)).toBeVisible();
+  if (new URL(page.url()).origin === admission.Origin) {
+    await expect(panel.getByText("completed", { exact: true })).toBeVisible();
+    await expect(panel.getByText(/Published READY/)).toBeVisible();
+  } else {
+    await expect(panel.getByText("blocked", { exact: true })).toBeVisible();
+    await expect(panel.getByText(/not permitted/)).toBeVisible();
+  }
   await panel.getByRole("button", { name: "Minimize" }).click();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   expect(

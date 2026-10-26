@@ -1,4 +1,4 @@
-import { readResponse } from "@/lib/api/transport";
+import { sessionRequest } from "@/features/auth/session-request";
 import type { TransferApi } from "./contracts";
 
 async function request<T>(
@@ -7,25 +7,21 @@ async function request<T>(
   key?: string,
   post = false,
 ): Promise<T> {
-  return readResponse<T>(
-    await fetch(`/api/v1/${path}`, {
-      method: post ? "POST" : "GET",
-      credentials: "same-origin",
-      cache: "no-store",
-      redirect: "error",
-      signal: AbortSignal.timeout(30000),
-      headers: post
-        ? {
-            "X-VaultDrive-Client": "1",
-            ...(body === undefined
-              ? {}
-              : { "Content-Type": "application/json" }),
-            ...(key ? { "Idempotency-Key": key } : {}),
-          }
-        : {},
-      body: body === undefined ? undefined : JSON.stringify(body),
-    }),
-  );
+  return sessionRequest<T>(`/api/v1/${path}`, {
+    method: post ? "POST" : "GET",
+    credentials: "same-origin",
+    cache: "no-store",
+    redirect: "error",
+    signal: AbortSignal.timeout(30000),
+    headers: post
+      ? {
+          "X-VaultDrive-Client": "1",
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+          ...(key ? { "Idempotency-Key": key } : {}),
+        }
+      : {},
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
 }
 const sessionPath = (id: string, suffix = "") =>
   `upload-sessions/${encodeURIComponent(id)}${suffix}`;

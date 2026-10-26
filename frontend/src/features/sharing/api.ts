@@ -1,6 +1,7 @@
 import type { components } from "@/lib/api/generated";
 import type { Resource } from "@/features/explorer/contracts";
-import { ApiError, readResponse } from "@/lib/api/transport";
+import { ApiError } from "@/lib/api/transport";
+import { sessionRequest } from "@/features/auth/session-request";
 import { validId, validSecret } from "./policy";
 
 export type Grant = components["schemas"]["sharing_GrantService_Grant"];
@@ -22,25 +23,23 @@ export async function sharingRequest<T>(
   version?: number | bigint,
   signal?: AbortSignal,
 ): Promise<T> {
-  return readResponse<T>(
-    await fetch(`/api/v1/${path}`, {
-      method,
-      cache: "no-store",
-      credentials: "same-origin",
-      signal: AbortSignal.any([
-        AbortSignal.timeout(30000),
-        ...(signal ? [signal] : []),
-      ]),
-      headers: {
-        "X-VaultDrive-Client": "1",
-        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-        ...(version === undefined
-          ? {}
-          : { "If-Match": `"${version.toString()}"` }),
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    }),
-  );
+  return sessionRequest<T>(`/api/v1/${path}`, {
+    method,
+    cache: "no-store",
+    credentials: "same-origin",
+    signal: AbortSignal.any([
+      AbortSignal.timeout(30000),
+      ...(signal ? [signal] : []),
+    ]),
+    headers: {
+      "X-VaultDrive-Client": "1",
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(version === undefined
+        ? {}
+        : { "If-Match": `"${version.toString()}"` }),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
 }
 export function shareUrl(origin: string, created: CreatedLink) {
   const url = new URL(origin);

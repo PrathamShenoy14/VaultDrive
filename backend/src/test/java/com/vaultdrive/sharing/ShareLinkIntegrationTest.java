@@ -86,7 +86,10 @@ class ShareLinkIntegrationTest {
     }
 
     @Test void expiryValidationAndExactSevenDayDatabaseBoundary() throws Exception {
-        Instant now = Instant.now();
+        // Expiry admission is defined by PostgreSQL time. Do not assume that the
+        // test JVM shares its clock (the Windows/VM launch gate remains separate).
+        Instant now = jdbc.queryForObject("SELECT statement_timestamp()",
+                (rs, row) -> rs.getTimestamp(1).toInstant());
         for (Instant expiry : List.of(now.minusSeconds(1), now.plus(8, ChronoUnit.DAYS))) {
             mvc.perform(post(ownerPath).with(as(owner)).contentType(MediaType.APPLICATION_JSON)
                     .content("{\"expiresAt\":\"" + expiry + "\"}")).andExpect(status().isBadRequest());

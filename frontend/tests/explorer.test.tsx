@@ -93,6 +93,32 @@ beforeEach(() => {
 });
 
 describe("M2 explorer with mocked HTTP responses", () => {
+  it("retries the failed refresh instead of skipping to the next page", async () => {
+    let failed = false;
+    const pages: string[] = [];
+    backend((url) => {
+      if (url.pathname !== "/api/v1/folders") return;
+      pages.push(url.searchParams.get("page")!);
+      if (failed) {
+        failed = false;
+        return Response.json(
+          { status: 503, error: "UNAVAILABLE", message: "Unavailable" },
+          { status: 503 },
+        );
+      }
+      return Response.json(page([folder], 0, 2));
+    });
+    const user = userEvent.setup();
+    render(<Explorer mode="drive" />);
+    await screen.findByRole("button", { name: "Projects" });
+    failed = true;
+    await user.click(
+      screen.getByRole("button", { name: "Refresh resources and storage" }),
+    );
+    await user.click(await screen.findByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(pages).toHaveLength(3));
+    expect(pages).toEqual(["0", "0", "0"]);
+  });
   it("aborts obsolete folder reads and ignores late responses after navigation", async () => {
     let finish: (response: Response) => void = () => {};
     let signal: AbortSignal | undefined;

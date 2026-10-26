@@ -85,12 +85,12 @@ export function AppShell({
       </a>
       <aside
         aria-label="Sidebar"
-        className="fixed inset-y-0 left-0 hidden w-60 flex-col px-4 py-7 lg:flex"
+        className="fixed inset-y-0 left-0 hidden w-60 flex-col overflow-y-auto px-4 py-7 lg:flex"
       >
         {side}
       </aside>
       <div className="lg:ml-60">
-        <header className="flex h-21 items-center gap-3 px-4 sm:px-7">
+        <header className="flex min-h-21 flex-wrap items-center gap-3 px-4 py-4 sm:flex-nowrap sm:px-7">
           <Sheet open={mobile} onOpenChange={setMobile}>
             <SheetTrigger
               render={
@@ -104,7 +104,10 @@ export function AppShell({
             >
               <Menu aria-hidden="true" />
             </SheetTrigger>
-            <SheetContent side="left" className="flex w-72 flex-col p-5">
+            <SheetContent
+              side="left"
+              className="flex w-72 max-w-[100vw] flex-col overflow-y-auto p-5"
+            >
               <SheetTitle className="sr-only">Navigation</SheetTitle>
               <SheetDescription className="sr-only">
                 Navigate your VaultDrive account.
