@@ -11,7 +11,13 @@ export function formatBytes(bytes: bigint) {
   const tenths = (bytes * 10n) / factor;
   return `${tenths / 10n}${index && tenths % 10n ? `.${tenths % 10n}` : ""} ${units[index]}`;
 }
-export function Storage({ usage }: { usage: Usage }) {
+export function Storage({
+  usage,
+  label = "Storage usage",
+}: {
+  usage: Usage;
+  label?: string;
+}) {
   const charged = usage.usedBytes + usage.reservedBytes;
   const percent =
     usage.limitBytes > 0n
@@ -21,7 +27,7 @@ export function Storage({ usage }: { usage: Usage }) {
         : 0;
   return (
     <section
-      aria-label="Storage usage"
+      aria-label={label}
       className="space-y-3 border-t px-3 pt-5 text-sm"
     >
       <div className="flex items-center gap-3 font-medium">
@@ -73,6 +79,24 @@ export function Storage({ usage }: { usage: Usage }) {
       <p className="text-[11px] leading-relaxed text-muted-foreground">
         Logical usage. Physical storage may differ.
       </p>
+      {quotaWarning(usage) && (
+        <p role="status" className="text-xs font-medium text-foreground">
+          {quotaWarning(usage)}
+        </p>
+      )}
     </section>
   );
+}
+export function quotaWarning(usage: Usage) {
+  const charged = usage.usedBytes + usage.reservedBytes;
+  if (charged > usage.limitBytes)
+    return "Over your storage limit. New reservations may be refused.";
+  if (usage.limitBytes === 0n)
+    return "Your storage limit is zero. Empty files may still be allowed.";
+  if (charged === usage.limitBytes)
+    return "Storage is full. Empty files may still be allowed.";
+  if (charged * 100n >= usage.limitBytes * 90n)
+    return "Storage is at least 90% used or reserved.";
+  if (charged * 100n >= usage.limitBytes * 80n)
+    return "Storage is at least 80% used or reserved.";
 }

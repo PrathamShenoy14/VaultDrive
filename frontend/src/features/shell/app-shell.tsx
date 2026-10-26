@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/sheet";
 import { navigation } from "./navigation";
 import { AccountMenu } from "./account-menu";
+import { NotificationBell } from "@/features/experience/notifications";
 import type { Profile } from "@/lib/api/transport";
 import { cn } from "@/lib/utils";
 
@@ -114,6 +115,7 @@ export function AppShell({
           <SearchBox />
           <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-3">
             <ThemeToggle />
+            <NotificationBell />
             <AccountMenu profile={profile} />
           </div>
         </header>

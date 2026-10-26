@@ -1,17 +1,18 @@
 # VaultDrive architecture
 
-Last reconciled with the repository on 2026-10-24. This is the current implementation map. Earlier phase records and ADR extensions preserve history; their original boundaries are not the current inventory.
+Last reconciled with the repository on 2026-10-26. This is the current implementation map. Earlier phase records and ADR extensions preserve history; their original boundaries are not the current inventory.
 
-## Frontend M1–M5: authentication, explorer, transfers, management and sharing
+## Frontend M1–M6: authenticated workspace and account experience
 
 `frontend/` is an independently buildable Next.js App Router/strict TypeScript app
 with Tailwind, shadcn Base UI, Lucide and next-themes. Server Components guard
-`/drive`, `/shared`, `/search`, `/activity` and `/trash`; client forms implement real
+`/drive`, `/shared`, `/search`, `/activity`, `/notifications`, `/settings` and
+`/trash`; client forms implement real
 registration/login/logout, and `/session/restore` uses the sole Route Handler
 refresh coordinator. Profile and logical quota come from the backend. M2 adds
 root/child file and folder feeds, capability-aware Shared entry points and traversal,
 filename/filter search, fresh metadata details, and read-only common-entry Trash.
-Only activity remains a placeholder. M3 adds picker/drop uploads, a persistent
+M3 adds picker/drop uploads, a persistent
 workspace transfer panel, bounded direct multipart part uploads and explicit
 completion/cancellation/empty recovery. File menus and selection offer streaming
 authenticated downloads. M4 adds folder creation, rename/move, Trash/restore,
@@ -21,7 +22,12 @@ recovery controls; see [M4 management](frontend-m4-management.md). M5 adds owner
 registered-email direct grants, read-only inherited grants and effective-role displays,
 plus expiring/revocable file Viewer links. The public share page strips fragment
 secrets and uses isolated header-based metadata and native streamed download adapters;
-see [M5 sharing](frontend-m5-sharing.md). Preview and activity/notifications remain deferred. [M3's state/transport/verification contract](frontend-m3-transfers.md)
+see [M5 sharing](frontend-m5-sharing.md). M6 adds a bounded unread-count bell/panel,
+paginated recipient notifications, separate owner resource/permission histories,
+display-name editing and exact logical quota details; see
+[M6 account/activity](frontend-m6-account-activity.md). Logout cancels M6 requests
+and broadcasts credential-free session changes across tabs. Preview remains
+deferred. [M3's state/transport/verification contract](frontend-m3-transfers.md)
 describes two file tasks, one sliced 8 MiB part per file, at most 50 panel entries,
 metadata-only tab recovery and the unresolved browser HTTPS/CORS/clock gates.
 

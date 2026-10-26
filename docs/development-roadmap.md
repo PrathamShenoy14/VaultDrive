@@ -1,5 +1,19 @@
 # Development roadmap
 
+## Frontend M6 — Notifications, Activity and Account Experience
+
+- [x] Recipient-only notification bell/panel/history, unread counts, per-item acknowledgment and supported filters/pages.
+- [x] Bounded visibility-aware count polling, cleanup, stale-access handling and disabled-worker guidance.
+- [x] Separate owner-only resource/permission histories with UTC timestamps and current-access checks.
+- [x] Registered account details, display-name editing, used/reserved quota, thresholds and uncertain estimates.
+- [x] Existing BFF/session/origin/CSRF enforcement, M6 request cancellation and cross-tab session invalidation.
+- [x] Focused frontend/backend tests and responsive keyboard/accessibility verification; see [M6 record](frontend-m6-account-activity.md) and [executed frontend results](../frontend/README.md).
+- [ ] Existing direct-browser Garage multipart HTTPS/CORS/clock and physical-retention launch gates remain open.
+
+M5 remains the committed sharing baseline (`94dcdf6`). M6 changes no frozen API,
+normal worker flag or infrastructure. Stop after M6; M7 remains deferred.
+The earlier milestone sections below describe their historical scope.
+
 ## Frontend M4 - File and Folder Management
 
 - [x] Capability-aware create, rename, move, Trash/restore and permanent-delete confirmations.

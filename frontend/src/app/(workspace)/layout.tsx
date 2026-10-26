@@ -8,6 +8,7 @@ import { unstable_rethrow } from "next/navigation";
 import { TransferProvider } from "@/features/transfers/provider";
 import { ManagementProvider } from "@/features/management/provider";
 import { SharingProvider } from "@/features/sharing/provider";
+import { SessionBoundary } from "@/features/experience/session-boundary";
 export const dynamic = "force-dynamic";
 async function StorageUsage() {
   let usage;
@@ -27,32 +28,34 @@ export default async function WorkspaceLayout({
 }) {
   const profile = await protectedRead("/api/v1/users/me");
   return (
-    <TransferProvider key={profile.userId} userId={profile.userId}>
-      <ManagementProvider key={profile.userId} userId={profile.userId}>
-        <SharingProvider>
-          <AppShell
-            profile={profile}
-            storage={
-              <Suspense
-                fallback={
-                  <div
-                    role="status"
-                    aria-label="Loading storage usage"
-                    className="space-y-3"
-                  >
-                    <Skeleton className="h-4 w-24" />
-                    <Skeleton className="h-2 w-full" />
-                  </div>
-                }
-              >
-                <StorageUsage />
-              </Suspense>
-            }
-          >
-            {children}
-          </AppShell>
-        </SharingProvider>
-      </ManagementProvider>
-    </TransferProvider>
+    <SessionBoundary key={profile.userId}>
+      <TransferProvider key={profile.userId} userId={profile.userId}>
+        <ManagementProvider key={profile.userId} userId={profile.userId}>
+          <SharingProvider>
+            <AppShell
+              profile={profile}
+              storage={
+                <Suspense
+                  fallback={
+                    <div
+                      role="status"
+                      aria-label="Loading storage usage"
+                      className="space-y-3"
+                    >
+                      <Skeleton className="h-4 w-24" />
+                      <Skeleton className="h-2 w-full" />
+                    </div>
+                  }
+                >
+                  <StorageUsage />
+                </Suspense>
+              }
+            >
+              {children}
+            </AppShell>
+          </SharingProvider>
+        </ManagementProvider>
+      </TransferProvider>
+    </SessionBoundary>
   );
 }

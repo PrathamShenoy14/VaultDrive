@@ -5,6 +5,7 @@ import { readQueryKeys, validReadQuery } from "@/features/explorer/read-policy";
 import { transferPolicy } from "@/features/transfers/policy";
 import { managementPolicy } from "@/features/management/policy";
 import { sharingPolicy } from "@/features/sharing/policy";
+import { experiencePolicy } from "@/features/experience/policy";
 import { publicLink } from "@/features/sharing/server/public-link";
 import { applyIssued, backend, ensureFresh, unauthorized } from "./backend";
 import {
@@ -142,12 +143,14 @@ function errorResponse(error: unknown) {
 async function handle(request: Request, path: string) {
   const management = managementPolicy(path);
   const sharing = sharingPolicy(path);
+  const experience = experiencePolicy(path);
   const transfer = transferPolicy(path);
   const readKeys = readQueryKeys(path);
   const methods = [
     ...new Set([
       ...(management?.methods ?? []),
       ...(sharing?.methods ?? []),
+      ...(experience?.methods ?? []),
       ...(transfer?.methods ?? []),
       ...(allowed.has(path) ? [allowed.get(path)!] : []),
       ...(readKeys ? ["GET"] : []),
@@ -161,15 +164,17 @@ async function handle(request: Request, path: string) {
   }
   const method = request.method;
   const mutation = method !== "GET";
-  const mutationPolicy = sharing ?? management;
+  const mutationPolicy = experience ?? sharing ?? management;
   const control = mutationPolicy?.methods.includes(method)
     ? {
         ...mutationPolicy,
         json: mutationPolicy.json && method !== "DELETE",
-        query: [] as string[],
+        query: experience?.query ?? ([] as string[]),
         download: false,
       }
-    : transfer;
+    : experience
+      ? { ...experience, download: false }
+      : transfer;
   const url = new URL(request.url);
   if (!validReadQuery(url.searchParams, control?.query ?? readKeys ?? []))
     return failure(400, "BAD_REQUEST", "Query parameters are not supported");
@@ -276,6 +281,11 @@ async function handle(request: Request, path: string) {
   return sessions.locked(id, async () => {
     const session = sessions.get(id);
     if (!session) throw unauthorized();
+    // A cancelled M6 request waiting behind another caller must not rotate or
+    // dispatch after its UI lifetime has ended. An already-started refresh keeps
+    // the existing serialization and uncertainty rules.
+    if (experience && request.signal.aborted)
+      return failure(400, "BAD_REQUEST", "Request cancelled");
     const cookies = await ensureFresh(session);
     if (path === "auth/refresh") {
       const result = new Response(null, { status: 204 });
@@ -289,7 +299,9 @@ async function handle(request: Request, path: string) {
         {
           method,
           ...(transferBody ? { body: transferBody } : {}),
-          ...(transfer?.download ? { signal: request.signal } : {}),
+          ...(transfer?.download || experience
+            ? { signal: request.signal }
+            : {}),
           headers: {
             Authorization: `Bearer ${session.access}`,
             ...(transfer?.download

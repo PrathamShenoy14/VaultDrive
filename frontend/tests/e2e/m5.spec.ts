@@ -263,6 +263,17 @@ test("real HTTPS Viewer links: one-time secret, anonymous header access, streame
   const fileId = await emptyFile(context, "Public notes.txt");
   await page.goto("/drive?view=grid");
   await share(page, "Public notes.txt");
+  // Exercise supported explicit expiry. With a skewed guest clock, a default
+  // backend 24-hour link can already look expired to the browser and its secret
+  // is deliberately cleared on revalidation. Clock agreement remains a gate.
+  const browserFuture = await page.evaluate(() => {
+    const date = new Date(Date.now() + 3600000);
+    date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+    return date.toISOString().slice(0, 16);
+  });
+  await page
+    .getByLabel("Link expiry (optional, local time)")
+    .fill(browserFuture);
   await page
     .getByRole("button", { name: "Create Viewer link", exact: true })
     .click();
@@ -359,12 +370,32 @@ test("real HTTPS Viewer links: one-time secret, anonymous header access, streame
     );
     expect(denied.status()).toBe(404);
     expect((await denied.text()).includes(secret)).toBe(false);
-    // Real backend clock expiry, no browser clock or infrastructure changes.
+    // Anchor this disposable expiry fixture to the backend's returned creation
+    // instant. Guest/host clock drift is an independent deployment gate; a
+    // Windows Date.now() expiry can be days in PostgreSQL's future.
+    const anchorResponse = await context.request.post(
+      `/api/v1/files/${fileId}/share-links`,
+      { headers: admission, data: { expiresAt: null } },
+    );
+    expect(anchorResponse.status()).toBe(201);
+    const anchor = await anchorResponse.json();
+    expect(
+      (
+        await context.request.delete(
+          `/api/v1/files/${fileId}/share-links/${anchor.link.id}`,
+          { headers: admission },
+        )
+      ).status(),
+    ).toBe(204);
     const expiring = await context.request.post(
       `/api/v1/files/${fileId}/share-links`,
       {
         headers: admission,
-        data: { expiresAt: new Date(Date.now() + 2500).toISOString() },
+        data: {
+          expiresAt: new Date(
+            Date.parse(anchor.link.createdAt) + 5000,
+          ).toISOString(),
+        },
       },
     );
     expect(expiring.status()).toBe(201);

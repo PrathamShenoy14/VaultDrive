@@ -33,8 +33,10 @@ same BFF. No multipart bytes traverse the BFF. [Frontend M4](frontend-m4-managem
 adds capability-aware folder creation, rename/move, Trash/restore, asynchronous
 deletion tracking and owner-only copy with retained recovery evidence.
 [Frontend M5](frontend-m5-sharing.md) adds registered-email grants, inherited-access
-displays and file Viewer links with fragment-to-header redemption. Preview and
-activity/notifications remain outside this slice. The backend freeze and release gates are unchanged.
+displays and file Viewer links with fragment-to-header redemption. M6 adds
+[notifications, owner histories and account/quota Settings](frontend-m6-account-activity.md)
+through the same BFF. Preview remains outside these slices. The backend freeze
+and release gates are unchanged.
 
 Spring Security has **no cross-origin API CORS policy**. A browser at a different
 scheme/host/port cannot use a direct credentialed API integration. Do not solve

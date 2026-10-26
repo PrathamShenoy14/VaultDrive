@@ -1,5 +1,6 @@
 import { parse, isInteger } from "lossless-json";
 import type { components, paths } from "./generated";
+import { announceSession } from "@/features/auth/client-session";
 export type Profile = components["schemas"]["user_ProfileService_Profile"];
 type RawUsage = components["schemas"]["storage_StorageUsageService_Usage"];
 export type Usage = { [K in keyof RawUsage]: bigint };
@@ -88,7 +89,7 @@ export async function authRequest(
   action: string,
   body?: LoginInput | RegisterInput,
 ): Promise<RegisterResult | void> {
-  return readResponse(
+  const result = await readResponse<RegisterResult | void>(
     await fetch(`/api/v1/auth/${action}`, {
       method: "POST",
       cache: "no-store",
@@ -100,6 +101,9 @@ export async function authRequest(
       body: body ? JSON.stringify(body) : undefined,
     }),
   );
+  if (action === "login") announceSession("changed");
+  if (action === "logout") announceSession("ended");
+  return result;
 }
 export function errorMessage(error: unknown): string {
   if (!(error instanceof ApiError))

@@ -2,6 +2,12 @@
 /* eslint-disable @next/next/no-location-assign-relative-destination -- Logout must discard all personalized Router Cache entries. */
 import { useState } from "react";
 import { LogOut, UserRound } from "lucide-react";
+import Link from "next/link";
+import {
+  pauseSession,
+  resumeSession,
+  announceSession,
+} from "@/features/auth/client-session";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -33,14 +39,17 @@ export function AccountMenu({ profile }: { profile: Profile }) {
   async function logout() {
     setBusy(true);
     setError(undefined);
+    pauseSession();
     try {
       await authRequest("logout");
       window.location.assign("/login");
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
+        announceSession("ended");
         window.location.assign("/login?reason=session");
         return;
       }
+      resumeSession();
       setError(errorMessage(e));
       setAccount(true);
     } finally {
@@ -117,7 +126,13 @@ export function AccountMenu({ profile }: { profile: Profile }) {
             </div>
           </dl>
           <p className="text-xs text-muted-foreground">
-            Profile editing will be available in a later milestone.
+            <Link
+              href="/settings"
+              onClick={() => setAccount(false)}
+              className="underline"
+            >
+              Profile and storage settings
+            </Link>
           </p>
           {error && (
             <p role="alert" className="text-sm text-destructive">

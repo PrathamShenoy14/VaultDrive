@@ -1,6 +1,29 @@
-# VaultDrive frontend M1–M5
+# VaultDrive frontend M1–M6
 
-Next.js App Router, real backend authentication and a responsive Drive-inspired file explorer. M2 adds navigation, selection, metadata, search, Shared and Trash; M3 adds transfers; M4 adds file/folder management; M5 adds direct grants, inherited-access displays and file Viewer links. The frozen [OpenAPI contract](../docs/openapi.json) and backend remain authoritative. No backend runtime, migration or infrastructure changes are included.
+Next.js App Router, real backend authentication and a responsive Drive-inspired file explorer. M2 adds navigation, selection, metadata, search, Shared and Trash; M3 adds transfers; M4 adds file/folder management; M5 adds direct grants, inherited-access displays and file Viewer links; M6 adds recipient notifications, owner histories and account/storage Settings. The frozen [OpenAPI contract](../docs/openapi.json) and backend remain authoritative. No backend runtime, migration or infrastructure changes are included.
+
+## Notifications, activity and account
+
+The shell bell opens recent recipient notifications and links to `/notifications`
+for URL-based paging, read-state/type filters and individual mark-as-read actions.
+Unread-count checks run at most five times, at 60-second intervals, cancel while
+hidden and stop on errors; explicit refresh restarts them. Notification workers
+remain disabled locally, so an empty inbox can be expected even after sharing.
+There is no bulk acknowledgment, mark-unread or real-time delivery claim.
+
+`/activity` displays separate owner-only resource and permission histories with
+supported action/resource filters, pagination and UTC timestamps. This is not a
+complete audit log. Obsolete notification metadata is suppressed, and resource
+navigation checks current access without inferring private parents.
+
+`/settings` displays registered account information, edits only display name and
+shows exact used/reserved/available quota plus separate uncertain estimates.
+80/90/100-percent, zero-limit and over-limit warnings use logical charge; Trash
+does not release it and metadata removal does not prove physical reclamation.
+Existing transfer/management invalidations and explicit refresh update usage.
+Logout cancels M6 requests; credential-free BroadcastChannel messages invalidate
+other tabs after logout or account replacement. See the [M6 contract mapping,
+security, limitations and reproduction](../docs/frontend-m6-account-activity.md).
 
 ## Sharing and collaboration
 
@@ -148,6 +171,70 @@ The M2 selection also includes `SearchIntegrationTest`, `TrashControllerTest` an
 
 The M2 Chrome scenario uses existing backend APIs **only for disposable fixture setup**: registered users, 50+ root folders, nested/shared folders, direct Viewer/Editor grants, real zero-byte files and trashed entries. Zero-byte fixture creation requires reachable Garage. No fixture mutation API is added to the BFF or product UI. Fixture schemas/accounts/objects are retained; no shared user data, infrastructure policy, restore or permanent deletion is changed. Test traces remain disabled.
 
+## Executed M6 verification — 2026-10-26
+
+Repository-local Node **24.22.1**: strict TypeScript, ESLint with zero warnings,
+Prettier, generated API drift, **388 Vitest tests** and the production build pass.
+The new 54 tests cover the M6 BFF, history/notification UI, redaction, safe
+navigation, exact quota thresholds, profile editing, session cancellation and
+bounded polling cleanup. No dependency, backend runtime, migration, frozen API or
+generated API-type change is included.
+
+The relevant backend selection passed **143 tests**, zero failures/errors/skips:
+recipient notification/quota delivery logic, owner resource/permission histories,
+permission races, storage accounting, authentication/session and frozen-contract
+regressions. These combine actual PostgreSQL integration and isolated controller/
+adapter tests. The full unrelated storage/broker/purge suite was not rerun.
+See the [exact backend command and contract mapping](../docs/frontend-m6-account-activity.md#verification).
+
+Browser verification uses actual Chrome on desktop, emulated iPhone and iPad,
+existing trusted local HTTPS certificates and `NODE_USE_SYSTEM_CA=1` for Node
+fixture clients. No TLS bypass or certificate/configuration changes are used.
+M6 real scenarios exercise HTTPS form registration/login, profile save, quota,
+both histories, pagination/filter/reload, an empty disabled-worker inbox and
+cross-tab account replacement/logout. Intercepted notification payloads and
+simulated expiry are explicitly mocked; they do not prove RabbitMQ delivery.
+New page/panel scans cover keyboard focus/Escape, light/dark themes, responsive
+overflow and axe accessibility.
+
+**36 unique Chrome scenarios passed across scoped runs/reruns**: nine M1
+auth/shell regressions, six M4 management regressions, twelve M5 sharing/loss
+regressions and nine M6 scenarios. M6 contributes three actual HTTPS/backend
+account/history/inbox/session scenarios and six intercepted notification/401
+scenarios. The final affected M5/M6 rerun passed all 12 cases; a subsequent
+three-viewport notification rerun passed all three cases after the panel navigation
+handoff. New page/panel scans had zero axe violations and no horizontal overflow;
+desktop and phone/tablet screenshots were visually reviewed. This is not an
+unintercepted notification-delivery or direct multipart-upload claim. Existing
+M2/M3 browser suites were not rerun for this slice; their unit regressions are
+included in the complete frontend run.
+
+The live backend uses fresh schema `frontend_m6_live_20261026` in the existing
+test database; all autonomous processors/probes remain off. Test fixtures are
+retained. The generated `next-env.d.ts` already matched the baseline and is not
+changed. Certificates, keys, private environments, logs and generated build/browser
+outputs are not committed.
+
+Reproduction from `frontend/`, with the verification servers running:
+
+```powershell
+$env:NODE_USE_SYSTEM_CA = '1'
+$env:E2E_BASE_URL = 'https://localhost:3000'
+$env:E2E_APP_ORIGIN = 'https://localhost:3000'
+npm run test:e2e -- m6.spec.ts m1.spec.ts m4.spec.ts m5.spec.ts m5-loss.spec.ts
+```
+
+The VM/PostgreSQL clock was observed on October 24 while Windows was on October 26. No clock was changed. The existing M5 short-expiry fixture now uses a fresh
+backend `createdAt` as its time anchor; its first client-time run failed to expire
+within ten seconds. Its ordinary Viewer-link fixture uses a supported explicit
+future expiry so client-side conservative expiry clearing does not race the secret
+visibility assertion. No clock, browser time or authorization check is bypassed.
+Earlier M6 runs also caught duplicate quota landmarks (fixed), streamed-title scan
+timing, a label selector and a test text-encoding mistake (corrected and rerun).
+This does not close the clock gate. Direct Chrome-to-Garage
+multipart, sustained clock bounds, physical retention/capacity and multi-process
+deployment remain unresolved. M7 is not started.
+
 ## Executed M5 verification — 2026-10-24
 
 Node **24.22.1**: generated API drift, strict TypeScript, ESLint (**zero warnings**), Prettier, **334 Vitest tests in 16 files**, and the production build passed. This includes 71 new sharing tests using mocked HTTP and synthetic capability values. No backend runtime, migration, generated API contract, dependency or infrastructure change was needed. The shared primary-button hover opacity was tightened after the M5 accessibility scan found insufficient hover contrast.
@@ -269,10 +356,10 @@ The live frontend calls used a fresh `frontend_m1_*` schema in the existing test
 - Exactly one Node process; no serverless, horizontal scaling, clustered PM2 or rolling multi-process deployment. Shared durable credential storage and distributed serialization require a later reviewed implementation. Sticky routing alone does not provide failover-safe rotation.
 - Authentication forms require JavaScript. Their native fallback submits with POST so credentials do not become URL query parameters when scripts are unavailable.
 - Process restarts require login. Sessions are bounded in memory, without persistence or performance/capacity claims. Backend families remain PostgreSQL-authoritative and expire independently.
-- No preview, activity/notifications, profile editing or account recovery. Sharing management is exposed for active resources; Trash keeps its existing restore/purge interface. No file content or counts are fabricated.
+- No preview or account recovery. M6 supports notification/history reads and display-name editing. Sharing management is exposed for active resources; Trash keeps its existing restore/purge interface. No file content or counts are fabricated.
 - The backend supports fixed order only; arbitrary date/type/size sorting is deferred. Offset pages are independent snapshots and can shift under concurrent changes. Explicit refresh rereads loaded pages, reconciles eligible selection and rereads quota.
 - No persistent resource cache, virtualization or performance/capacity claims. Loaded pages and selection are scoped to the current navigation; back/forward restores the location and reloads bounded feeds, not prior accumulated pages.
 - Browser-to-Garage multipart HTTPS/CORS/clock/native-expiry/fault/recovery verification remains [blocked/open](../docs/browser-multipart-verification-2026-10-23.md). M4/M5 verify local HTTPS auth and native downloads as recorded above. No multipart interoperability is claimed.
 - CSP limits framing/base/form/object embedding; a nonce-based script policy and operational edge/fleet abuse controls remain deployment work. No deployment or infrastructure changes are included.
 
-Stop after frontend M5.
+Stop after frontend M6. M7 is not included.

@@ -169,7 +169,7 @@ test("real backend registration/login/profile/quota, shell navigation and commit
   ).toContainText(email);
   await page.keyboard.press("Escape");
   for (const item of [
-    { name: "Recent / Activity", heading: "Recent / Activity" },
+    { name: "Recent / Activity", heading: "Activity" },
     { name: "Trash", heading: "Trash" },
   ]) {
     if (await mobile.isVisible()) await mobile.click();
@@ -185,7 +185,7 @@ test("real backend registration/login/profile/quota, shell navigation and commit
   await expect(
     page.getByRole("heading", { name: "Trash", exact: true }),
   ).toBeVisible();
-  // Logout through the HTTP BFF contract, because browser mutation Origin is HTTP.
+  // Exercise the explicit HTTP-client BFF logout contract independently of UI logout.
   const logout = await request.post("/api/v1/auth/logout", {
     headers: { ...admission, Cookie: session },
   });
@@ -201,6 +201,10 @@ test("real backend registration/login/profile/quota, shell navigation and commit
       await request.get("/api/v1/users/me", { headers: { Cookie: session } })
     ).status(),
   ).toBe(401);
-  await page.goto("/drive");
-  await expect(page).toHaveURL(/\/login\?reason=session/);
+  // M6 also detects revoked sessions from in-flight unread checks. A fresh page
+  // isolates this server-guard assertion from that concurrent hard navigation.
+  const afterLogout = await context.newPage();
+  await afterLogout.goto("/drive");
+  await expect(afterLogout).toHaveURL(/\/login\?reason=session/);
+  await afterLogout.close();
 });
